@@ -81,10 +81,12 @@ class BleSetupServer(
     fun start(): StartResult {
         val a = adapter ?: return StartResult.Unsupported("this device has no Bluetooth adapter")
         if (!a.isEnabled) return StartResult.Unsupported("Bluetooth is off; turn it on in Settings")
-        if (!a.isMultipleAdvertisementSupported) {
-            return StartResult.Unsupported("this Bluetooth chip can't advertise as an LE peripheral")
-        }
-        val advertiser = a.bluetoothLeAdvertiser ?: return StartResult.Unsupported("no LE advertiser available")
+        // Only *multiple* simultaneous advertisements are reported here; one
+        // legacy advertisement can still work, so let the attempt decide
+        // (a real failure arrives in onStartFailure).
+        if (!a.isMultipleAdvertisementSupported) log("chip reports no multi-advertisement support; trying one anyway")
+        val advertiser = a.bluetoothLeAdvertiser
+            ?: return StartResult.Unsupported("this Bluetooth chip can't advertise as an LE peripheral")
 
         val gatt = manager.openGattServer(context, callback)
             ?: return StartResult.Unsupported("couldn't open a GATT server")
