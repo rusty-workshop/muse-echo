@@ -228,7 +228,7 @@ private fun StatusChip(modifier: Modifier) {
     val link by GadgetState.link.collectAsState()
     val detail by GadgetState.linkDetail.collectAsState()
     val (color, label) = when (link) {
-        Link.CONNECTED -> Palette.teal to detail.ifEmpty { "Muse" }
+        Link.CONNECTED -> Palette.teal to "Connected to ${detail.ifEmpty { "Muse" }}"
         Link.CONNECTING -> Palette.amber to "Connecting"
         Link.RECONNECTING -> Palette.amber to detail.ifEmpty { "Reconnecting" }
         Link.NOT_PAIRED -> Palette.coral to "Not paired"

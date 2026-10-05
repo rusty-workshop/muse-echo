@@ -58,7 +58,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var front by remember { mutableStateOf(prefs.comeToFront) }
     var confirmUnpair by remember { mutableStateOf(false) }
 
-    Box(Modifier.fillMaxSize().background(Palette.night.copy(alpha = 0.97f))) {
+    Box(Modifier.fillMaxSize().background(Palette.night)) {
         Row(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp)) {
             Column(Modifier.weight(1.15f).fillMaxHeight().verticalScroll(rememberScrollState())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

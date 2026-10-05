@@ -124,13 +124,13 @@ class GadgetRunner(
             log = GadgetState::log,
         )
         GadgetState.log("connecting to ${vm.name.ifEmpty { vm.id }}")
-        GadgetState.setLink(Link.CONNECTING, "Connecting to ${vm.name.ifEmpty { "your Muse" }}")
+        GadgetState.setLink(Link.CONNECTING, "Connecting to ${friendlyName(vm)}")
         val started = now()
         current = session
         val outcome = coroutineScope {
             val watcher = launch {
                 while (session.registeredAt == null) delay(250)
-                GadgetState.setLink(Link.CONNECTED, vm.name.ifEmpty { "Muse" })
+                GadgetState.setLink(Link.CONNECTED, friendlyName(vm))
             }
             try {
                 session.run()
@@ -196,6 +196,11 @@ class GadgetRunner(
     }
 
     companion object {
+        private val UUID_RE = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+        /** The VM's name when it has a readable one; leased VMs are often named by UUID. */
+        fun friendlyName(vm: Vm): String = vm.name.takeIf { it.isNotBlank() && !UUID_RE.matches(it) } ?: "Muse"
+
         const val DEFAULT_NOISE_HOST = "hatch.metaaivm.com"
         const val BACKOFF_BASE_MS = 2_000L
         const val BACKOFF_MAX_MS = 60_000L
