@@ -20,9 +20,26 @@ class Speaker(context: Context) {
         private set
 
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
-    private val tts: TextToSpeech = TextToSpeech(context.applicationContext) { status ->
+    private val appContext = context.applicationContext
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    // The init callback can fire inside the constructor (on failure), before
+    // `tts` is assigned, so it's always handled on the next main-loop turn.
+    private var tts: TextToSpeech = TextToSpeech(appContext) { status -> main.post { onInit(status, retried = false) } }
+
+    private fun onInit(status: Int, retried: Boolean) {
+        if (status != TextToSpeech.SUCCESS && !retried) {
+            // The system default can name an engine that's no longer installed;
+            // fall back to whichever engine is.
+            val engine = tts.engines.firstOrNull()?.name
+            if (engine != null) {
+                tts.shutdown()
+                tts = TextToSpeech(appContext, { status -> main.post { onInit(status, retried = true) } }, engine)
+                return
+            }
+        }
         available = status == TextToSpeech.SUCCESS && configure()
-        GadgetState.log(if (available) "text-to-speech ready" else "no text-to-speech engine; replies are captions only")
+        GadgetState.log(if (available) "text-to-speech ready (${tts.defaultEngine})" else "no text-to-speech engine; replies are captions only")
     }
 
     private fun configure(): Boolean {
