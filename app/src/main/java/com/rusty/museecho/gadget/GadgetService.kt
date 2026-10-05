@@ -127,6 +127,7 @@ class GadgetService : Service() {
             onWake = { scope.launch { onWake() } },
             log = GadgetState::log,
             onStopWord = { scope.launch { onStopWord() } },
+            strict = { GadgetState.speaking.value },
         )
         applyWakeWord()
         scope.launch {

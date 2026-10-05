@@ -31,6 +31,8 @@ class WakeWord(
     private val log: (String) -> Unit,
     /** Heard "stop" on its own; the caller decides whether it means anything. */
     private val onStopWord: () -> Unit = {},
+    /** While true (the Echo is speaking), only the full phrase counts, so it can't wake itself. */
+    private val strict: () -> Boolean = { false },
 ) {
     @Volatile
     private var running = false
@@ -58,14 +60,17 @@ class WakeWord(
         val words = phrase.lowercase().split(Regex("[^a-z']+")).filter { it.isNotBlank() }
         if (words.isEmpty()) return "the wake phrase is empty"
         val target = words.joinToString(" ")
+        // "hey" is short and often heard as noise; the phrase's last word alone also counts.
+        val shortTarget = words.last().takeIf { words.size > 1 && it.length >= 3 }
         running = true
         paused = false
         worker = thread(name = "wake-word", isDaemon = true) {
             try {
                 LibVosk.setLogLevel(LogLevel.WARNINGS)
                 val m = model ?: Model(modelDir.absolutePath).also { model = it }
-                val grammar = JsonArray(listOf(JsonPrimitive(target), JsonPrimitive(STOP_WORD), JsonPrimitive("[unk]"))).toString()
-                Recognizer(m, RATE.toFloat(), grammar).use { rec -> listen(rec, target) }
+                val entries = listOfNotNull(target, shortTarget, STOP_WORD, "[unk]").distinct()
+                val grammar = JsonArray(entries.map { JsonPrimitive(it) }).toString()
+                Recognizer(m, RATE.toFloat(), grammar).use { rec -> listen(rec, target, shortTarget) }
             } catch (e: Throwable) {
                 log("wake word stopped: ${e.message}")
                 running = false
@@ -76,7 +81,7 @@ class WakeWord(
     }
 
     @SuppressLint("MissingPermission")
-    private fun listen(rec: Recognizer, target: String) {
+    private fun listen(rec: Recognizer, target: String, shortTarget: String?) {
         val bufBytes = maxOf(AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT), 4096)
         val chunk = ByteArray(RATE / 10 * 2) // 100 ms
         var record: AudioRecord? = null
@@ -118,7 +123,7 @@ class WakeWord(
                 // Track the floor: fall fast toward quiet, rise slowly with steady noise (a fan, a TV).
                 noiseFloor = if (level < noiseFloor) noiseFloor * 0.7 + level * 0.3 else noiseFloor * 0.995 + level * 0.005
                 noiseFloor = noiseFloor.coerceIn(5.0, 2_000.0)
-                if (level >= maxOf(GATE_RMS, noiseFloor * 2.5)) {
+                if (level >= maxOf(GATE_RMS, noiseFloor * GATE_OVER_FLOOR)) {
                     if (now >= feedUntil) {
                         // Waking from quiet: replay the pre-roll first.
                         rec.reset()
@@ -139,7 +144,9 @@ class WakeWord(
                     onStopWord()
                     continue
                 }
-                if (text.contains(target)) {
+                val heard = text.contains(target) ||
+                    (shortTarget != null && !strict() && text.split(' ').any { it == shortTarget })
+                if (heard) {
                     rec.reset()
                     // Pause first, so the note recorder gets the microphone straight away.
                     paused = true
@@ -194,10 +201,11 @@ class WakeWord(
         }
 
         /** About -45 dBFS: quieter than speech across a room, louder than the Echo's idle noise floor. */
-        const val GATE_RMS = 180.0
+        const val GATE_RMS = 90.0
+        const val GATE_OVER_FLOOR = 1.8
         const val HOLD_MS = 2_500L
         const val DEFAULT_FLOOR = 60.0
-        const val PRE_ROLL_CHUNKS = 5
+        const val PRE_ROLL_CHUNKS = 8
 
         private fun textOf(json: String, key: String): String =
             ((runCatching { Json.parseToJsonElement(json) }.getOrNull() as? JsonObject)?.get(key) as? JsonPrimitive)
