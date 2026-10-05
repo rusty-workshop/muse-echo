@@ -56,22 +56,33 @@ class Speaker(context: Context) {
         }
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String) {
+                GadgetState.setSpeaking(true)
                 startedAt.remove(utteranceId)?.let { GadgetState.log("speech started after ${System.currentTimeMillis() - it} ms") }
             }
             override fun onDone(utteranceId: String) {
+                GadgetState.setSpeaking(false)
+                current = ""
                 pending.remove(utteranceId)?.complete(true)
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String) {
+                GadgetState.setSpeaking(false)
+                current = ""
                 pending.remove(utteranceId)?.complete(false)
             }
         })
         return true
     }
 
+    /** The text being spoken now, so a spoken "stop" in it isn't mistaken for you. */
+    @Volatile
+    var current = ""
+        private set
+
     fun speak(text: String) {
         if (!available) return
+        current = text
         val id = UUID.randomUUID().toString()
         startedAt[id] = System.currentTimeMillis()
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
@@ -81,6 +92,7 @@ class Speaker(context: Context) {
     suspend fun speakAndWait(text: String): Boolean {
         if (!available) return false
         val id = UUID.randomUUID().toString()
+        current = text
         val done = CompletableDeferred<Boolean>()
         pending[id] = done
         startedAt[id] = System.currentTimeMillis()
@@ -98,6 +110,11 @@ class Speaker(context: Context) {
 
     fun stop() {
         tts.stop()
+        GadgetState.setSpeaking(false)
+        current = ""
+        // tts.stop() doesn't call onDone, so release anyone waiting on speakAndWait.
+        pending.values.forEach { it.complete(false) }
+        pending.clear()
     }
 
     fun shutdown() {

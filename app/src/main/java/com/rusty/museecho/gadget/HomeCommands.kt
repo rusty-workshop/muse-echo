@@ -32,6 +32,8 @@ class HomeCommands(
     private val timers: Timers,
     private val laptop: Laptop,
     private val bringToFront: () -> Unit,
+    private val notes: com.rusty.museecho.integrations.Notes? = null,
+    private val glance: com.rusty.museecho.integrations.Glance? = null,
 ) {
     val specs: JsonObject = buildJsonObject {
         val keys = Roku.KEYS.keys.joinToString(", ")
@@ -63,6 +65,24 @@ class HomeCommands(
         spec("timers.cancel", "Cancel timers/alarms on the Echo Show, or silence one that's ringing.",
             required = mapOf("which" to param("string", "An id or label from timers.list, \"all\", or \"ringing\" to silence.")),
             optional = mapOf("kind" to param("string", "Only \"timer\" or only \"alarm\".")))
+        spec("notes.get", "Read the note pinned on the Echo Show's home screen (a titled list, e.g. a shopping list).")
+        spec("notes.set", "Replace the pinned note on the Echo Show's home screen. It stays until cleared.",
+            optional = mapOf(
+                "title" to param("string", "Heading, e.g. \"Shopping\". Short."),
+                "items" to param("array", "List lines, e.g. [\"milk\",\"eggs\"]. Up to ${com.rusty.museecho.integrations.Notes.MAX}."),
+            ))
+        spec("notes.add", "Add lines to the pinned note on the Echo Show (skips ones already there).",
+            required = mapOf("items" to param("array", "Lines to add.")))
+        spec("notes.remove", "Remove lines from the pinned note (matches case-insensitively, or by contained text).",
+            required = mapOf("items" to param("array", "Lines to remove.")))
+        spec("notes.clear", "Take the pinned note off the Echo Show's home screen.")
+        spec("glance.set", "Set the one-line glance under the clock on the Echo Show's home screen, e.g. the next calendar " +
+            "event or a reminder. Next to it the Echo shows its own weather.",
+            required = mapOf("text" to param("string", "One short line, under ~60 characters.")),
+            optional = mapOf("minutes" to param("integer", "Clear it after this many minutes. Omit to keep it.")))
+        spec("glance.clear", "Clear the glance line under the clock.")
+        spec("media.control", "Control whatever is playing on the Echo Show (any app, or audio.play_url).",
+            required = mapOf("action" to param("string", "One of: play_pause, play, pause, next, previous, stop.")))
         spec("laptop.shortcuts", "List the shortcuts Rusty has allowed on his laptop (same safelist as Sofa's Coding Mode).")
         spec("laptop.run", "Run one of the laptop's safelisted shortcuts (from laptop.shortcuts).",
             required = mapOf("shortcut" to param("string", "Its key or label.")),
@@ -170,6 +190,52 @@ class HomeCommands(
                 if (n == 0) commandError("nothing matched \"$which\"") else commandOk(buildJsonObject { put("cancelled", n) })
             }
         }
+        "notes.get" -> withNotes { n ->
+            val note = n.value.value
+            commandOk(buildJsonObject {
+                put("title", note.title)
+                put("items", JsonArray(note.items.map { JsonPrimitive(it) }))
+            })
+        }
+        "notes.set" -> withNotes { n ->
+            val note = n.set(params.str("title"), params.list("items"))
+            commandOk(buildJsonObject { put("title", note.title); put("count", note.items.size) })
+        }
+        "notes.add" -> withNotes { n ->
+            val note = n.add(params.list("items"))
+            commandOk(buildJsonObject { put("count", note.items.size) })
+        }
+        "notes.remove" -> withNotes { n ->
+            commandOk(buildJsonObject { put("removed", n.remove(params.list("items"))) })
+        }
+        "notes.clear" -> withNotes { n ->
+            n.clear()
+            commandOk(buildJsonObject { put("cleared", true) })
+        }
+        "glance.set" -> glance?.let { g ->
+            val text = params.str("text") ?: return commandError("text is required")
+            g.set(text, params.num("minutes")?.toInt())
+            commandOk(buildJsonObject { put("shown", text.take(120)) })
+        } ?: commandError("not available")
+        "glance.clear" -> glance?.let { g ->
+            g.set("", null)
+            commandOk(buildJsonObject { put("cleared", true) })
+        } ?: commandError("not available")
+        "media.control" -> {
+            val key = when (params.str("action")?.lowercase()) {
+                "play_pause", "toggle" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                "play" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY
+                "pause" -> android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
+                "next" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+                "previous", "prev" -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                "stop" -> android.view.KeyEvent.KEYCODE_MEDIA_STOP
+                else -> return commandError("action must be play_pause, play, pause, next, previous or stop")
+            }
+            val audio = context.getSystemService(android.media.AudioManager::class.java)
+            audio.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, key))
+            audio.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, key))
+            commandOk(buildJsonObject { put("sent", params.str("action")) })
+        }
         "laptop.shortcuts" -> withLaptop {
             val list = laptop.shortcuts()
             if (list.isEmpty()) commandError("couldn't reach the laptop at ${laptop.host}, or it has no shortcuts")
@@ -192,6 +258,9 @@ class HomeCommands(
         val ip = roku.ip() ?: return commandError("couldn't find a Roku on the network")
         return block(ip)
     }
+
+    private inline fun withNotes(block: (com.rusty.museecho.integrations.Notes) -> JsonObject): JsonObject =
+        notes?.let(block) ?: commandError("not available")
 
     private suspend fun withLaptop(block: suspend () -> JsonObject): JsonObject =
         if (!laptop.configured) commandError("the laptop link isn't set up; add the Sofa companion token in Muse Echo's setup")
@@ -222,5 +291,12 @@ class HomeCommands(
 
         private fun JsonObject.str(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
         private fun JsonObject.num(key: String) = (this[key] as? JsonPrimitive)?.doubleOrNull
+
+        /** A string list, also accepting a single string or a comma-separated one. */
+        private fun JsonObject.list(key: String): List<String> = when (val v = this[key]) {
+            is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            is JsonPrimitive -> v.contentOrNull?.split(',', '\n').orEmpty()
+            else -> emptyList()
+        }.map { it.trim() }.filter { it.isNotEmpty() }
     }
 }

@@ -20,6 +20,9 @@ SDKs), plus the push-to-talk chat flow from their ESP32 screen boards.
 | `voice.configure` | Get or set speaker volume |
 | `audio.play_url` / `audio.stop` | Stream audio or internet radio |
 | `device.health` | Uptime, memory, storage, Wi-Fi signal, volume, screen state |
+| `notes.get` / `notes.set` / `notes.add` / `notes.remove` / `notes.clear` | The pinned note on the home screen (e.g. a shopping list); tap a line to tick it off |
+| `glance.set` / `glance.clear` | A line under the clock (next event, reminder), next to the Echo's own weather |
+| `media.control` | Play/pause/next/previous/stop for whatever plays on the Echo |
 | `display.set_profile` | Muse tells the Echo its name, shown instead of "Muse" |
 | `timer.set` / `alarm.set` / `timers.list` / `timers.cancel` | Timers and (repeating) alarms with an on-screen countdown, chime and spoken label |
 | `tv.status` / `tv.key` / `tv.apps` / `tv.launch` / `tv.type` | The Roku TV over ECP (found by SSDP) |
@@ -79,6 +82,12 @@ The app keeps Muse's reply stream open all the time, so the Echo also shows
 Replies render basic Markdown and show any pictures Muse attaches (tap one
 for full screen). With **follow-up listening** on, the Echo listens for a
 few seconds after Muse answers, so you can reply without the wake word.
+
+Say **"stop"** (or tap the screen) to cut Muse off mid-sentence. The **mic
+switch** in the top bar turns the wake word and voice notes off, shown in red.
+The **sun** asks for the morning brief (weather, your day, server status),
+which the first "hey muse" after quiet hours also gets. **History** shows past
+exchanges on the Echo.
 
 **Quiet hours** (default 22:00 to 07:00): no wake word, no speaking, a dim
 screen and soft timer beeps; alarms still ring.

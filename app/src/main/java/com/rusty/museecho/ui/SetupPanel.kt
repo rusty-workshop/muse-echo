@@ -65,6 +65,10 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var quietStart by remember { mutableStateOf(prefs.quietStart) }
     var quietEnd by remember { mutableStateOf(prefs.quietEnd) }
     var quietMessage by remember { mutableStateOf<String?>(null) }
+    var brief by remember { mutableStateOf(prefs.morningBrief) }
+    var lat by remember { mutableStateOf("%.4f".format(prefs.weatherLat)) }
+    var lon by remember { mutableStateOf("%.4f".format(prefs.weatherLon)) }
+    var weatherMessage by remember { mutableStateOf<String?>(null) }
     val bleOk = remember { actions.blePairingSupported() }
     val museName by GadgetState.museName.collectAsState()
     var nameField by remember { mutableStateOf(museName) }
@@ -235,6 +239,32 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     gadgetAlerts = it
                     prefs.showGadgetAlerts = it
                 }
+
+                ToggleRow("Morning brief", "The first \"${actions.wakePhrase()}\" after quiet hours gets weather, your day and server status (or tap the sun icon)", brief) {
+                    brief = it
+                    prefs.morningBrief = it
+                }
+
+                SectionTitle("Weather location")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = lat, onValueChange = { lat = it.take(10) }, singleLine = true,
+                        label = { Text("Latitude") }, modifier = Modifier.width(130.dp))
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedTextField(value = lon, onValueChange = { lon = it.take(10) }, singleLine = true,
+                        label = { Text("Longitude") }, modifier = Modifier.width(130.dp))
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        val la = lat.trim().toDoubleOrNull()
+                        val lo = lon.trim().toDoubleOrNull()
+                        weatherMessage = if (la == null || lo == null || la !in -90.0..90.0 || lo !in -180.0..180.0) {
+                            "Enter decimal coordinates, e.g. 30.3322 and -81.6557"
+                        } else {
+                            actions.saveWeatherLocation(la, lo)
+                            "Saved"
+                        }
+                    }) { Text("Save") }
+                }
+                weatherMessage?.let { Body(it, if (it == "Saved") Palette.teal else Palette.coral) }
 
                 SectionTitle("Quiet hours")
                 Body("No wake word, no speaking, a dim screen, soft timer beeps. Alarms still ring.", Palette.muted)

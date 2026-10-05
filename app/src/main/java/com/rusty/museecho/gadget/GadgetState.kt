@@ -71,6 +71,37 @@ object GadgetState {
         _quiet.value = quiet
     }
 
+    /** The Echo is speaking right now (the orb pulses with it). */
+    private val _speaking = MutableStateFlow(false)
+    val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
+
+    fun setSpeaking(on: Boolean) {
+        _speaking.value = on
+    }
+
+    /** Mic switched off on screen: no wake word, no voice notes. */
+    private val _micOff = MutableStateFlow(false)
+    val micOff: StateFlow<Boolean> = _micOff.asStateFlow()
+
+    fun setMicOff(off: Boolean) {
+        _micOff.value = off
+    }
+
+    /** What audio.play_url is playing, if anything. */
+    private val _nowPlaying = MutableStateFlow<String?>(null)
+    val nowPlaying: StateFlow<String?> = _nowPlaying.asStateFlow()
+
+    fun setNowPlaying(title: String?) {
+        _nowPlaying.value = title
+    }
+
+    private val _weather = MutableStateFlow<com.rusty.museecho.integrations.WeatherNow?>(null)
+    val weather: StateFlow<com.rusty.museecho.integrations.WeatherNow?> = _weather.asStateFlow()
+
+    fun setWeather(w: com.rusty.museecho.integrations.WeatherNow?) {
+        _weather.value = w
+    }
+
     /** A timer or alarm is ringing (the ring screen must stay bright). */
     private val _ringing = MutableStateFlow(false)
     val ringing: StateFlow<Boolean> = _ringing.asStateFlow()

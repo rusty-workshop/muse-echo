@@ -29,6 +29,8 @@ class WakeWord(
     private val modelDir: File,
     private val onWake: () -> Unit,
     private val log: (String) -> Unit,
+    /** Heard "stop" on its own; the caller decides whether it means anything. */
+    private val onStopWord: () -> Unit = {},
 ) {
     @Volatile
     private var running = false
@@ -62,7 +64,7 @@ class WakeWord(
             try {
                 LibVosk.setLogLevel(LogLevel.WARNINGS)
                 val m = model ?: Model(modelDir.absolutePath).also { model = it }
-                val grammar = JsonArray(listOf(JsonPrimitive(target), JsonPrimitive("[unk]"))).toString()
+                val grammar = JsonArray(listOf(JsonPrimitive(target), JsonPrimitive(STOP_WORD), JsonPrimitive("[unk]"))).toString()
                 Recognizer(m, RATE.toFloat(), grammar).use { rec -> listen(rec, target) }
             } catch (e: Throwable) {
                 log("wake word stopped: ${e.message}")
@@ -132,6 +134,11 @@ class WakeWord(
                 preRoll.clear()
                 val final = rec.acceptWaveForm(chunk, n)
                 val text = textOf(if (final) rec.result else rec.partialResult, if (final) "text" else "partial")
+                // "stop" only as a whole, finished utterance, so it isn't picked out of a longer phrase.
+                if (final && text.trim() == STOP_WORD) {
+                    onStopWord()
+                    continue
+                }
                 if (text.contains(target)) {
                     rec.reset()
                     // Pause first, so the note recorder gets the microphone straight away.
@@ -170,6 +177,7 @@ class WakeWord(
     companion object {
         const val RATE = 16_000
         const val MODEL_DIR_NAME = "vosk-model"
+        const val STOP_WORD = "stop"
 
         /** Root-mean-square level of 16-bit little-endian PCM, 0..32768. */
         fun rms(pcm: ByteArray, n: Int): Double {

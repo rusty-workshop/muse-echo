@@ -34,7 +34,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -103,6 +107,15 @@ interface UiActions {
     fun ringing(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.Countdown>>
     fun showImage(bitmap: android.graphics.Bitmap)
     fun refreshQuiet()
+    fun setMicOff(off: Boolean)
+    fun morningBrief()
+    fun notes(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.integrations.PinnedNote>
+    fun removeNote(item: String)
+    fun glance(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.integrations.GlanceLine>
+    fun history(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.Exchange>>
+    fun togglePlayback()
+    fun stopPlayback()
+    fun saveWeatherLocation(lat: Double, lon: Double)
     fun wakeWordEnabled(): Boolean
     fun wakePhrase(): String
     fun wakeModelPresent(): Boolean
@@ -127,17 +140,29 @@ fun MuseEchoApp(actions: UiActions) {
         val screen by GadgetState.screen.collectAsState()
         var showSetup by remember { mutableStateOf(false) }
         var showKeyboard by remember { mutableStateOf(false) }
+        var showHistory by remember { mutableStateOf(false) }
+        val micOff by GadgetState.micOff.collectAsState()
 
         Box(Modifier.fillMaxSize().background(Palette.night)) {
             Crossfade(targetState = screen, label = "screen") { s ->
                 when (s) {
-                    Screen.Idle -> IdleFace()
+                    Screen.Idle -> IdleFace(actions)
                     is Screen.Image -> ImageScreen(s, actions::dismissScreen)
                     is Screen.Text -> TextScreen(s, actions::dismissScreen)
                 }
             }
             StatusChip(Modifier.align(Alignment.TopStart).padding(14.dp))
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
+                IconButton(onClick = { actions.setMicOff(!micOff) }) {
+                    Icon(if (micOff) Icons.Filled.MicOff else Icons.Filled.Mic, if (micOff) "Turn mic on" else "Turn mic off",
+                        tint = if (micOff) Palette.coral else Palette.muted)
+                }
+                IconButton(onClick = actions::morningBrief) {
+                    Icon(Icons.Filled.WbSunny, "Morning brief", tint = Palette.muted)
+                }
+                IconButton(onClick = { showHistory = true }) {
+                    Icon(Icons.Filled.History, "History", tint = Palette.muted)
+                }
                 IconButton(onClick = { showKeyboard = true }) {
                     Icon(Icons.Filled.Keyboard, "Type to Muse", tint = Palette.muted)
                 }
@@ -148,8 +173,12 @@ fun MuseEchoApp(actions: UiActions) {
             Captions(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 120.dp, bottom = 18.dp), actions)
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
 
-            TimerChips(Modifier.align(Alignment.TopCenter).padding(top = 12.dp), actions)
+            Column(Modifier.align(Alignment.TopCenter).padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                TimerChips(Modifier, actions)
+                NowPlayingChip(Modifier.padding(top = 6.dp), actions)
+            }
             RingScreen(actions)
+            if (showHistory) HistoryPanel(actions, onClose = { showHistory = false })
             if (showKeyboard) TypeSheet(onSend = { actions.sendText(it); showKeyboard = false }, onClose = { showKeyboard = false })
             if (showSetup) SetupPanel(actions, onClose = { showSetup = false })
         }
@@ -157,30 +186,39 @@ fun MuseEchoApp(actions: UiActions) {
 }
 
 @Composable
-private fun IdleFace() {
+private fun IdleFace(actions: UiActions) {
     // The orb moves slowly, so 12 frames a second looks the same as 60 and
     // costs a fraction of the CPU; during quiet hours it holds still.
     val quiet by GadgetState.quiet.collectAsState()
+    val speaking by GadgetState.speaking.collectAsState()
     var t by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(quiet) {
-        if (quiet) return@LaunchedEffect
+    LaunchedEffect(quiet, speaking) {
+        if (quiet && !speaking) return@LaunchedEffect
         val start = System.currentTimeMillis() - (t * 1000).toLong()
         while (true) {
             t = (System.currentTimeMillis() - start) / 1000f
-            delay(83)
+            // Faster frames while speaking, so the pulse keeps up with the voice.
+            delay(if (speaking) 40 else 83)
         }
     }
-    val breathe = 0.99f + 0.07f * kotlin.math.sin(t * 2 * Math.PI.toFloat() / 7.2f)
+    // While speaking, a syllable-rate flutter on top of the slow breath.
+    val voice = if (speaking) 0.06f * (0.5f + 0.5f * kotlin.math.sin(t * 17f)) * (0.6f + 0.4f * kotlin.math.sin(t * 5.3f)) else 0f
+    val breathe = 0.99f + 0.07f * kotlin.math.sin(t * 2 * Math.PI.toFloat() / 7.2f) + voice
     val drift = (t / 14f) % 1f
     val talk by GadgetState.talk.collectAsState()
     val link by GadgetState.link.collectAsState()
     val name by GadgetState.museName.collectAsState()
     val now = rememberNow()
 
-    Row(Modifier.fillMaxSize().padding(horizontal = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {
+    val note by actions.notes().collectAsState()
+    val glanceLine by actions.glance().collectAsState()
+    val weather by GadgetState.weather.collectAsState()
+    val hasNote = note.items.isNotEmpty() || note.title.isNotEmpty()
+    Row(Modifier.fillMaxSize().padding(horizontal = if (hasNote) 24.dp else 40.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(if (hasNote) 170.dp else 220.dp), contentAlignment = Alignment.Center) {
             val angle = drift * 2 * Math.PI
             val tint = when {
+                speaking -> Palette.teal
                 talk == Talk.LISTENING -> Palette.coral
                 talk == Talk.SENDING || talk == Talk.WAITING -> Palette.amber
                 link == Link.CONNECTED -> Palette.violet
@@ -195,10 +233,19 @@ private fun IdleFace() {
                 drawCircle(Brush.radialGradient(listOf(tint, tint.copy(alpha = 0.15f)), c - shift * 0.6f, r * 0.55f), r * 0.48f, c - shift * 0.6f)
             }
         }
-        Spacer(Modifier.width(36.dp))
-        Column {
-            Text(SimpleDateFormat("h:mm", Locale.US).format(now), color = Palette.ink, fontSize = 84.sp, fontWeight = FontWeight.Light)
+        Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
+        Column(Modifier.weight(1f)) {
+            Text(SimpleDateFormat("h:mm", Locale.US).format(now), color = Palette.ink, fontSize = if (hasNote) 72.sp else 84.sp, fontWeight = FontWeight.Light)
             Text(SimpleDateFormat("EEEE, MMMM d", Locale.US).format(now), color = Palette.muted, fontSize = 20.sp)
+            weather?.let { w ->
+                Text("${w.tempF}° ${w.summary}  ·  H ${w.highF}° L ${w.lowF}°", color = Palette.ink.copy(alpha = 0.85f), fontSize = 17.sp,
+                    modifier = Modifier.padding(top = 4.dp))
+            }
+            val line = glanceLine.text.takeIf { glanceLine.untilMs == 0L || now.time < glanceLine.untilMs }.orEmpty()
+            if (line.isNotEmpty()) {
+                Text(line, color = Palette.amber, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp))
+            }
             Spacer(Modifier.height(10.dp))
             Text(
                 when (link) {
@@ -208,6 +255,79 @@ private fun IdleFace() {
                 },
                 color = Palette.muted.copy(alpha = 0.8f), fontSize = 15.sp,
             )
+        }
+        if (hasNote) NoteCard(note, actions)
+    }
+}
+
+/** The pinned note: tap a line to tick it off. */
+@Composable
+private fun NoteCard(note: com.rusty.museecho.integrations.PinnedNote, actions: UiActions) {
+    Column(
+        Modifier.width(220.dp).heightIn(max = 300.dp).background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        if (note.title.isNotEmpty()) {
+            Text(note.title, color = Palette.amber, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+        }
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            note.items.forEach { item ->
+                Text("•  $item", color = Palette.ink, fontSize = 15.sp, lineHeight = 20.sp,
+                    modifier = Modifier.fillMaxWidth().clickable { actions.removeNote(item) }.padding(vertical = 3.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingChip(modifier: Modifier, actions: UiActions) {
+    val playing by GadgetState.nowPlaying.collectAsState()
+    val title = playing ?: return
+    Row(
+        modifier.background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50)).padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("♪  $title", color = Palette.ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 220.dp))
+        IconButton(onClick = actions::togglePlayback, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.PlayArrow, "Pause or resume", tint = Palette.muted, modifier = Modifier.size(20.dp))
+        }
+        IconButton(onClick = actions::stopPlayback, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.Stop, "Stop", tint = Palette.muted, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Today's (and earlier) exchanges on the Echo, newest first. */
+@Composable
+private fun HistoryPanel(actions: UiActions, onClose: () -> Unit) {
+    val items by actions.history().collectAsState()
+    val day = SimpleDateFormat("EEE MMM d", Locale.US)
+    val time = SimpleDateFormat("h:mm a", Locale.US)
+    Box(Modifier.fillMaxSize().background(Palette.night)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("History", color = Palette.ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onClose) { Text("Done") }
+            }
+            if (items.isEmpty()) Body("Nothing yet.", Palette.muted)
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                var lastDay = ""
+                items.asReversed().forEach { e ->
+                    val d = day.format(Date(e.at))
+                    if (d != lastDay) {
+                        SectionTitle(d)
+                        lastDay = d
+                    }
+                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).background(Palette.card, RoundedCornerShape(12.dp)).padding(12.dp)) {
+                        Text(listOfNotNull(time.format(Date(e.at)), e.source).joinToString("  ·  "), color = Palette.muted, fontSize = 12.sp)
+                        if (e.heard.isNotEmpty()) Text("“${e.heard}”", color = Palette.muted, fontSize = 15.sp)
+                        Text(com.rusty.museecho.gadget.Markdown.toAnnotated(e.reply), color = Palette.ink, fontSize = 16.sp, lineHeight = 22.sp)
+                    }
+                }
+            }
         }
     }
 }
@@ -257,7 +377,8 @@ private fun StatusChip(modifier: Modifier) {
     val link by GadgetState.link.collectAsState()
     val detail by GadgetState.linkDetail.collectAsState()
     val name by GadgetState.museName.collectAsState()
-    val (color, label) = when (link) {
+    val micOff by GadgetState.micOff.collectAsState()
+    val (color, label) = if (micOff) Palette.coral to "Mic off" else when (link) {
         Link.CONNECTED -> Palette.teal to "Connected to ${if (detail.isEmpty() || detail == "Muse") name else detail}"
         Link.CONNECTING -> Palette.amber to "Connecting"
         Link.RECONNECTING -> Palette.amber to detail.ifEmpty { "Reconnecting" }
@@ -335,14 +456,15 @@ private fun TalkButton(modifier: Modifier, actions: UiActions) {
         }
         level = 0f
     }
-    val enabled = link == Link.CONNECTED || listening
+    val micOff by GadgetState.micOff.collectAsState()
+    val enabled = (link == Link.CONNECTED && !micOff) || listening
     Box(
         modifier.size(84.dp).scale(1f + level * 0.35f).clip(CircleShape)
             .background(if (listening) Palette.coral else if (enabled) Palette.violet else Palette.card)
             .clickable(enabled = enabled, onClick = actions::toggleTalk),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(if (listening) Icons.Filled.Stop else Icons.Filled.Mic, if (listening) "Send" else "Talk",
+        Icon(if (listening) Icons.Filled.Stop else if (micOff) Icons.Filled.MicOff else Icons.Filled.Mic, if (listening) "Send" else "Talk",
             tint = if (enabled) Color.White else Palette.muted, modifier = Modifier.size(38.dp))
     }
 }

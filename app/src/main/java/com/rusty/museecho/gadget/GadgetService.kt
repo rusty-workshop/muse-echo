@@ -66,6 +66,17 @@ class GadgetService : Service() {
     private val imageHttp = okhttp3.OkHttpClient.Builder().callTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
     lateinit var errors: ErrorLog
         private set
+    lateinit var notes: com.rusty.museecho.integrations.Notes
+        private set
+    lateinit var history: com.rusty.museecho.integrations.History
+        private set
+    lateinit var glance: com.rusty.museecho.integrations.Glance
+        private set
+    private val weather = com.rusty.museecho.integrations.Weather()
+
+    /** Set when quiet hours end; the next "hey muse" gets the morning brief. */
+    @Volatile
+    private var briefPending = false
     private val startedAt = System.currentTimeMillis()
     private var disconnectedSince = 0L
     private lateinit var wakeWord: WakeWord
@@ -86,7 +97,11 @@ class GadgetService : Service() {
         roku = com.rusty.museecho.integrations.Roku(this)
         importDroppedSettings()
         GadgetState.setMuseName(Prefs(this).museName)
-        val home = HomeCommands(this, roku, timers, laptop, ::bringToFront)
+        notes = com.rusty.museecho.integrations.Notes(java.io.File(filesDir, "notes.json"))
+        history = com.rusty.museecho.integrations.History(java.io.File(filesDir, "history.json"))
+        glance = com.rusty.museecho.integrations.Glance(java.io.File(filesDir, "glance.json"))
+        GadgetState.setMicOff(Prefs(this).micOff)
+        val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance)
         commands = EchoCommands(this, speaker, ::bringToFront, home, ::isQuietNow, { healthExtras() })
         runner = GadgetRunner(
             store = store,
@@ -105,11 +120,13 @@ class GadgetService : Service() {
         runnerJob = scope.launch { runner.run() }
         scope.launch { tickTimers() }
         scope.launch { watchdog() }
+        scope.launch { refreshWeather() }
         com.rusty.museecho.BootReceiver.scheduleKeepAlive(this)
         wakeWord = WakeWord(
             modelDir = java.io.File(getExternalFilesDir(null), WakeWord.MODEL_DIR_NAME),
             onWake = { scope.launch { onWake() } },
             log = GadgetState::log,
+            onStopWord = { scope.launch { onStopWord() } },
         )
         applyWakeWord()
         scope.launch {
@@ -175,6 +192,7 @@ class GadgetService : Service() {
             if (quiet != GadgetState.quiet.value) {
                 GadgetState.setQuiet(quiet)
                 GadgetState.log(if (quiet) "quiet hours started" else "quiet hours ended")
+                if (!quiet) briefPending = true
                 applyWakeWord()
             } else if (prefs.wakeWordEnabled && !quiet && !wakeWord.listening && micAllowed() &&
                 GadgetState.talk.value != Talk.LISTENING
@@ -213,6 +231,47 @@ class GadgetService : Service() {
     }
 
     fun isQuietNow() = QuietHours.isQuiet(Prefs(this))
+
+    /** Ask Muse for the morning brief, as a turn on the Echo. */
+    fun morningBrief() {
+        talk(BRIEF_PROMPT, null, label = "Morning brief")
+    }
+
+    private fun onStopWord() {
+        // Only while speaking, and not when the Echo itself is saying "stop".
+        if (!GadgetState.speaking.value) return
+        if (Regex("\\bstop\\b", RegexOption.IGNORE_CASE).containsMatchIn(speaker.current)) return
+        GadgetState.log("heard \"stop\"")
+        speaker.stop()
+        GadgetState.setFollowUp(false)
+    }
+
+    /** Mic switch on the screen: off means no wake word and no voice notes. */
+    fun setMicOff(off: Boolean) {
+        Prefs(this).micOff = off
+        GadgetState.setMicOff(off)
+        if (off && GadgetState.talk.value == Talk.LISTENING) {
+            recorder.cancel()
+            GadgetState.setFollowUp(false)
+            GadgetState.setTalk(Talk.IDLE)
+        }
+        applyWakeWord()
+    }
+
+    private suspend fun refreshWeather() {
+        while (true) {
+            val prefs = Prefs(this)
+            weather.fetch(prefs.weatherLat, prefs.weatherLon)?.let { GadgetState.setWeather(it) }
+            delay(if (GadgetState.weather.value == null) 2 * 60_000L else 30 * 60_000L)
+        }
+    }
+
+    fun reloadWeather() {
+        scope.launch {
+            val prefs = Prefs(this@GadgetService)
+            weather.fetch(prefs.weatherLat, prefs.weatherLon)?.let { GadgetState.setWeather(it) }
+        }
+    }
 
     /** Apply a quiet-hours settings change now rather than at the next watchdog tick. */
     fun refreshQuiet() {
@@ -308,22 +367,30 @@ class GadgetService : Service() {
     fun reconnect() = runner.poke()
 
     /** Send a typed message ([text]) or a voice note ([wav]); progress shows in [GadgetState]. */
-    fun talk(text: String?, wav: ByteArray?) {
+    fun talk(text: String?, wav: ByteArray?, label: String? = null) {
         turnJob?.cancel()
         turnJob = scope.launch {
             GadgetState.setTalk(Talk.SENDING)
-            GadgetState.setReplySource(null)
-            GadgetState.setHeard(text ?: "")
+            GadgetState.setReplySource(label)
+            GadgetState.setHeard(if (label != null) "" else text ?: "")
             GadgetState.setReply("")
             GadgetState.setReplyImages(emptyList())
             try {
+                var heardText = if (label != null) label else text.orEmpty()
                 val reply = chat.turn(text, wav) { heard, partial ->
-                    if (heard.isNotEmpty()) GadgetState.setHeard(heard)
+                    if (heard.isNotEmpty() && label == null) {
+                        heardText = heard
+                        GadgetState.setHeard(heard)
+                    }
                     GadgetState.setTalk(if (partial == null || partial.text.isEmpty()) Talk.WAITING else Talk.REPLIED)
                     partial?.let { GadgetState.setReply(it.text) }
                 }
-                if (reply != null) deliver(reply, source = null, wakeScreen = false)
-                else GadgetState.setTalk(Talk.REPLIED)
+                if (reply != null) {
+                    history.add(com.rusty.museecho.integrations.Exchange(System.currentTimeMillis(), heardText, reply.text, label))
+                    deliver(reply, source = label, wakeScreen = false)
+                } else {
+                    GadgetState.setTalk(Talk.REPLIED)
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -390,6 +457,7 @@ class GadgetService : Service() {
         if (GadgetState.talk.value == Talk.LISTENING || turnJob?.isActive == true) return
         GadgetState.log("message from ${reply.origin.name.lowercase().replace('_', ' ')}")
         GadgetState.setHeard("")
+        history.add(com.rusty.museecho.integrations.Exchange(System.currentTimeMillis(), reply.prompt.orEmpty(), reply.text, source))
         if (!QuietHours.isQuiet(prefs)) softChime()
         deliver(reply, source, wakeScreen = true)
     }
@@ -403,7 +471,14 @@ class GadgetService : Service() {
         }
     }
 
-    fun stopSpeaking() = speaker.stop()
+    fun stopSpeaking() {
+        speaker.stop()
+        GadgetState.setFollowUp(false)
+    }
+
+    fun togglePlayback() = commands.togglePause()
+
+    fun stopPlayback() = commands.stopPlayer()
 
     // -- Voice notes (push-to-talk and wake word) ---------------------------------------
 
@@ -416,6 +491,10 @@ class GadgetService : Service() {
      */
     fun startTalking(handsFree: Boolean = false): Boolean {
         val followUp = GadgetState.followUp.value
+        if (GadgetState.micOff.value) {
+            GadgetState.setFollowUp(false)
+            return false
+        }
         if (GadgetState.talk.value == Talk.LISTENING) return true
         if (!micAllowed()) {
             GadgetState.setReply("Microphone permission is needed to talk")
@@ -466,6 +545,12 @@ class GadgetService : Service() {
             return
         }
         bringToFront(force = true)
+        if (briefPending && Prefs(this).morningBrief) {
+            briefPending = false
+            wakeWord.resume()
+            morningBrief()
+            return
+        }
         val beep = android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 60)
         beep.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 150)
         scope.launch {
@@ -478,7 +563,7 @@ class GadgetService : Service() {
     /** (Re)apply the wake-word setting; returns an error message if it can't run. */
     fun applyWakeWord(): String? {
         val prefs = Prefs(this)
-        if (!prefs.wakeWordEnabled || QuietHours.isQuiet(prefs)) {
+        if (!prefs.wakeWordEnabled || QuietHours.isQuiet(prefs) || prefs.micOff) {
             wakeWord.stop()
             return null
         }
@@ -657,6 +742,9 @@ class GadgetService : Service() {
         const val PAIRING_WINDOW_MS = 10 * 60_000L
         const val RING_MAX_MS = 2 * 60_000L
         const val RECONNECT_KICK_MS = 5 * 60_000L
+        const val BRIEF_PROMPT = "Good morning! Give me my morning brief, under 80 words and written to be spoken aloud " +
+            "(no lists or markdown): today's weather here, what's on my calendar today, anything I asked you to remind " +
+            "me about, and whether anything is wrong on the Latitude server."
 
         @Volatile
         var instance: GadgetService? = null
@@ -736,6 +824,24 @@ class Prefs(context: Context) {
     var showGadgetAlerts: Boolean
         get() = prefs.getBoolean("show_gadget_alerts", true)
         set(v) = prefs.edit().putBoolean("show_gadget_alerts", v).apply()
+
+    var micOff: Boolean
+        get() = prefs.getBoolean("mic_off", false)
+        set(v) = prefs.edit().putBoolean("mic_off", v).apply()
+
+    /** The first "hey muse" after quiet hours gets the morning brief. */
+    var morningBrief: Boolean
+        get() = prefs.getBoolean("morning_brief", true)
+        set(v) = prefs.edit().putBoolean("morning_brief", v).apply()
+
+    /** Weather location; defaults to Jacksonville, FL (Sofa's setting). */
+    var weatherLat: Double
+        get() = prefs.getFloat("weather_lat", 30.3322f).toDouble()
+        set(v) = prefs.edit().putFloat("weather_lat", v.toFloat()).apply()
+
+    var weatherLon: Double
+        get() = prefs.getFloat("weather_lon", -81.6557f).toDouble()
+        set(v) = prefs.edit().putFloat("weather_lon", v.toFloat()).apply()
 
     var quietEnabled: Boolean
         get() = prefs.getBoolean("quiet_enabled", true)

@@ -64,6 +64,15 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(EXTRA_AUTO, false)) autoLaunched = true
     }
 
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        // A tap anywhere cuts Muse off mid-sentence.
+        if (ev.action == android.view.MotionEvent.ACTION_DOWN && GadgetState.speaking.value) {
+            GadgetService.instance?.stopSpeaking()
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onResume() {
         super.onResume()
         visible = true
@@ -186,6 +195,39 @@ class MainActivity : ComponentActivity() {
         override fun ringing() = GadgetService.instance?.timers?.ringing ?: none
 
         override fun showImage(bitmap: android.graphics.Bitmap) = GadgetState.show(Screen.Image(bitmap, ""))
+        override fun setMicOff(off: Boolean) {
+            GadgetService.instance?.setMicOff(off)
+        }
+
+        override fun morningBrief() {
+            GadgetService.instance?.morningBrief()
+        }
+
+        private val emptyNote = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.PinnedNote())
+        private val emptyGlance = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.GlanceLine())
+        private val emptyHistory = kotlinx.coroutines.flow.MutableStateFlow(emptyList<com.rusty.museecho.integrations.Exchange>())
+        override fun notes() = GadgetService.instance?.notes?.value ?: emptyNote
+        override fun removeNote(item: String) {
+            GadgetService.instance?.notes?.remove(listOf(item))
+        }
+
+        override fun glance() = GadgetService.instance?.glance?.value ?: emptyGlance
+        override fun history() = GadgetService.instance?.history?.value ?: emptyHistory
+        override fun togglePlayback() {
+            GadgetService.instance?.togglePlayback()
+        }
+
+        override fun stopPlayback() {
+            GadgetService.instance?.stopPlayback()
+        }
+
+        override fun saveWeatherLocation(lat: Double, lon: Double) {
+            val prefs = com.rusty.museecho.gadget.Prefs(this@MainActivity)
+            prefs.weatherLat = lat
+            prefs.weatherLon = lon
+            GadgetService.instance?.reloadWeather()
+        }
+
         override fun refreshQuiet() {
             GadgetService.instance?.refreshQuiet()
         }

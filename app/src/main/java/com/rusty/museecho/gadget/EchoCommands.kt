@@ -81,6 +81,7 @@ class EchoCommands(
             "Stream an audio file or internet radio URL (MP3, AAC, OGG, WAV) on the Echo Show's speaker. " +
                 "Replies once playback starts.",
             required = mapOf("url" to param("string", "http:// or https:// URL of the audio.")),
+            optional = mapOf("title" to param("string", "What it is, shown on screen, e.g. \"KEXP\".")),
             timeoutMs = 45_000)
         spec("audio.stop", "Stop audio started with audio.play_url.")
         spec("display.set_profile",
@@ -102,7 +103,7 @@ class EchoCommands(
                 "display.brightness" -> brightness(params.int("level"))
                 "voice.say" -> say(params.string("text"))
                 "voice.configure" -> volume(params.int("volume"))
-                "audio.play_url" -> playUrl(params.string("url"))
+                "audio.play_url" -> playUrl(params.string("url"), params.string("title"))
                 "audio.stop" -> stopAudio()
                 "display.set_profile" -> setProfile(params.string("name"))
                 else -> home?.run(command, params) ?: commandError("unknown command: $command")
@@ -228,7 +229,7 @@ class EchoCommands(
         return commandOk(buildJsonObject { put("volume", currentVolume()) })
     }
 
-    private suspend fun playUrl(url: String?): JsonObject {
+    private suspend fun playUrl(url: String?, title: String?): JsonObject {
         if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
             return commandError("url must be http:// or https://")
         }
@@ -245,6 +246,7 @@ class EchoCommands(
             )
             mp.setOnPreparedListener {
                 it.start()
+                GadgetState.setNowPlaying(title?.takeIf { t -> t.isNotBlank() } ?: android.net.Uri.parse(url).host ?: "Audio")
                 started.complete(Result.success(it.duration))
             }
             mp.setOnErrorListener { _, what, extra ->
@@ -283,10 +285,17 @@ class EchoCommands(
         return commandOk(buildJsonObject { put("stopped", was) })
     }
 
-    private fun stopPlayer() {
+    fun stopPlayer() {
         player?.let { runCatching { it.stop() }; it.release() }
         player = null
+        GadgetState.setNowPlaying(null)
     }
+
+    fun togglePause() {
+        player?.let { if (it.isPlaying) it.pause() else it.start() }
+    }
+
+    fun isPlaying() = player?.isPlaying == true
 
     fun release() {
         stopPlayer()
