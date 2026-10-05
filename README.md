@@ -20,6 +20,11 @@ SDKs), plus the push-to-talk chat flow from their ESP32 screen boards.
 | `voice.configure` | Get or set speaker volume |
 | `audio.play_url` / `audio.stop` | Stream audio or internet radio |
 | `device.health` | Uptime, memory, storage, Wi-Fi signal, volume, screen state |
+| `display.set_profile` | Muse tells the Echo its name, shown instead of "Muse" |
+| `timer.set` / `alarm.set` / `timers.list` / `timers.cancel` | Timers and (repeating) alarms with an on-screen countdown, chime and spoken label |
+| `tv.status` / `tv.key` / `tv.apps` / `tv.launch` / `tv.type` | The Roku TV over ECP (found by SSDP) |
+| `sofa.mode` | Switch the Echo to Sofa in home/school/tv/coding/lmstudio/ambient mode |
+| `laptop.shortcuts` / `laptop.run` | The Sofa laptop companion's safelisted shortcuts (needs its token in setup) |
 
 And from the Echo: tap the mic to send Muse a voice note (or the keyboard icon
 to type). Muse's reply streams in as a caption, and is spoken if a TTS engine
@@ -34,7 +39,7 @@ is installed.
    adb -s G6G11B06033403LD install -r app/build/outputs/apk/debug/app-debug.apk
    ```
 
-2. Optional grants, so Muse can pull the app over Fully Kiosk and change brightness:
+2. Optional grants, so Muse can bring the app to the front and change brightness:
 
    ```sh
    adb -s G6G11B06033403LD shell appops set com.rusty.museecho SYSTEM_ALERT_WINDOW allow
@@ -65,6 +70,19 @@ tools/pair-via-linux.sh mgst_…
 
 Bluetooth is only used for that one-time setup; after it, everything is a
 normal internet connection.
+
+## Wake word
+
+Setup panel > Wake word: say the phrase (default "hey muse"), talk, and the
+note sends when you stop. It runs offline with [Vosk](https://alphacephei.com/vosk/)
+limited to just that phrase, behind a volume gate, so it uses almost no CPU in
+a quiet room. The model isn't in the APK; push it once:
+
+```sh
+unzip vosk-model-small-en-us-0.15.zip
+adb push vosk-model-small-en-us-0.15 /sdcard/Android/data/com.rusty.museecho/files/
+adb shell mv /sdcard/Android/data/com.rusty.museecho/files/vosk-model-small-en-us-0.15 /sdcard/Android/data/com.rusty.museecho/files/vosk-model
+```
 
 ## Speech
 

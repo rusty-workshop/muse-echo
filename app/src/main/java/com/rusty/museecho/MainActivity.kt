@@ -17,7 +17,6 @@ import com.rusty.museecho.gadget.GadgetService
 import com.rusty.museecho.gadget.GadgetState
 import com.rusty.museecho.gadget.Screen
 import com.rusty.museecho.gadget.Talk
-import com.rusty.museecho.gadget.VoiceRecorder
 import com.rusty.museecho.ui.MuseEchoApp
 import com.rusty.museecho.ui.UiActions
 import kotlinx.coroutines.Job
@@ -27,7 +26,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private val recorder = VoiceRecorder()
     private var autoLaunched = false
     private var pendingTalk = false
     private var retreatJob: Job? = null
@@ -56,6 +54,8 @@ class MainActivity : ComponentActivity() {
             MuseEchoApp(actions)
         }
         watchForRetreat()
+        // Started at boot only to bring the service up from the foreground.
+        if (intent?.getBooleanExtra(EXTRA_BOOT, false) == true) moveTaskToBack(true)
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -73,13 +73,8 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
-    override fun onDestroy() {
-        recorder.cancel()
-        super.onDestroy()
-    }
-
     /**
-     * When Muse pulled this app to the front (over Fully Kiosk's dashboard),
+     * When Muse pulled this app to the front (over whatever was on screen),
      * step back once the screen has been idle for a while.
      */
     private fun watchForRetreat() {
@@ -97,25 +92,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startTalking() {
-        GadgetService.instance?.stopSpeaking()
-        if (!recorder.start { runOnUiThread { stopTalking() } }) {
-            GadgetState.setReply("Couldn't open the microphone")
-            GadgetState.setTalk(Talk.ERROR)
-            return
-        }
-        GadgetState.setHeard("")
-        GadgetState.setReply("")
-        GadgetState.setTalk(Talk.LISTENING)
+        GadgetService.instance?.startTalking()
     }
 
     private fun stopTalking() {
-        if (GadgetState.talk.value != Talk.LISTENING) return
-        val wav = recorder.stop()
-        if (wav == null) {
-            GadgetState.setTalk(Talk.IDLE)
-            return
-        }
-        GadgetService.instance?.talk(null, wav)
+        GadgetService.instance?.stopTalking()
     }
 
     private val actions = object : UiActions {
@@ -138,7 +119,7 @@ class MainActivity : ComponentActivity() {
             GadgetService.instance?.talk(text, null)
         }
 
-        override fun micLevel(): Float = recorder.level
+        override fun micLevel(): Float = GadgetService.instance?.micLevel() ?: 0f
 
         override fun dismissScreen() = GadgetState.show(Screen.Idle)
 
@@ -163,10 +144,54 @@ class MainActivity : ComponentActivity() {
         override fun isPaired(): Boolean = GadgetService.instance?.isPaired() == true
         override fun bleName(): String = GadgetService.instance?.identity()?.bleName ?: "MuseGadget…"
         override fun nodeId(): String = GadgetService.instance?.identity()?.nodeId ?: ""
+        override fun dismissRinging() {
+            GadgetService.instance?.dismissRinging()
+        }
+
+        override fun cancelTimer(id: String) {
+            GadgetService.instance?.timers?.cancel(id)
+        }
+
+        override fun blePairingSupported(): Boolean =
+            packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
+
+        override fun setMuseName(name: String) {
+            if (name.isBlank()) return
+            com.rusty.museecho.gadget.Prefs(this@MainActivity).museName = name
+            GadgetState.setMuseName(name)
+        }
+
+        override fun laptopHost(): String = GadgetService.instance?.laptop?.host ?: com.rusty.museecho.integrations.Laptop.DEFAULT_HOST
+        override fun hasLaptopToken(): Boolean = GadgetService.instance?.laptop?.configured == true
+        override fun saveLaptop(host: String, token: String?) {
+            val laptop = GadgetService.instance?.laptop ?: return
+            if (host.isNotBlank()) laptop.host = host
+            if (token != null) laptop.token = token
+        }
+
+        private val none = kotlinx.coroutines.flow.MutableStateFlow<List<com.rusty.museecho.integrations.Countdown>>(emptyList())
+        override fun timers() = GadgetService.instance?.timers?.items ?: none
+        override fun ringing() = GadgetService.instance?.timers?.ringing ?: none
+
+        override fun wakeWordEnabled(): Boolean = com.rusty.museecho.gadget.Prefs(this@MainActivity).wakeWordEnabled
+        override fun wakePhrase(): String = com.rusty.museecho.gadget.Prefs(this@MainActivity).wakePhrase
+        override fun wakeModelPresent(): Boolean = GadgetService.instance?.wakeModelPresent() == true
+        override fun setWakeWord(enabled: Boolean, phrase: String): String? {
+            val prefs = com.rusty.museecho.gadget.Prefs(this@MainActivity)
+            prefs.wakeWordEnabled = enabled
+            if (phrase.isNotBlank()) prefs.wakePhrase = phrase
+            if (enabled && ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                micPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            return GadgetService.instance?.applyWakeWord()
+        }
     }
 
     companion object {
         const val EXTRA_AUTO = "auto"
+        const val EXTRA_BOOT = "boot"
         const val RETREAT_AFTER_MS = 60_000L
 
         @Volatile

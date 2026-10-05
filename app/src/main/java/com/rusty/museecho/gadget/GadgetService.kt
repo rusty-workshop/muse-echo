@@ -55,6 +55,15 @@ class GadgetService : Service() {
     private var ble: BleSetupServer? = null
     private var setup: SetupController? = null
     private var turnJob: Job? = null
+    lateinit var timers: com.rusty.museecho.integrations.Timers
+        private set
+    lateinit var laptop: com.rusty.museecho.integrations.Laptop
+        private set
+    lateinit var roku: com.rusty.museecho.integrations.Roku
+        private set
+    private val recorder = VoiceRecorder()
+    private lateinit var wakeWord: WakeWord
+    private var chime: android.media.Ringtone? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -65,7 +74,13 @@ class GadgetService : Service() {
         val ua = "musegadget/${BuildConfig.VERSION_NAME} (Echo Show 5; Android ${Build.VERSION.RELEASE}) museecho"
         api = MuseApi(ua, log = GadgetState::log)
         speaker = Speaker(this)
-        commands = EchoCommands(this, speaker, ::bringToFront)
+        timers = com.rusty.museecho.integrations.Timers(java.io.File(filesDir, "timers.json"))
+        laptop = com.rusty.museecho.integrations.Laptop(this)
+        roku = com.rusty.museecho.integrations.Roku(this)
+        importDroppedSettings()
+        GadgetState.setMuseName(Prefs(this).museName)
+        val home = HomeCommands(this, roku, timers, laptop, ::bringToFront)
+        commands = EchoCommands(this, speaker, ::bringToFront, home)
         runner = GadgetRunner(
             store = store,
             identity = identity,
@@ -79,6 +94,13 @@ class GadgetService : Service() {
         chat = ChatClient({ runner.current }, identity.nodeId)
         startInForeground()
         runnerJob = scope.launch { runner.run() }
+        scope.launch { tickTimers() }
+        wakeWord = WakeWord(
+            modelDir = java.io.File(getExternalFilesDir(null), WakeWord.MODEL_DIR_NAME),
+            onWake = { scope.launch { onWake() } },
+            log = GadgetState::log,
+        )
+        applyWakeWord()
         scope.launch {
             GadgetState.link.collectLatest { updateNotification() }
         }
@@ -98,6 +120,9 @@ class GadgetService : Service() {
 
     override fun onDestroy() {
         stopPairing(null)
+        stopChime()
+        recorder.cancel()
+        wakeWord.release()
         scope.cancel()
         commands.release()
         speaker.shutdown()
@@ -122,6 +147,67 @@ class GadgetService : Service() {
                 file.delete()
                 GadgetState.log("imported $name")
             }.onFailure { GadgetState.log("couldn't import $name: ${it.message}") }
+        }
+    }
+
+    // -- Timers -----------------------------------------------------------------------
+
+    private suspend fun tickTimers() {
+        while (true) {
+            val rang = timers.tick()
+            if (rang.isNotEmpty()) {
+                GadgetState.log("ringing: ${rang.joinToString { it.label }}")
+                bringToFront(force = true)
+                startChime()
+                // Let the chime get going, then say what it's for.
+                delay(1_500)
+                speaker.speak(rang.joinToString(". ") { if (it.isAlarm) it.label else "${it.label} is done" })
+                scope.launch {
+                    delay(RING_MAX_MS)
+                    if (timers.ringing.value.isNotEmpty()) timers.dismiss()
+                }
+            }
+            if (timers.ringing.value.isEmpty()) stopChime()
+            delay(1_000)
+        }
+    }
+
+    private fun startChime() {
+        if (chime?.isPlaying == true) return
+        val uri = android.media.RingtoneManager.getActualDefaultRingtoneUri(this, android.media.RingtoneManager.TYPE_ALARM)
+            ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+        chime = android.media.RingtoneManager.getRingtone(this, uri)?.apply {
+            audioAttributes = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
+            play()
+        }
+    }
+
+    private fun stopChime() {
+        chime?.stop()
+        chime = null
+    }
+
+    fun dismissRinging() {
+        timers.dismiss()
+        stopChime()
+        speaker.stop()
+    }
+
+    /** `laptop_token` / `laptop_host` pushed with adb, like `sdk_token`. */
+    private fun importDroppedSettings() {
+        val drop = getExternalFilesDir(null) ?: return
+        java.io.File(drop, "laptop_token").takeIf { it.isFile }?.let {
+            laptop.token = it.readText().trim()
+            it.delete()
+            GadgetState.log("imported laptop_token")
+        }
+        java.io.File(drop, "laptop_host").takeIf { it.isFile }?.let {
+            laptop.host = it.readText().trim()
+            it.delete()
         }
     }
 
@@ -171,6 +257,78 @@ class GadgetService : Service() {
     }
 
     fun stopSpeaking() = speaker.stop()
+
+    // -- Voice notes (push-to-talk and wake word) ---------------------------------------
+
+    private fun micAllowed() = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** Start a voice note. [handsFree] ends it on silence (after the wake word). */
+    fun startTalking(handsFree: Boolean = false): Boolean {
+        if (GadgetState.talk.value == Talk.LISTENING) return true
+        if (!micAllowed()) {
+            GadgetState.setReply("Microphone permission is needed to talk")
+            GadgetState.setTalk(Talk.ERROR)
+            return false
+        }
+        speaker.stop()
+        wakeWord.pause()
+        val ok = recorder.start(endOnSilence = handsFree) { scope.launch { stopTalking() } }
+        if (!ok) {
+            wakeWord.resume()
+            GadgetState.setReply("Couldn't open the microphone")
+            GadgetState.setTalk(Talk.ERROR)
+            return false
+        }
+        GadgetState.setHeard("")
+        GadgetState.setReply("")
+        GadgetState.setTalk(Talk.LISTENING)
+        return true
+    }
+
+    fun stopTalking() {
+        if (GadgetState.talk.value != Talk.LISTENING) return
+        val wav = recorder.stop()
+        wakeWord.resume()
+        if (wav == null) {
+            GadgetState.setTalk(Talk.IDLE)
+            return
+        }
+        talk(null, wav)
+    }
+
+    fun micLevel(): Float = recorder.level
+
+    private fun onWake() {
+        GadgetState.log("wake word heard")
+        if (GadgetState.link.value != Link.CONNECTED) {
+            wakeWord.resume()
+            return
+        }
+        bringToFront(force = true)
+        val beep = android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 60)
+        beep.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 150)
+        scope.launch {
+            delay(400)
+            beep.release()
+        }
+        if (!startTalking(handsFree = true)) wakeWord.resume()
+    }
+
+    /** (Re)apply the wake-word setting; returns an error message if it can't run. */
+    fun applyWakeWord(): String? {
+        val prefs = Prefs(this)
+        if (!prefs.wakeWordEnabled) {
+            wakeWord.stop()
+            return null
+        }
+        if (!micAllowed()) return "Microphone permission is needed for the wake word"
+        val error = wakeWord.start(prefs.wakePhrase)
+        if (error != null) GadgetState.log("wake word: $error")
+        return error
+    }
+
+    fun wakeModelPresent() = wakeWord.modelPresent
 
     // -- Pairing --------------------------------------------------------------------
 
@@ -277,8 +435,10 @@ class GadgetService : Service() {
 
     // -- Screen ---------------------------------------------------------------------
 
-    private fun bringToFront() {
-        if (!Prefs(this).comeToFront || MainActivity.visible) return
+    private fun bringToFront() = bringToFront(force = false)
+
+    private fun bringToFront(force: Boolean) {
+        if ((!force && !Prefs(this).comeToFront) || MainActivity.visible) return
         @Suppress("DEPRECATION")
         getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "museecho:show")
@@ -295,7 +455,11 @@ class GadgetService : Service() {
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Muse connection", NotificationManager.IMPORTANCE_LOW))
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            // The microphone type keeps wake-word listening and voice notes
+            // allowed while another app is in front.
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && micAllowed()) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            startForeground(NOTIFICATION_ID, notification, type)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -331,6 +495,7 @@ class GadgetService : Service() {
         private const val CHANNEL = "muse"
         private const val NOTIFICATION_ID = 1
         const val PAIRING_WINDOW_MS = 10 * 60_000L
+        const val RING_MAX_MS = 2 * 60_000L
 
         @Volatile
         var instance: GadgetService? = null
@@ -386,4 +551,17 @@ class Prefs(context: Context) {
     var displayName: String
         get() = prefs.getString("display_name", null) ?: "Echo Show"
         set(v) = prefs.edit().putString("display_name", v).apply()
+
+    var museName: String
+        get() = prefs.getString("muse_name", null) ?: "Muse"
+        set(v) = prefs.edit().putString("muse_name", v).apply()
+
+    /** Hands-free wake word (see WakeWord). */
+    var wakeWordEnabled: Boolean
+        get() = prefs.getBoolean("wake_word", false)
+        set(v) = prefs.edit().putBoolean("wake_word", v).apply()
+
+    var wakePhrase: String
+        get() = prefs.getString("wake_phrase", null) ?: "hey muse"
+        set(v) = prefs.edit().putString("wake_phrase", v.trim().lowercase()).apply()
 }

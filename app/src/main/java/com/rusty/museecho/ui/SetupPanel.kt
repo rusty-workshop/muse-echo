@@ -57,6 +57,17 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var speak by remember { mutableStateOf(prefs.speakReplies) }
     var front by remember { mutableStateOf(prefs.comeToFront) }
     var confirmUnpair by remember { mutableStateOf(false) }
+    val bleOk = remember { actions.blePairingSupported() }
+    val museName by GadgetState.museName.collectAsState()
+    var nameField by remember { mutableStateOf(museName) }
+    var laptopHost by remember { mutableStateOf(actions.laptopHost()) }
+    var laptopToken by remember { mutableStateOf("") }
+    var hasLaptopToken by remember { mutableStateOf(actions.hasLaptopToken()) }
+    var laptopMessage by remember { mutableStateOf<String?>(null) }
+    var wakeOn by remember { mutableStateOf(actions.wakeWordEnabled()) }
+    var wakePhrase by remember { mutableStateOf(actions.wakePhrase()) }
+    var wakeMessage by remember { mutableStateOf<String?>(null) }
+    val wakeModel = remember { actions.wakeModelPresent() }
 
     Box(Modifier.fillMaxSize().background(Palette.night)) {
         Row(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp)) {
@@ -94,6 +105,9 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
 
                 SectionTitle("2 · Pair with the Muse app")
                 when {
+                    !bleOk && !paired -> Body("This Echo's system doesn't allow apps to use Bluetooth LE, so pair " +
+                        "from the laptop instead: run tools/pair-via-linux.sh in the muse-echo project, then follow " +
+                        "the Muse app steps it prints. The pairing is copied here automatically.")
                     paired && ble != BlePairing.ADVERTISING && ble != BlePairing.CONNECTED ->
                         Body("Paired ✓  ${if (link == Link.CONNECTED) "Connected to $linkDetail." else linkDetail}", Palette.teal)
                     else -> Body("On your phone: Muse app → Settings → Devices → turn on Developer mode, " +
@@ -108,7 +122,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                         else -> Palette.amber
                     })
                 }
-                if (ble == BlePairing.UNSUPPORTED) {
+                if (ble == BlePairing.UNSUPPORTED && bleOk) {
                     Body("Fallback: pair from a Linux machine with Bluetooth and copy the pairing over " +
                         "(tools/pair-via-linux.sh in the project).", Palette.muted)
                 }
@@ -116,7 +130,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (ble == BlePairing.ADVERTISING || ble == BlePairing.CONNECTED) {
                         OutlinedButton(onClick = actions::cancelPair) { Text("Stop pairing") }
-                    } else {
+                    } else if (bleOk) {
                         Button(onClick = actions::pair, enabled = hasToken) { Text(if (paired) "Pair again" else "Start pairing") }
                     }
                     if (paired) {
@@ -129,12 +143,59 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     }
                 }
 
+                SectionTitle("Name on screen")
+                Body("What the screen calls your Muse. Muse can also set this itself (display.set_profile).", Palette.muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = nameField, onValueChange = { nameField = it.take(32) }, singleLine = true,
+                        modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = { actions.setMuseName(nameField.trim()) },
+                        enabled = nameField.isNotBlank() && nameField.trim() != museName) { Text("Save") }
+                }
+
+                SectionTitle("Laptop link")
+                Body(if (hasLaptopToken) "Set up ✓  Muse can run your laptop shortcuts." else
+                    "Lets Muse run the laptop shortcuts Sofa's Coding Mode uses. Paste the token from " +
+                        "~/.config/sofa-laptop-companion/token on the laptop.", if (hasLaptopToken) Palette.teal else Palette.ink)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = laptopHost, onValueChange = { laptopHost = it }, singleLine = true,
+                        label = { Text("Host:port") }, modifier = Modifier.weight(0.9f))
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedTextField(value = laptopToken, onValueChange = { laptopToken = it }, singleLine = true,
+                        label = { Text("Token") }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        actions.saveLaptop(laptopHost, laptopToken.ifBlank { null })
+                        if (laptopToken.isNotBlank()) hasLaptopToken = true
+                        laptopToken = ""
+                        laptopMessage = "Saved"
+                    }) { Text("Save") }
+                }
+                laptopMessage?.let { Body(it, Palette.teal) }
+
+                SectionTitle("Wake word")
+                Body(if (wakeModel) "Say the phrase and talk; it sends when you stop. Recognised on the Echo, offline." else
+                    "The offline speech model isn't on the Echo yet.", if (wakeModel) Palette.muted else Palette.coral)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = wakePhrase, onValueChange = { wakePhrase = it.take(40) }, singleLine = true,
+                        label = { Text("Phrase") }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    Switch(checked = wakeOn, enabled = wakeModel, onCheckedChange = {
+                        wakeOn = it
+                        wakeMessage = actions.setWakeWord(it, wakePhrase)
+                    })
+                }
+                if (wakeOn && wakePhrase.trim().lowercase() != actions.wakePhrase()) {
+                    TextButton(onClick = { wakeMessage = actions.setWakeWord(true, wakePhrase) }) { Text("Use this phrase") }
+                }
+                wakeMessage?.let { Body(it, Palette.coral) }
+
                 SectionTitle("Behaviour")
                 ToggleRow("Speak Muse's replies", "Needs a text-to-speech engine (e.g. RHVoice from F-Droid)", speak) {
                     speak = it
                     prefs.speakReplies = it
                 }
-                ToggleRow("Come to the front", "When Muse shows something, jump over the dashboard, then step back after a minute idle", front) {
+                ToggleRow("Come to the front", "When Muse shows something, jump over other apps, then step back after a minute idle", front) {
                     front = it
                     prefs.comeToFront = it
                 }

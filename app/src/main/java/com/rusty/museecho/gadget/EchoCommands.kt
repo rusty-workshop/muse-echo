@@ -38,12 +38,15 @@ class EchoCommands(
     private val context: Context,
     private val speaker: Speaker,
     private val bringToFront: () -> Unit,
+    private val home: HomeCommands? = null,
 ) {
     private val http = OkHttpClient.Builder().callTimeout(45, TimeUnit.SECONDS).build()
     private val audio = context.getSystemService(AudioManager::class.java)
     private var player: MediaPlayer? = null
 
-    val specs: JsonObject = buildJsonObject {
+    val specs: JsonObject get() = JsonObject(ownSpecs + (home?.specs ?: JsonObject(emptyMap())))
+
+    private val ownSpecs: JsonObject = buildJsonObject {
         spec("device.health",
             "Echo Show status: uptime, memory, storage, Wi-Fi signal, speaker volume, screen state and app version. " +
                 "The Echo Show runs on mains power and has no battery.")
@@ -78,6 +81,10 @@ class EchoCommands(
             required = mapOf("url" to param("string", "http:// or https:// URL of the audio.")),
             timeoutMs = 45_000)
         spec("audio.stop", "Stop audio started with audio.play_url.")
+        spec("display.set_profile",
+            "Tell the Echo Show your name, so its screen says it instead of \"Muse\" " +
+                "(e.g. \"Tap the mic to talk to <name>\"). Call this once with your own name.",
+            required = mapOf("name" to param("string", "Your name, as you'd like it shown.")))
     }
 
     suspend fun run(command: String, params: JsonObject, timeoutMs: Long?): JsonObject = try {
@@ -95,7 +102,8 @@ class EchoCommands(
                 "voice.configure" -> volume(params.int("volume"))
                 "audio.play_url" -> playUrl(params.string("url"))
                 "audio.stop" -> stopAudio()
-                else -> commandError("unknown command: $command")
+                "display.set_profile" -> setProfile(params.string("name"))
+                else -> home?.run(command, params) ?: commandError("unknown command: $command")
             }
         }
     } catch (e: TimeoutCancellationException) {
@@ -249,6 +257,14 @@ class EchoCommands(
                 commandError("couldn't play that URL: ${it.message}")
             },
         )
+    }
+
+    private fun setProfile(name: String?): JsonObject {
+        val clean = name?.trim()?.take(32)
+        if (clean.isNullOrEmpty()) return commandError("name is required")
+        Prefs(context).museName = clean
+        GadgetState.setMuseName(clean)
+        return commandOk(buildJsonObject { put("name", clean) })
     }
 
     private fun stopAudio(): JsonObject {

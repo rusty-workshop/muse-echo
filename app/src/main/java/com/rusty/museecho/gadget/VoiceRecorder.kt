@@ -24,8 +24,13 @@ class VoiceRecorder {
     var level = 0f
         private set
 
+    /**
+     * Start recording. [onLimit] fires when the note should end on its own:
+     * at [MAX_SECONDS], or with [endOnSilence] once speech has been followed
+     * by [SILENCE_MS] of quiet (or nothing was said within [NO_SPEECH_MS]).
+     */
     @SuppressLint("MissingPermission") // checked by the caller before start()
-    fun start(onLimit: () -> Unit): Boolean {
+    fun start(endOnSilence: Boolean = false, onLimit: () -> Unit): Boolean {
         val minBuf = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuf <= 0) return false
         val record = try {
@@ -44,6 +49,9 @@ class VoiceRecorder {
         worker = thread(name = "voice-note") {
             val buf = ShortArray(RATE / 20)
             val bytes = ByteBuffer.allocate(buf.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+            val started = System.currentTimeMillis()
+            var heardSpeech = false
+            var quietSince = 0L
             try {
                 while (recording) {
                     val n = record.read(buf, 0, buf.size)
@@ -55,6 +63,21 @@ class VoiceRecorder {
                         peak = maxOf(peak, kotlin.math.abs(buf[i].toInt()))
                     }
                     level = peak / 32768f
+                    if (endOnSilence) {
+                        val now = System.currentTimeMillis()
+                        if (level > SPEECH_LEVEL) {
+                            heardSpeech = true
+                            quietSince = 0L
+                        } else if (quietSince == 0L) {
+                            quietSince = now
+                        }
+                        val done = if (heardSpeech) quietSince != 0L && now - quietSince >= SILENCE_MS
+                        else now - started >= NO_SPEECH_MS
+                        if (done) {
+                            recording = false
+                            onLimit()
+                        }
+                    }
                     synchronized(pcm) {
                         pcm.write(bytes.array(), 0, n * 2)
                         if (pcm.size() >= MAX_SECONDS * RATE * 2) {
@@ -92,6 +115,9 @@ class VoiceRecorder {
         const val RATE = 16_000
         const val MAX_SECONDS = 30
         const val MIN_MS = 400
+        const val SPEECH_LEVEL = 0.06f
+        const val SILENCE_MS = 1_300L
+        const val NO_SPEECH_MS = 5_000L
 
         fun wav(pcm: ByteArray, rate: Int = RATE): ByteArray {
             val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {

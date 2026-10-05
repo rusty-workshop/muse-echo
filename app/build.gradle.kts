@@ -19,7 +19,11 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.2.0"
+        // The Echo Show 5 is 32-bit ARM; keeps Vosk's native libs for other ABIs out of the APK.
+        ndk {
+            abiFilters += "armeabi-v7a"
+        }
     }
 
     buildTypes {
@@ -72,6 +76,11 @@ dependencies {
     // whole protocol uses BouncyCastle's lightweight API (no JCA provider
     // registration, so it never shadows Android's own "BC").
     implementation(libs.bouncycastle)
+    // Offline wake-word spotting (Vosk, Apache-2.0); JNA is its native bridge.
+    implementation(libs.vosk.android) {
+        exclude(group = "net.java.dev.jna")
+    }
+    implementation("${libs.jna.get()}@aar")
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

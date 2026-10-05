@@ -53,6 +53,14 @@ object GadgetState {
     private val _bleDetail = MutableStateFlow("")
     val bleDetail: StateFlow<String> = _bleDetail.asStateFlow()
 
+    /** What the screen calls the Muse (set by Muse via display.set_profile, or in setup). */
+    private val _museName = MutableStateFlow("Muse")
+    val museName: StateFlow<String> = _museName.asStateFlow()
+
+    fun setMuseName(name: String) {
+        _museName.value = name.ifBlank { "Muse" }
+    }
+
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log.asStateFlow()
 

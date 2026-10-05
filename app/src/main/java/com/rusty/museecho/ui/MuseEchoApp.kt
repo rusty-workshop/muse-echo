@@ -92,6 +92,19 @@ interface UiActions {
     fun isPaired(): Boolean
     fun bleName(): String
     fun nodeId(): String
+    fun dismissRinging()
+    fun cancelTimer(id: String)
+    fun blePairingSupported(): Boolean
+    fun setMuseName(name: String)
+    fun laptopHost(): String
+    fun hasLaptopToken(): Boolean
+    fun saveLaptop(host: String, token: String?)
+    fun timers(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.Countdown>>
+    fun ringing(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.Countdown>>
+    fun wakeWordEnabled(): Boolean
+    fun wakePhrase(): String
+    fun wakeModelPresent(): Boolean
+    fun setWakeWord(enabled: Boolean, phrase: String): String?
 }
 
 internal object Palette {
@@ -133,6 +146,8 @@ fun MuseEchoApp(actions: UiActions) {
             Captions(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 120.dp, bottom = 18.dp), actions)
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
 
+            TimerChips(Modifier.align(Alignment.TopCenter).padding(top = 12.dp), actions)
+            RingScreen(actions)
             if (showKeyboard) TypeSheet(onSend = { actions.sendText(it); showKeyboard = false }, onClose = { showKeyboard = false })
             if (showSetup) SetupPanel(actions, onClose = { showSetup = false })
         }
@@ -146,6 +161,7 @@ private fun IdleFace() {
     val drift by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(14000, easing = LinearEasing)), label = "drift")
     val talk by GadgetState.talk.collectAsState()
     val link by GadgetState.link.collectAsState()
+    val name by GadgetState.museName.collectAsState()
     val now = rememberNow()
 
     Row(Modifier.fillMaxSize().padding(horizontal = 40.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -173,9 +189,9 @@ private fun IdleFace() {
             Spacer(Modifier.height(10.dp))
             Text(
                 when (link) {
-                    Link.CONNECTED -> "Tap the mic to talk to Muse"
-                    Link.NOT_PAIRED, Link.NO_TOKEN -> "Open setup (top right) to pair with Muse"
-                    else -> "Connecting to Muse…"
+                    Link.CONNECTED -> "Tap the mic to talk to $name"
+                    Link.NOT_PAIRED, Link.NO_TOKEN -> "Open setup (top right) to pair with $name"
+                    else -> "Connecting to $name…"
                 },
                 color = Palette.muted.copy(alpha = 0.8f), fontSize = 15.sp,
             )
@@ -227,8 +243,9 @@ private fun TextScreen(s: Screen.Text, onDismiss: () -> Unit) {
 private fun StatusChip(modifier: Modifier) {
     val link by GadgetState.link.collectAsState()
     val detail by GadgetState.linkDetail.collectAsState()
+    val name by GadgetState.museName.collectAsState()
     val (color, label) = when (link) {
-        Link.CONNECTED -> Palette.teal to "Connected to ${detail.ifEmpty { "Muse" }}"
+        Link.CONNECTED -> Palette.teal to "Connected to ${if (detail.isEmpty() || detail == "Muse") name else detail}"
         Link.CONNECTING -> Palette.amber to "Connecting"
         Link.RECONNECTING -> Palette.amber to detail.ifEmpty { "Reconnecting" }
         Link.NOT_PAIRED -> Palette.coral to "Not paired"
@@ -258,7 +275,7 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
             val status = when (talk) {
                 Talk.LISTENING -> "Listening… tap the button again to send"
                 Talk.SENDING -> "Sending to Muse…"
-                Talk.WAITING -> "Muse is thinking…"
+                Talk.WAITING -> "${GadgetState.museName.value} is thinking…"
                 else -> null
             }
             if (heard.isNotEmpty()) Text("“$heard”", color = Palette.muted, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -313,6 +330,56 @@ private fun TypeSheet(onSend: (String) -> Unit, onClose: () -> Unit) {
                 keyboardActions = KeyboardActions(onSend = { if (text.isNotBlank()) onSend(text.trim()) }),
             )
             TextButton(onClick = { if (text.isNotBlank()) onSend(text.trim()) }) { Text("Send") }
+        }
+    }
+}
+
+/** Running timers and upcoming alarms, as small chips at the top; tap one to cancel it. */
+@Composable
+private fun TimerChips(modifier: Modifier, actions: UiActions) {
+    val items by actions.timers().collectAsState()
+    val now = rememberNow()
+    // Alarms only show when they're within the next 12 hours, to keep the face calm.
+    val shown = items.filter { !it.isAlarm || it.dueAtMs - now.time < 12 * 3600_000L }.take(3)
+    if (shown.isEmpty()) return
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        shown.forEach { item ->
+            Row(
+                Modifier.background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50))
+                    .clickable { actions.cancelTimer(item.id) }.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (item.isAlarm) "⏰" else "⏱", fontSize = 13.sp)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (item.isAlarm) "${item.label} · ${SimpleDateFormat("h:mm a", Locale.US).format(Date(item.dueAtMs))}"
+                    else "${item.label} · ${com.rusty.museecho.integrations.Timers.clock(item.dueAtMs - now.time)}",
+                    color = Palette.ink, fontSize = 13.sp, maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** Full-screen while a timer or alarm rings; any tap silences it. */
+@Composable
+private fun RingScreen(actions: UiActions) {
+    val ringing by actions.ringing().collectAsState()
+    if (ringing.isEmpty()) return
+    val transition = rememberInfiniteTransition(label = "ring")
+    val pulse by transition.animateFloat(0.85f, 1.1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pulse")
+    Box(
+        Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Palette.coral.copy(alpha = 0.55f), Palette.night)))
+            .clickable(onClick = actions::dismissRinging),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (ringing.any { it.isAlarm }) "⏰" else "⏱", fontSize = 64.sp, modifier = Modifier.scale(pulse))
+            Spacer(Modifier.height(8.dp))
+            Text(ringing.joinToString(" · ") { it.label }, color = Palette.ink, fontSize = 34.sp,
+                fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(6.dp))
+            Text("Tap anywhere to stop", color = Palette.muted, fontSize = 16.sp)
         }
     }
 }
