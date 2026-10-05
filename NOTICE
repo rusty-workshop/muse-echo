@@ -1,0 +1,19 @@
+Muse Echo
+Copyright (C) 2026 Rusty
+
+This app is licensed under the GNU Affero General Public License v3.0 or later
+(see LICENSE).
+
+Portions are ported from Meta's Muse Gadget SDK
+(https://github.com/facebookincubator/muse-gadget-sdk), Copyright (c) Meta
+Platforms, Inc. and affiliates, licensed under the Apache License, Version 2.0:
+the BLE pairing protocol, setup commands, Noise XX session, HTTP-over-Noise
+envelopes, link control session and device API client (app/src/main/java/
+com/rusty/museecho/protocol and .../noise), and the reply-event handling
+modelled on the ESP32 firmware's muse_chat_link.c. The test vectors in
+app/src/test/resources/link_pairing_v5.json are copied unchanged from that
+repository; noise_vectors.json is generated from its Python reference code by
+tools/gen_noise_vectors.py.
+
+Using this gadget with Muse requires your own SDK token and is subject to the
+Gadget SDK Terms at https://gadgets.muse.ai/sdk-terms.

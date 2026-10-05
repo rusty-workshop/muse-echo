@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.MuseEcho" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/night</item>
+        <item name="android:statusBarColor">@color/night</item>
+        <item name="android:navigationBarColor">@color/night</item>
+    </style>
+    <color name="night">#FF0E0B14</color>
+    <color name="violet">#FF8B6CFF</color>
+</resources>

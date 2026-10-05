@@ -1,0 +1,17 @@
+/app/build/
+/app/release/
+/build/
+/captures/
+.cxx/
+.DS_Store
+.externalNativeBuild/
+.gradle/
+*.hprof
+/.idea/
+*.iml
+local.properties
+
+# Local build outputs / SDK path
+local.properties
+__pycache__/
+.kotlin/
