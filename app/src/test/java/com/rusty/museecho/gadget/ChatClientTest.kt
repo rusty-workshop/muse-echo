@@ -57,15 +57,18 @@ class ChatClientTest {
 
             vm.respond(sub.streamId, 200, ByteArray(0), end = false)
             // Reply events, one split across two frames, before and after the ack.
+            val ctx = """"chat_context":{"device_id":"homelink-abcdef"}"""
+            // Reply events, one line split across two frames, before and after the ack.
             vm.reply(sub.streamId, BodyChunk(
-                """{"type":"event","seq":1,"payload":{"event_name":"message.user","message_id":"u1","content":"what time is it"}}
-{"type":"event","seq":2,"payload":{"event_name":"delta.text_append","message_id":"a1","reply_to_message_id":"u1","text":"It's "}}
-{"type":"event","seq":3,"payload":{"event_na""".toByteArray()))
-            vm.respond(post.streamId, 200, """{"result":{"message_id":"u1"}}""".toByteArray(), end = true)
+                ("""{"event":"message.user","payload":{$ctx,"display_text":"what time is it","message_id":"u1"},"seq":1,"type":"event"}
+{"event":"delta.message_start","payload":{$ctx,"message_id":"assistant-msg-a1","reply_to_message_id":""},"seq":2,"type":"event"}
+{"event":"delta.text_append","payload":{"message_id":"assistant-msg-a1","text":"It's "},"seq":3,"type":"event"}
+{"event":"delta.text_ap""").toByteArray()))
+            vm.respond(post.streamId, 200, """{"channel":"main","message_id":"u1","reply_to_message_id":"u1"}""".toByteArray(), end = true)
             vm.reply(sub.streamId, BodyChunk(
-                """me":"delta.text_append","message_id":"a1","text":"noon."}}
-{"type":"event","seq":4,"payload":{"event_name":"delta.message_done","message_id":"a1","reply_to_message_id":"u1"}}
-""".toByteArray()))
+                ("""pend","payload":{"message_id":"assistant-msg-a1","text":"noon."},"seq":4,"type":"event"}
+{"event":"delta.message_done","payload":{$ctx,"message_id":"assistant-msg-a1"},"seq":5,"type":"event"}
+""").toByteArray()))
 
             assertEquals("It's noon.", turn.await())
             assertTrue(updates.contains("It's noon."))

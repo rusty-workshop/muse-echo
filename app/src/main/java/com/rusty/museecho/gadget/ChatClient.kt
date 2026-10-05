@@ -35,7 +35,7 @@ class ChatClient(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     suspend fun turn(text: String?, wav: ByteArray?, onUpdate: (ReplyTracker) -> Unit): String {
         val link = session()?.takeIf { it.registeredAt != null } ?: throw ChatError("Not connected to Muse")
-        val tracker = ReplyTracker()
+        val tracker = ReplyTracker(nodeId)
         val sub = link.openRequest(
             "POST", LinkSession.SUBSCRIBE_PATH,
             LinkSession.jsonHeaders(APP_ID, accept = "application/x-ndjson"), "{}".toByteArray(),
