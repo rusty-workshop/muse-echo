@@ -101,6 +101,8 @@ interface UiActions {
     fun saveLaptop(host: String, token: String?)
     fun timers(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.Countdown>>
     fun ringing(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.Countdown>>
+    fun showImage(bitmap: android.graphics.Bitmap)
+    fun refreshQuiet()
     fun wakeWordEnabled(): Boolean
     fun wakePhrase(): String
     fun wakeModelPresent(): Boolean
@@ -156,9 +158,20 @@ fun MuseEchoApp(actions: UiActions) {
 
 @Composable
 private fun IdleFace() {
-    val transition = rememberInfiniteTransition(label = "orb")
-    val breathe by transition.animateFloat(0.92f, 1.06f, infiniteRepeatable(tween(3600), RepeatMode.Reverse), label = "breathe")
-    val drift by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(14000, easing = LinearEasing)), label = "drift")
+    // The orb moves slowly, so 12 frames a second looks the same as 60 and
+    // costs a fraction of the CPU; during quiet hours it holds still.
+    val quiet by GadgetState.quiet.collectAsState()
+    var t by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(quiet) {
+        if (quiet) return@LaunchedEffect
+        val start = System.currentTimeMillis() - (t * 1000).toLong()
+        while (true) {
+            t = (System.currentTimeMillis() - start) / 1000f
+            delay(83)
+        }
+    }
+    val breathe = 0.99f + 0.07f * kotlin.math.sin(t * 2 * Math.PI.toFloat() / 7.2f)
+    val drift = (t / 14f) % 1f
     val talk by GadgetState.talk.collectAsState()
     val link by GadgetState.link.collectAsState()
     val name by GadgetState.museName.collectAsState()
@@ -266,23 +279,41 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
     val heard by GadgetState.heard.collectAsState()
     val reply by GadgetState.reply.collectAsState()
     val talk by GadgetState.talk.collectAsState()
+    val images by GadgetState.replyImages.collectAsState()
+    val source by GadgetState.replySource.collectAsState()
+    val followUp by GadgetState.followUp.collectAsState()
     val visible = heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE
     AnimatedVisibility(visible, modifier, enter = fadeIn(), exit = fadeOut()) {
         Column(
             Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.92f), RoundedCornerShape(18.dp))
                 .clickable(onClick = actions::clearCaptions).padding(horizontal = 18.dp, vertical = 12.dp),
         ) {
-            val status = when (talk) {
-                Talk.LISTENING -> "Listening… tap the button again to send"
-                Talk.SENDING -> "Sending to Muse…"
-                Talk.WAITING -> "${GadgetState.museName.value} is thinking…"
+            val name = GadgetState.museName.value
+            val status = when {
+                talk == Talk.LISTENING && followUp -> "Listening for your reply…"
+                talk == Talk.LISTENING -> "Listening… tap the button again to send"
+                talk == Talk.SENDING -> "Sending to $name…"
+                talk == Talk.WAITING -> "$name is thinking…"
                 else -> null
             }
+            source?.let { Text(it, color = Palette.amber, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             if (heard.isNotEmpty()) Text("“$heard”", color = Palette.muted, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (status != null) Text(status, color = Palette.amber, fontSize = 15.sp)
-            if (reply.isNotEmpty()) {
-                Column(Modifier.heightIn(max = 150.dp).verticalScroll(rememberScrollState())) {
-                    Text(reply, color = if (talk == Talk.ERROR) Palette.coral else Palette.ink, fontSize = 20.sp, lineHeight = 27.sp)
+            if (reply.isNotEmpty() || images.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.Top) {
+                    if (reply.isNotEmpty()) {
+                        Column(Modifier.weight(1f).heightIn(max = 150.dp).verticalScroll(rememberScrollState())) {
+                            Text(com.rusty.museecho.gadget.Markdown.toAnnotated(reply),
+                                color = if (talk == Talk.ERROR) Palette.coral else Palette.ink, fontSize = 20.sp, lineHeight = 27.sp)
+                        }
+                    }
+                    images.take(3).forEach { bitmap ->
+                        Spacer(Modifier.width(10.dp))
+                        Image(bitmap.asImageBitmap(), contentDescription = "Picture from $name",
+                            modifier = Modifier.size(width = 120.dp, height = 90.dp).clip(RoundedCornerShape(10.dp))
+                                .clickable { actions.showImage(bitmap) },
+                            contentScale = ContentScale.Crop)
+                    }
                 }
             }
         }

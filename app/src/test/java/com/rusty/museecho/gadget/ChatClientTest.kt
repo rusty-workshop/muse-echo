@@ -2,7 +2,6 @@ package com.rusty.museecho.gadget
 
 import com.rusty.museecho.noise.ApplicationRequest
 import com.rusty.museecho.noise.BodyChunk
-import com.rusty.museecho.noise.Reset
 import com.rusty.museecho.protocol.DeviceDescription
 import com.rusty.museecho.protocol.FakeVm
 import com.rusty.museecho.protocol.LinkSession
@@ -10,6 +9,7 @@ import com.rusty.museecho.protocol.MessageDecoder
 import com.rusty.museecho.protocol.str
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -40,13 +40,17 @@ class ChatClientTest {
             }), end = false)
             while (session.registeredAt == null) delay(10)
 
-            val updates = mutableListOf<String>()
             val chat = ChatClient({ session }, "homelink-abcdef")
-            val wav = ByteArray(100) { 1 }
-            val turn = async { chat.turn(null, wav) { updates += it.replyText } }
-
+            val feedJob = launch { chat.runFeed(session) }
             val sub = vm.next()
             assertEquals("/chat/subscribe", (sub.value as ApplicationRequest).path)
+            vm.respond(sub.streamId, 200, ByteArray(0), end = false)
+            while (!chat.feedOpen) delay(10)
+
+            val updates = mutableListOf<String>()
+            val wav = ByteArray(100) { 1 }
+            val turn = async { chat.turn(null, wav) { _, r -> r?.let { updates += it.text } } }
+
             val post = vm.next()
             val postReq = post.value as ApplicationRequest
             assertEquals("/chat/stream", postReq.path)
@@ -55,10 +59,8 @@ class ChatClientTest {
             assertEquals("audio/wav", item.str("mime_type"))
             assertEquals(java.util.Base64.getEncoder().encodeToString(wav), item.str("data_base64"))
 
-            vm.respond(sub.streamId, 200, ByteArray(0), end = false)
-            // Reply events, one split across two frames, before and after the ack.
             val ctx = """"chat_context":{"device_id":"homelink-abcdef"}"""
-            // Reply events, one line split across two frames, before and after the ack.
+            // Reply events, one line split across two frames, around the ack.
             vm.reply(sub.streamId, BodyChunk(
                 ("""{"event":"message.user","payload":{$ctx,"display_text":"what time is it","message_id":"u1"},"seq":1,"type":"event"}
 {"event":"delta.message_start","payload":{$ctx,"message_id":"assistant-msg-a1","reply_to_message_id":""},"seq":2,"type":"event"}
@@ -70,12 +72,9 @@ class ChatClientTest {
 {"event":"delta.message_done","payload":{$ctx,"message_id":"assistant-msg-a1"},"seq":5,"type":"event"}
 """).toByteArray()))
 
-            assertEquals("It's noon.", turn.await())
+            assertEquals("It's noon.", turn.await()!!.text)
             assertTrue(updates.contains("It's noon."))
-            // The subscription is cancelled once the turn settles.
-            val cancel = vm.next()
-            assertEquals(sub.streamId, cancel.streamId)
-            assertTrue(cancel.value is Reset)
+            feedJob.cancel()
 
             vm.control(control, buildJsonObject { put("event", "link.unpaired") })
             run.await()

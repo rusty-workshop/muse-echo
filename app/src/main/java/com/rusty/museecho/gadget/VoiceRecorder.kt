@@ -19,6 +19,10 @@ class VoiceRecorder {
     private var worker: Thread? = null
     private val pcm = ByteArrayOutputStream()
 
+    /** Whether speech was heard in a hands-free note (set while recording). */
+    @Volatile
+    private var spoke = true
+
     /** Live input level, 0..1, for the UI meter. */
     @Volatile
     var level = 0f
@@ -44,6 +48,7 @@ class VoiceRecorder {
             return false
         }
         synchronized(pcm) { pcm.reset() }
+        spoke = !endOnSilence
         recording = true
         record.startRecording()
         worker = thread(name = "voice-note") {
@@ -67,6 +72,7 @@ class VoiceRecorder {
                         val now = System.currentTimeMillis()
                         if (level > SPEECH_LEVEL) {
                             heardSpeech = true
+                            spoke = true
                             quietSince = 0L
                         } else if (quietSince == 0L) {
                             quietSince = now
@@ -95,13 +101,13 @@ class VoiceRecorder {
         return true
     }
 
-    /** Stops and returns the note as WAV, or null if it was too short to be speech. */
+    /** Stops and returns the note as WAV, or null if it was too short, or (hands-free) nobody spoke. */
     fun stop(): ByteArray? {
         recording = false
-        worker?.join(1000)
+        if (worker != Thread.currentThread()) worker?.join(1000)
         worker = null
         val data = synchronized(pcm) { pcm.toByteArray() }
-        if (data.size < RATE * 2 * MIN_MS / 1000) return null
+        if (data.size < RATE * 2 * MIN_MS / 1000 || !spoke) return null
         return wav(data)
     }
 
@@ -113,7 +119,7 @@ class VoiceRecorder {
 
     companion object {
         const val RATE = 16_000
-        const val MAX_SECONDS = 30
+        const val MAX_SECONDS = 90
         const val MIN_MS = 400
         const val SPEECH_LEVEL = 0.06f
         const val SILENCE_MS = 1_300L

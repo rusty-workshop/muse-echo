@@ -57,6 +57,14 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var speak by remember { mutableStateOf(prefs.speakReplies) }
     var front by remember { mutableStateOf(prefs.comeToFront) }
     var confirmUnpair by remember { mutableStateOf(false) }
+    var showPairing by remember { mutableStateOf(false) }
+    var followUp by remember { mutableStateOf(prefs.followUp) }
+    var museMsgs by remember { mutableStateOf(prefs.showMuseInitiated) }
+    var gadgetAlerts by remember { mutableStateOf(prefs.showGadgetAlerts) }
+    var quietOn by remember { mutableStateOf(prefs.quietEnabled) }
+    var quietStart by remember { mutableStateOf(prefs.quietStart) }
+    var quietEnd by remember { mutableStateOf(prefs.quietEnd) }
+    var quietMessage by remember { mutableStateOf<String?>(null) }
     val bleOk = remember { actions.blePairingSupported() }
     val museName by GadgetState.museName.collectAsState()
     var nameField by remember { mutableStateOf(museName) }
@@ -79,68 +87,84 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 Body("This Echo Show is ${actions.bleName()} (${actions.nodeId()}).", Palette.muted)
 
-                SectionTitle("1 · SDK token")
-                if (hasToken) {
-                    Body("Saved ✓  You can replace it below.", Palette.teal)
-                } else {
-                    Body("Get one at gadgets.muse.ai → Account → SDK tokens, then paste it here. " +
-                        "Or: adb push sdk_token /sdcard/Android/data/com.rusty.museecho/files/ and restart the app.")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = token, onValueChange = { token = it; tokenMessage = null },
-                        placeholder = { Text("mgst_…") }, singleLine = true, modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        tokenMessage = actions.saveToken(token)
-                        if (tokenMessage == null) {
-                            hasToken = true
-                            token = ""
-                            tokenMessage = "Saved"
-                        }
-                    }, enabled = token.isNotBlank()) { Text("Save") }
-                }
-                tokenMessage?.let { Body(it, if (it == "Saved") Palette.teal else Palette.coral) }
-
-                SectionTitle("2 · Pair with the Muse app")
-                when {
-                    !bleOk && !paired -> Body("This Echo's system doesn't allow apps to use Bluetooth LE, so pair " +
-                        "from the laptop instead: run tools/pair-via-linux.sh in the muse-echo project, then follow " +
-                        "the Muse app steps it prints. The pairing is copied here automatically.")
-                    paired && ble != BlePairing.ADVERTISING && ble != BlePairing.CONNECTED ->
-                        Body("Paired ✓  ${if (link == Link.CONNECTED) "Connected to $linkDetail." else linkDetail}", Palette.teal)
-                    else -> Body("On your phone: Muse app → Settings → Devices → turn on Developer mode, " +
-                        "then Add device (+) and pick ${actions.bleName()}. Muse warns it's a community " +
-                        "device; continue. When it asks for Wi-Fi, pick the network shown (no password needed).")
-                }
-                if (bleDetail.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    Body(bleDetail, when (ble) {
-                        BlePairing.UNSUPPORTED, BlePairing.FAILED -> Palette.coral
-                        BlePairing.DONE -> Palette.teal
-                        else -> Palette.amber
-                    })
-                }
-                if (ble == BlePairing.UNSUPPORTED && bleOk) {
-                    Body("Fallback: pair from a Linux machine with Bluetooth and copy the pairing over " +
-                        "(tools/pair-via-linux.sh in the project).", Palette.muted)
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (ble == BlePairing.ADVERTISING || ble == BlePairing.CONNECTED) {
-                        OutlinedButton(onClick = actions::cancelPair) { Text("Stop pairing") }
-                    } else if (bleOk) {
-                        Button(onClick = actions::pair, enabled = hasToken) { Text(if (paired) "Pair again" else "Start pairing") }
-                    }
-                    if (paired) {
+                if (paired && !showPairing) {
+                    SectionTitle("Muse")
+                    Body("Paired ✓  ${if (link == Link.CONNECTED) "Connected to $museName." else linkDetail.ifEmpty { "Connecting…" }}", Palette.teal)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = actions::reconnect) { Text("Reconnect") }
                         if (confirmUnpair) {
                             Button(onClick = { actions.unpair(); confirmUnpair = false }) { Text("Really unpair") }
                         } else {
                             OutlinedButton(onClick = { confirmUnpair = true }) { Text("Unpair") }
                         }
+                        TextButton(onClick = { showPairing = true }) { Text("Token & pairing…") }
                     }
+                } else {
+                    SectionTitle("1 · SDK token")
+                    if (hasToken) {
+                        Body("Saved ✓  You can replace it below.", Palette.teal)
+                    } else {
+                        Body("Get one at gadgets.muse.ai → Account → SDK tokens, then paste it here. " +
+                            "Or: adb push sdk_token /sdcard/Android/data/com.rusty.museecho/files/ and restart the app.")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = token, onValueChange = { token = it; tokenMessage = null },
+                            placeholder = { Text("mgst_…") }, singleLine = true, modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = {
+                            tokenMessage = actions.saveToken(token)
+                            if (tokenMessage == null) {
+                                hasToken = true
+                                token = ""
+                                tokenMessage = "Saved"
+                            }
+                        }, enabled = token.isNotBlank()) { Text("Save") }
+                    }
+                    tokenMessage?.let { Body(it, if (it == "Saved") Palette.teal else Palette.coral) }
+
+                    SectionTitle("2 · Pair with the Muse app")
+                    when {
+                        !bleOk && !paired -> Body("This Echo's system doesn't allow apps to use Bluetooth LE, so pair " +
+                            "from the laptop instead: run tools/pair-via-linux.sh in the muse-echo project, then follow " +
+                            "the Muse app steps it prints. The pairing is copied here automatically.")
+                        paired && ble != BlePairing.ADVERTISING && ble != BlePairing.CONNECTED ->
+                            Body("Paired ✓  ${if (link == Link.CONNECTED) "Connected to $linkDetail." else linkDetail}", Palette.teal)
+                        else -> Body("On your phone: Muse app → Settings → Devices → turn on Developer mode, " +
+                            "then Add device (+) and pick ${actions.bleName()}. Muse warns it's a community " +
+                            "device; continue. When it asks for Wi-Fi, pick the network shown (no password needed).")
+                    }
+                    if (bleDetail.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Body(bleDetail, when (ble) {
+                            BlePairing.UNSUPPORTED, BlePairing.FAILED -> Palette.coral
+                            BlePairing.DONE -> Palette.teal
+                            else -> Palette.amber
+                        })
+                    }
+                    if (ble == BlePairing.UNSUPPORTED && bleOk) {
+                        Body("Fallback: pair from a Linux machine with Bluetooth and copy the pairing over " +
+                            "(tools/pair-via-linux.sh in the project).", Palette.muted)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (ble == BlePairing.ADVERTISING || ble == BlePairing.CONNECTED) {
+                            OutlinedButton(onClick = actions::cancelPair) { Text("Stop pairing") }
+                        } else if (bleOk) {
+                            Button(onClick = actions::pair, enabled = hasToken) { Text(if (paired) "Pair again" else "Start pairing") }
+                        }
+                        if (paired) {
+                            OutlinedButton(onClick = actions::reconnect) { Text("Reconnect") }
+                            if (confirmUnpair) {
+                                Button(onClick = { actions.unpair(); confirmUnpair = false }) { Text("Really unpair") }
+                            } else {
+                                OutlinedButton(onClick = { confirmUnpair = true }) { Text("Unpair") }
+                            }
+                        }
+                    }
+
                 }
 
                 SectionTitle("Name on screen")
@@ -199,6 +223,48 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     front = it
                     prefs.comeToFront = it
                 }
+                ToggleRow("Follow-up listening", "After $museName answers, listen a few seconds for your reply, no wake word needed", followUp) {
+                    followUp = it
+                    prefs.followUp = it
+                }
+                ToggleRow("Messages from $museName", "Show and speak things $museName sends on its own, like reminders", museMsgs) {
+                    museMsgs = it
+                    prefs.showMuseInitiated = it
+                }
+                ToggleRow("Gadget alerts", "Announce messages from your other gadgets (the server) and $museName's answer", gadgetAlerts) {
+                    gadgetAlerts = it
+                    prefs.showGadgetAlerts = it
+                }
+
+                SectionTitle("Quiet hours")
+                Body("No wake word, no speaking, a dim screen, soft timer beeps. Alarms still ring.", Palette.muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = quietStart, onValueChange = { quietStart = it.take(5) }, singleLine = true,
+                        label = { Text("From") }, modifier = Modifier.width(100.dp))
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedTextField(value = quietEnd, onValueChange = { quietEnd = it.take(5) }, singleLine = true,
+                        label = { Text("To") }, modifier = Modifier.width(100.dp))
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        val s1 = com.rusty.museecho.gadget.QuietHours.parse(quietStart)
+                        val e1 = com.rusty.museecho.gadget.QuietHours.parse(quietEnd)
+                        if (s1 == null || e1 == null) {
+                            quietMessage = "Use 24-hour times like 22:00"
+                        } else {
+                            prefs.quietStart = "%02d:%02d".format(s1.hour, s1.minute)
+                            prefs.quietEnd = "%02d:%02d".format(e1.hour, e1.minute)
+                            quietMessage = "Saved"
+                            actions.refreshQuiet()
+                        }
+                    }) { Text("Save") }
+                    Spacer(Modifier.weight(1f))
+                    Switch(checked = quietOn, onCheckedChange = {
+                        quietOn = it
+                        prefs.quietEnabled = it
+                        actions.refreshQuiet()
+                    })
+                }
+                quietMessage?.let { Body(it, if (it == "Saved") Palette.teal else Palette.coral) }
             }
             Spacer(Modifier.width(16.dp))
             Column(

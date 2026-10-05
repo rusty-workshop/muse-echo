@@ -40,6 +40,8 @@ class GadgetRunner(
     private val commands: JsonObject,
     private val runCommand: CommandRunner,
     private val now: () -> Long = System::currentTimeMillis,
+    /** Runs once the session is registered, until the session ends (cancelled with it). */
+    private val onRegistered: suspend (LinkSession) -> Unit = {},
 ) {
     /** Poked to skip the current wait, e.g. right after pairing finishes. */
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -131,6 +133,7 @@ class GadgetRunner(
             val watcher = launch {
                 while (session.registeredAt == null) delay(250)
                 GadgetState.setLink(Link.CONNECTED, friendlyName(vm))
+                onRegistered(session)
             }
             try {
                 session.run()

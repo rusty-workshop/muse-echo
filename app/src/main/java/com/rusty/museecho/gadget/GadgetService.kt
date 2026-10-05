@@ -15,6 +15,7 @@ import com.rusty.museecho.BuildConfig
 import com.rusty.museecho.MainActivity
 import com.rusty.museecho.R
 import com.rusty.museecho.ble.BleSetupServer
+import com.rusty.museecho.protocol.ChatFeed
 import com.rusty.museecho.protocol.Identity
 import com.rusty.museecho.protocol.MuseApi
 import com.rusty.museecho.protocol.OkHttpWsConnector
@@ -62,12 +63,18 @@ class GadgetService : Service() {
     lateinit var roku: com.rusty.museecho.integrations.Roku
         private set
     private val recorder = VoiceRecorder()
+    private val imageHttp = okhttp3.OkHttpClient.Builder().callTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
+    lateinit var errors: ErrorLog
+        private set
+    private val startedAt = System.currentTimeMillis()
+    private var disconnectedSince = 0L
     private lateinit var wakeWord: WakeWord
     private var chime: android.media.Ringtone? = null
 
     override fun onCreate() {
         super.onCreate()
         instance = this
+        errors = ErrorLog(java.io.File(filesDir, "errors.json")).also { it.installCrashHandler() }
         store = Store(filesDir)
         importDroppedFiles()
         identity = store.loadOrCreateIdentity()
@@ -80,7 +87,7 @@ class GadgetService : Service() {
         importDroppedSettings()
         GadgetState.setMuseName(Prefs(this).museName)
         val home = HomeCommands(this, roku, timers, laptop, ::bringToFront)
-        commands = EchoCommands(this, speaker, ::bringToFront, home)
+        commands = EchoCommands(this, speaker, ::bringToFront, home, ::isQuietNow, { healthExtras() })
         runner = GadgetRunner(
             store = store,
             identity = identity,
@@ -90,11 +97,15 @@ class GadgetService : Service() {
             version = BuildConfig.VERSION_NAME,
             commands = commands.specs,
             runCommand = commands::run,
+            onRegistered = { session -> chat.runFeed(session) },
         )
         chat = ChatClient({ runner.current }, identity.nodeId)
+        scope.launch { chat.updates.collect { runCatching { onFeedUpdate(it) } } }
         startInForeground()
         runnerJob = scope.launch { runner.run() }
         scope.launch { tickTimers() }
+        scope.launch { watchdog() }
+        com.rusty.museecho.BootReceiver.scheduleKeepAlive(this)
         wakeWord = WakeWord(
             modelDir = java.io.File(getExternalFilesDir(null), WakeWord.MODEL_DIR_NAME),
             onWake = { scope.launch { onWake() } },
@@ -150,6 +161,65 @@ class GadgetService : Service() {
         }
     }
 
+    // -- Self-healing --------------------------------------------------------------------
+
+    /**
+     * Once a minute: apply quiet hours, restart the wake word if it died, and
+     * kick the connection if it's been down a while (the runner's own backoff
+     * can sit at a minute; a poke retries now).
+     */
+    private suspend fun watchdog() {
+        while (true) {
+            val prefs = Prefs(this)
+            val quiet = QuietHours.isQuiet(prefs)
+            if (quiet != GadgetState.quiet.value) {
+                GadgetState.setQuiet(quiet)
+                GadgetState.log(if (quiet) "quiet hours started" else "quiet hours ended")
+                applyWakeWord()
+            } else if (prefs.wakeWordEnabled && !quiet && !wakeWord.listening && micAllowed() &&
+                GadgetState.talk.value != Talk.LISTENING
+            ) {
+                errors.add("wake word had stopped; restarted")
+                applyWakeWord()
+            }
+            if (GadgetState.link.value == Link.CONNECTED || store.loadPairing() == null) {
+                disconnectedSince = 0L
+            } else {
+                val now = System.currentTimeMillis()
+                if (disconnectedSince == 0L) disconnectedSince = now
+                if (now - disconnectedSince > RECONNECT_KICK_MS) {
+                    errors.add("disconnected for ${(now - disconnectedSince) / 60_000} min; reconnecting")
+                    disconnectedSince = now
+                    runner.poke()
+                }
+            }
+            delay(60_000)
+        }
+    }
+
+    /** Extra fields for device.health: how the app itself is doing. */
+    fun healthExtras() = kotlinx.serialization.json.buildJsonObject {
+        put("app_uptime_s", (System.currentTimeMillis() - startedAt) / 1000)
+        put("connected", GadgetState.link.value == Link.CONNECTED)
+        put("reply_feed_open", chat.feedOpen)
+        put("wake_word", when {
+            !Prefs(this@GadgetService).wakeWordEnabled -> "off"
+            GadgetState.quiet.value -> "paused for quiet hours"
+            wakeWord.listening -> "listening"
+            else -> "not running"
+        })
+        put("quiet_hours", GadgetState.quiet.value)
+        put("recent_errors", kotlinx.serialization.json.JsonArray(errors.read().takeLast(10).map { kotlinx.serialization.json.JsonPrimitive(it) }))
+    }
+
+    fun isQuietNow() = QuietHours.isQuiet(Prefs(this))
+
+    /** Apply a quiet-hours settings change now rather than at the next watchdog tick. */
+    fun refreshQuiet() {
+        GadgetState.setQuiet(isQuietNow())
+        applyWakeWord()
+    }
+
     // -- Timers -----------------------------------------------------------------------
 
     private suspend fun tickTimers() {
@@ -158,16 +228,23 @@ class GadgetService : Service() {
             if (rang.isNotEmpty()) {
                 GadgetState.log("ringing: ${rang.joinToString { it.label }}")
                 bringToFront(force = true)
-                startChime()
-                // Let the chime get going, then say what it's for.
-                delay(1_500)
-                speaker.speak(rang.joinToString(". ") { if (it.isAlarm) it.label else "${it.label} is done" })
+                val quiet = QuietHours.isQuiet(Prefs(this))
+                if (quiet && rang.none { it.isAlarm }) {
+                    // Overnight, timers get a soft beep; alarms still ring properly.
+                    softChime()
+                } else {
+                    startChime()
+                    // Let the chime get going, then say what it's for.
+                    delay(1_500)
+                    if (!quiet) speaker.speak(rang.joinToString(". ") { if (it.isAlarm) it.label else "${it.label} is done" })
+                }
                 scope.launch {
                     delay(RING_MAX_MS)
                     if (timers.ringing.value.isNotEmpty()) timers.dismiss()
                 }
             }
             if (timers.ringing.value.isEmpty()) stopChime()
+            GadgetState.setRinging(timers.ringing.value.isNotEmpty())
             delay(1_000)
         }
     }
@@ -235,24 +312,94 @@ class GadgetService : Service() {
         turnJob?.cancel()
         turnJob = scope.launch {
             GadgetState.setTalk(Talk.SENDING)
+            GadgetState.setReplySource(null)
             GadgetState.setHeard(text ?: "")
             GadgetState.setReply("")
+            GadgetState.setReplyImages(emptyList())
             try {
-                val reply = chat.turn(text, wav) { tracker ->
-                    if (tracker.heard.isNotEmpty()) GadgetState.setHeard(tracker.heard)
-                    GadgetState.setTalk(if (tracker.replyText.isEmpty()) Talk.WAITING else Talk.REPLIED)
-                    GadgetState.setReply(tracker.replyText)
+                val reply = chat.turn(text, wav) { heard, partial ->
+                    if (heard.isNotEmpty()) GadgetState.setHeard(heard)
+                    GadgetState.setTalk(if (partial == null || partial.text.isEmpty()) Talk.WAITING else Talk.REPLIED)
+                    partial?.let { GadgetState.setReply(it.text) }
                 }
-                GadgetState.setReply(reply)
-                GadgetState.setTalk(Talk.REPLIED)
-                if (Prefs(this@GadgetService).speakReplies && reply.isNotBlank()) speaker.speak(reply)
+                if (reply != null) deliver(reply, source = null, wakeScreen = false)
+                else GadgetState.setTalk(Talk.REPLIED)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                errors.add("chat failed: ${e.message}")
                 GadgetState.log("chat failed: ${e.message}")
                 GadgetState.setReply(e.message ?: "Something went wrong")
                 GadgetState.setTalk(Talk.ERROR)
             }
+        }
+    }
+
+    /**
+     * Show a finished reply: caption, pictures, speech (unless quiet), then
+     * an optional follow-up listen. [source] labels replies that didn't come
+     * from an Echo turn.
+     */
+    private suspend fun deliver(reply: ChatFeed.Reply, source: String?, wakeScreen: Boolean) {
+        val prefs = Prefs(this)
+        val quiet = QuietHours.isQuiet(prefs)
+        GadgetState.setReplySource(source)
+        GadgetState.setReply(reply.text)
+        GadgetState.setTalk(Talk.REPLIED)
+        if (wakeScreen && !quiet) bringToFront(force = false)
+        scope.launch { GadgetState.setReplyImages(downloadImages(reply.images)) }
+        if (!prefs.speakReplies || quiet || reply.text.isBlank()) return
+        val spoken = Markdown.toSpeech(reply.text)
+        if (spoken.isBlank()) return
+        // Hold the mic for the follow-up rather than letting the wake word take it.
+        if (speaker.speakAndWait(spoken) && prefs.followUp && GadgetState.talk.value == Talk.REPLIED &&
+            !QuietHours.isQuiet(prefs) && GadgetState.link.value == Link.CONNECTED
+        ) {
+            GadgetState.setFollowUp(true)
+            if (!startTalking(handsFree = true)) GadgetState.setFollowUp(false)
+        }
+    }
+
+    private suspend fun downloadImages(urls: List<String>): List<android.graphics.Bitmap> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            urls.take(4).mapNotNull { url ->
+                runCatching {
+                    imageHttp.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { resp ->
+                        val bytes = resp.body?.bytes()
+                        if (!resp.isSuccessful || bytes == null || bytes.size > EchoCommands.MAX_IMAGE_BYTES) null
+                        else EchoCommands.decodeScaled(bytes)
+                    }
+                }.getOrNull()
+            }
+        }
+
+    /** Messages that didn't come from an Echo turn: replies sent to the Echo, gadget alerts, Muse's own. */
+    private suspend fun onFeedUpdate(update: ChatFeed.Update) {
+        val reply = (update as? ChatFeed.Update.Assistant)?.reply ?: return
+        if (!reply.final) return
+        val prefs = Prefs(this)
+        val source = when (reply.origin) {
+            // Replies to an Echo turn are handled by talk(); anything else tagged for the Echo shows here.
+            ChatFeed.Origin.THIS_DEVICE -> if (turnJob?.isActive == true) return else GadgetState.museName.value
+            ChatFeed.Origin.OTHER_GADGET -> if (!prefs.showGadgetAlerts) return else
+                "Alert" + (reply.prompt?.let { ": ${it.take(80)}" } ?: "")
+            ChatFeed.Origin.MUSE_INITIATED -> if (!prefs.showMuseInitiated) return else GadgetState.museName.value
+            ChatFeed.Origin.OTHER -> return
+        }
+        // Don't talk over someone mid-sentence or mid-turn.
+        if (GadgetState.talk.value == Talk.LISTENING || turnJob?.isActive == true) return
+        GadgetState.log("message from ${reply.origin.name.lowercase().replace('_', ' ')}")
+        GadgetState.setHeard("")
+        if (!QuietHours.isQuiet(prefs)) softChime()
+        deliver(reply, source, wakeScreen = true)
+    }
+
+    private fun softChime() {
+        val beep = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 50)
+        beep.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 200)
+        scope.launch {
+            delay(500)
+            beep.release()
         }
     }
 
@@ -263,8 +410,12 @@ class GadgetService : Service() {
     private fun micAllowed() = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
 
-    /** Start a voice note. [handsFree] ends it on silence (after the wake word). */
+    /**
+     * Start a voice note. [handsFree] ends it on silence (wake word and
+     * follow-ups); a follow-up keeps Muse's answer on screen while it listens.
+     */
     fun startTalking(handsFree: Boolean = false): Boolean {
+        val followUp = GadgetState.followUp.value
         if (GadgetState.talk.value == Talk.LISTENING) return true
         if (!micAllowed()) {
             GadgetState.setReply("Microphone permission is needed to talk")
@@ -280,8 +431,12 @@ class GadgetService : Service() {
             GadgetState.setTalk(Talk.ERROR)
             return false
         }
-        GadgetState.setHeard("")
-        GadgetState.setReply("")
+        if (!followUp) {
+            GadgetState.setHeard("")
+            GadgetState.setReply("")
+            GadgetState.setReplyImages(emptyList())
+            GadgetState.setReplySource(null)
+        }
         GadgetState.setTalk(Talk.LISTENING)
         return true
     }
@@ -289,9 +444,12 @@ class GadgetService : Service() {
     fun stopTalking() {
         if (GadgetState.talk.value != Talk.LISTENING) return
         val wav = recorder.stop()
+        val wasFollowUp = GadgetState.followUp.value
+        GadgetState.setFollowUp(false)
         wakeWord.resume()
         if (wav == null) {
-            GadgetState.setTalk(Talk.IDLE)
+            // Nobody answered the follow-up: leave Muse's reply up.
+            GadgetState.setTalk(if (wasFollowUp) Talk.REPLIED else Talk.IDLE)
             return
         }
         talk(null, wav)
@@ -318,7 +476,7 @@ class GadgetService : Service() {
     /** (Re)apply the wake-word setting; returns an error message if it can't run. */
     fun applyWakeWord(): String? {
         val prefs = Prefs(this)
-        if (!prefs.wakeWordEnabled) {
+        if (!prefs.wakeWordEnabled || QuietHours.isQuiet(prefs)) {
             wakeWord.stop()
             return null
         }
@@ -496,6 +654,7 @@ class GadgetService : Service() {
         private const val NOTIFICATION_ID = 1
         const val PAIRING_WINDOW_MS = 10 * 60_000L
         const val RING_MAX_MS = 2 * 60_000L
+        const val RECONNECT_KICK_MS = 5 * 60_000L
 
         @Volatile
         var instance: GadgetService? = null
@@ -560,6 +719,33 @@ class Prefs(context: Context) {
     var wakeWordEnabled: Boolean
         get() = prefs.getBoolean("wake_word", false)
         set(v) = prefs.edit().putBoolean("wake_word", v).apply()
+
+    /** After Muse answers, listen briefly for a reply without the wake word. */
+    var followUp: Boolean
+        get() = prefs.getBoolean("follow_up", true)
+        set(v) = prefs.edit().putBoolean("follow_up", v).apply()
+
+    /** Show messages Muse sends on its own (reminders, scheduled tasks). */
+    var showMuseInitiated: Boolean
+        get() = prefs.getBoolean("show_muse_initiated", true)
+        set(v) = prefs.edit().putBoolean("show_muse_initiated", v).apply()
+
+    /** Announce messages from other gadgets (e.g. the Latitude's alerts) and Muse's answers. */
+    var showGadgetAlerts: Boolean
+        get() = prefs.getBoolean("show_gadget_alerts", true)
+        set(v) = prefs.edit().putBoolean("show_gadget_alerts", v).apply()
+
+    var quietEnabled: Boolean
+        get() = prefs.getBoolean("quiet_enabled", true)
+        set(v) = prefs.edit().putBoolean("quiet_enabled", v).apply()
+
+    var quietStart: String
+        get() = prefs.getString("quiet_start", null) ?: "22:00"
+        set(v) = prefs.edit().putString("quiet_start", v).apply()
+
+    var quietEnd: String
+        get() = prefs.getString("quiet_end", null) ?: "07:00"
+        set(v) = prefs.edit().putString("quiet_end", v).apply()
 
     var wakePhrase: String
         get() = prefs.getString("wake_phrase", null) ?: "hey muse"

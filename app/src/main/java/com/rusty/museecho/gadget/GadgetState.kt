@@ -47,6 +47,46 @@ object GadgetState {
     private val _reply = MutableStateFlow("")
     val reply: StateFlow<String> = _reply.asStateFlow()
 
+    /** Pictures that came with the reply (rich replies). */
+    private val _replyImages = MutableStateFlow<List<Bitmap>>(emptyList())
+    val replyImages: StateFlow<List<Bitmap>> = _replyImages.asStateFlow()
+
+    fun setReplyImages(images: List<Bitmap>) {
+        _replyImages.value = images
+    }
+
+    /** Where the current caption came from, when it isn't an Echo turn ("From the server", "Muse"). */
+    private val _replySource = MutableStateFlow<String?>(null)
+    val replySource: StateFlow<String?> = _replySource.asStateFlow()
+
+    fun setReplySource(source: String?) {
+        _replySource.value = source
+    }
+
+    /** True while quiet hours are in effect. */
+    private val _quiet = MutableStateFlow(false)
+    val quiet: StateFlow<Boolean> = _quiet.asStateFlow()
+
+    fun setQuiet(quiet: Boolean) {
+        _quiet.value = quiet
+    }
+
+    /** A timer or alarm is ringing (the ring screen must stay bright). */
+    private val _ringing = MutableStateFlow(false)
+    val ringing: StateFlow<Boolean> = _ringing.asStateFlow()
+
+    fun setRinging(on: Boolean) {
+        _ringing.value = on
+    }
+
+    /** A follow-up listen (no wake word) is in progress. */
+    private val _followUp = MutableStateFlow(false)
+    val followUp: StateFlow<Boolean> = _followUp.asStateFlow()
+
+    fun setFollowUp(on: Boolean) {
+        _followUp.value = on
+    }
+
     private val _ble = MutableStateFlow(BlePairing.OFF)
     val ble: StateFlow<BlePairing> = _ble.asStateFlow()
 

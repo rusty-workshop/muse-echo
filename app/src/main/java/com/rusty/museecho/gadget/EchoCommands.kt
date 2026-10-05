@@ -39,6 +39,8 @@ class EchoCommands(
     private val speaker: Speaker,
     private val bringToFront: () -> Unit,
     private val home: HomeCommands? = null,
+    private val quiet: () -> Boolean = { false },
+    private val healthExtras: () -> JsonObject = { JsonObject(emptyMap()) },
 ) {
     private val http = OkHttpClient.Builder().callTimeout(45, TimeUnit.SECONDS).build()
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -140,6 +142,7 @@ class EchoCommands(
             put("volume_percent", currentVolume())
             put("screen_on", context.getSystemService(PowerManager::class.java).isInteractive)
             put("tts_available", speaker.available)
+            healthExtras().forEach { (k, v) -> put(k, v) }
         })
     }
 
@@ -191,6 +194,13 @@ class EchoCommands(
         if (text.isNullOrBlank()) return commandError("text is required")
         GadgetState.setReply(text)
         bringToFront()
+        if (quiet()) {
+            return commandOk(buildJsonObject {
+                put("spoken", false)
+                put("shown", true)
+                put("note", "quiet hours are on, so it was shown as a caption instead of spoken")
+            })
+        }
         if (!speaker.available) {
             return commandOk(buildJsonObject {
                 put("spoken", false)
@@ -198,7 +208,7 @@ class EchoCommands(
                 put("note", "no text-to-speech engine is installed on this Echo Show; the text was shown as a caption")
             })
         }
-        val spoken = speaker.speakAndWait(text)
+        val spoken = speaker.speakAndWait(Markdown.toSpeech(text))
         return commandOk(buildJsonObject {
             put("spoken", spoken)
             put("shown", true)

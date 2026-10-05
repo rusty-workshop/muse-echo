@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
             MuseEchoApp(actions)
         }
         watchForRetreat()
+        dimDuringQuietHours()
         // Started at boot only to bring the service up from the foreground.
         if (intent?.getBooleanExtra(EXTRA_BOOT, false) == true) moveTaskToBack(true)
     }
@@ -87,6 +88,17 @@ class MainActivity : ComponentActivity() {
                 delay(RETREAT_AFTER_MS)
                 autoLaunched = false
                 moveTaskToBack(true)
+            }
+        }
+    }
+
+    /** Overnight, keep this window dim unless something's happening on it. */
+    private fun dimDuringQuietHours() {
+        lifecycleScope.launch {
+            combine(GadgetState.quiet, GadgetState.screen, GadgetState.talk, GadgetState.ringing) { quiet, screen, talk, ringing ->
+                quiet && screen is Screen.Idle && (talk == Talk.IDLE || talk == Talk.REPLIED) && !ringing
+            }.collectLatest { dim ->
+                window.attributes = window.attributes.apply { screenBrightness = if (dim) 0.05f else -1f }
             }
         }
     }
@@ -172,6 +184,11 @@ class MainActivity : ComponentActivity() {
         private val none = kotlinx.coroutines.flow.MutableStateFlow<List<com.rusty.museecho.integrations.Countdown>>(emptyList())
         override fun timers() = GadgetService.instance?.timers?.items ?: none
         override fun ringing() = GadgetService.instance?.timers?.ringing ?: none
+
+        override fun showImage(bitmap: android.graphics.Bitmap) = GadgetState.show(Screen.Image(bitmap, ""))
+        override fun refreshQuiet() {
+            GadgetService.instance?.refreshQuiet()
+        }
 
         override fun wakeWordEnabled(): Boolean = com.rusty.museecho.gadget.Prefs(this@MainActivity).wakeWordEnabled
         override fun wakePhrase(): String = com.rusty.museecho.gadget.Prefs(this@MainActivity).wakePhrase

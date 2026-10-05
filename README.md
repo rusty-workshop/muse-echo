@@ -32,12 +32,7 @@ is installed.
 
 ## Setup
 
-1. Build and install:
-
-   ```sh
-   ANDROID_HOME=~/Android/Sdk JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew assembleDebug
-   adb -s G6G11B06033403LD install -r app/build/outputs/apk/debug/app-debug.apk
-   ```
+1. Build and install: `tools/deploy.sh <adb serial or ip:port>`.
 
 2. Optional grants, so Muse can bring the app to the front and change brightness:
 
@@ -70,6 +65,37 @@ tools/pair-via-linux.sh mgst_…
 
 Bluetooth is only used for that one-time setup; after it, everything is a
 normal internet connection.
+
+## Beyond your own questions
+
+The app keeps Muse's reply stream open all the time, so the Echo also shows
+(and speaks) messages that didn't start on it, each toggleable in setup:
+
+- **Messages from Muse**: things Muse sends on its own, like reminders.
+- **Gadget alerts**: messages your other gadgets post (e.g. `musegadget
+  send-user-msg "Backup failed"` on the server) and Muse's answer.
+- Conversations on your phone never appear on the Echo.
+
+Replies render basic Markdown and show any pictures Muse attaches (tap one
+for full screen). With **follow-up listening** on, the Echo listens for a
+few seconds after Muse answers, so you can reply without the wake word.
+
+**Quiet hours** (default 22:00 to 07:00): no wake word, no speaking, a dim
+screen and soft timer beeps; alarms still ring.
+
+## Keeping it healthy
+
+`device.health` includes app uptime, whether the reply feed and wake word are
+running, quiet-hours state and recent errors (crashes included), so you can
+ask Muse "is the Echo OK?". A watchdog restarts the wake word and kicks the
+connection if it's been down five minutes, and a 15-minute alarm restarts the
+service if Android ever kills it.
+
+Deploy from the laptop in one step (builds, tests, installs, waits for Muse):
+
+```sh
+tools/deploy.sh 192.168.1.85:35395
+```
 
 ## Wake word
 
