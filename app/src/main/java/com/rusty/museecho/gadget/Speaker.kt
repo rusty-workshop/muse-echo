@@ -25,7 +25,13 @@ class Speaker(context: Context) {
 
     // The init callback can fire inside the constructor (on failure), before
     // `tts` is assigned, so it's always handled on the next main-loop turn.
-    private var tts: TextToSpeech = TextToSpeech(appContext) { status -> main.post { onInit(status, retried = false) } }
+    // Prefer the neural (Piper) engine when it's installed; it sounds far more human than RHVoice.
+    private var engine: String? = PREFERRED_ENGINES.firstOrNull { installed(it) }
+    private var tts: TextToSpeech = TextToSpeech(appContext, { status -> main.post { onInit(status, retried = false) } }, engine)
+
+    private fun installed(pkg: String) = runCatching { appContext.packageManager.getPackageInfo(pkg, 0) }.isSuccess
+
+    private val startedAt = ConcurrentHashMap<String, Long>()
 
     private fun onInit(status: Int, retried: Boolean) {
         if (status != TextToSpeech.SUCCESS && !retried) {
@@ -34,12 +40,13 @@ class Speaker(context: Context) {
             val engine = tts.engines.firstOrNull()?.name
             if (engine != null) {
                 tts.shutdown()
+                this.engine = engine
                 tts = TextToSpeech(appContext, { status -> main.post { onInit(status, retried = true) } }, engine)
                 return
             }
         }
         available = status == TextToSpeech.SUCCESS && configure()
-        GadgetState.log(if (available) "text-to-speech ready (${tts.defaultEngine})" else "no text-to-speech engine; replies are captions only")
+        GadgetState.log(if (available) "text-to-speech ready (${engine ?: tts.defaultEngine})" else "no text-to-speech engine; replies are captions only")
     }
 
     private fun configure(): Boolean {
@@ -48,7 +55,9 @@ class Speaker(context: Context) {
             if (tts.setLanguage(Locale.getDefault()) < TextToSpeech.LANG_AVAILABLE) return false
         }
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String) {}
+            override fun onStart(utteranceId: String) {
+                startedAt.remove(utteranceId)?.let { GadgetState.log("speech started after ${System.currentTimeMillis() - it} ms") }
+            }
             override fun onDone(utteranceId: String) {
                 pending.remove(utteranceId)?.complete(true)
             }
@@ -63,7 +72,9 @@ class Speaker(context: Context) {
 
     fun speak(text: String) {
         if (!available) return
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        val id = UUID.randomUUID().toString()
+        startedAt[id] = System.currentTimeMillis()
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
     }
 
     /** Speak [text] and wait (up to 2 minutes) until it has been said. */
@@ -72,11 +83,17 @@ class Speaker(context: Context) {
         val id = UUID.randomUUID().toString()
         val done = CompletableDeferred<Boolean>()
         pending[id] = done
+        startedAt[id] = System.currentTimeMillis()
         if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) {
             pending.remove(id)
             return false
         }
         return withTimeoutOrNull(120_000) { done.await() } ?: false
+    }
+
+    companion object {
+        /** Neural voices first (sherpa-onnx Piper engine), then whatever is the default. */
+        val PREFERRED_ENGINES = listOf("com.k2fsa.sherpa.onnx.tts.engine")
     }
 
     fun stop() {

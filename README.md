@@ -100,7 +100,10 @@ tools/deploy.sh 192.168.1.85:35395
 ## Wake word
 
 Setup panel > Wake word: say the phrase (default "hey muse"), talk, and the
-note sends when you stop. It runs offline with [Vosk](https://alphacephei.com/vosk/)
+note sends by itself about a second after you stop (only after the wake word
+or a follow-up; the mic button still sends on a tap). End of speech is
+measured against the room's background noise, learned while listening, so
+it works across the room and with a TV on. It runs offline with [Vosk](https://alphacephei.com/vosk/)
 limited to just that phrase, behind a volume gate, so it uses almost no CPU in
 a quiet room. The model isn't in the APK; push it once:
 
@@ -112,8 +115,11 @@ adb shell mv /sdcard/Android/data/com.rusty.museecho/files/vosk-model-small-en-u
 
 ## Speech
 
-LineageOS ships no text-to-speech engine. Install one (RHVoice or eSpeak NG
-from F-Droid) to hear replies; without it they're captions only. Push-to-talk
+The app prefers the neural Piper voice from the sherpa-onnx TTS engine
+(`com.k2fsa.sherpa.onnx.tts.engine`, e.g. the en_US lessac-medium build from
+huggingface.co/csukuangfj/sherpa-onnx-apk, armeabi-v7a) and falls back to
+whatever engine is installed (RHVoice from F-Droid works). With none, replies
+are captions only. Push-to-talk
 records on the Echo and Muse transcribes it server-side, so no speech
 recognizer is needed on the device.
 

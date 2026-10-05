@@ -36,6 +36,8 @@
         </intent>
         <!-- Sofa, which Muse can switch between modes. -->
         <package android:name="com.rusty.sofa" />
+        <!-- The neural speech engine, preferred over the system default. -->
+        <package android:name="com.k2fsa.sherpa.onnx.tts.engine" />
     </queries>
 
     <application

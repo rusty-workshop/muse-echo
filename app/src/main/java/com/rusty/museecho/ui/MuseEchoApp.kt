@@ -282,6 +282,7 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
     val images by GadgetState.replyImages.collectAsState()
     val source by GadgetState.replySource.collectAsState()
     val followUp by GadgetState.followUp.collectAsState()
+    val handsFree by GadgetState.handsFree.collectAsState()
     val visible = heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE
     AnimatedVisibility(visible, modifier, enter = fadeIn(), exit = fadeOut()) {
         Column(
@@ -291,6 +292,7 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
             val name = GadgetState.museName.value
             val status = when {
                 talk == Talk.LISTENING && followUp -> "Listening for your reply…"
+                talk == Talk.LISTENING && handsFree -> "Listening… it sends when you stop talking"
                 talk == Talk.LISTENING -> "Listening… tap the button again to send"
                 talk == Talk.SENDING -> "Sending to $name…"
                 talk == Talk.WAITING -> "$name is thinking…"

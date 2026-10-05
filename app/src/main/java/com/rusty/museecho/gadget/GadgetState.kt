@@ -79,6 +79,14 @@ object GadgetState {
         _ringing.value = on
     }
 
+    /** The current note ends by itself when you stop talking (wake word / follow-up). */
+    private val _handsFree = MutableStateFlow(false)
+    val handsFree: StateFlow<Boolean> = _handsFree.asStateFlow()
+
+    fun setHandsFree(on: Boolean) {
+        _handsFree.value = on
+    }
+
     /** A follow-up listen (no wake word) is in progress. */
     private val _followUp = MutableStateFlow(false)
     val followUp: StateFlow<Boolean> = _followUp.asStateFlow()

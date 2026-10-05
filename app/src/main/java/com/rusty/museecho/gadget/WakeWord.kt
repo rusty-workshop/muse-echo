@@ -38,6 +38,14 @@ class WakeWord(
     private var worker: Thread? = null
     private var model: Model? = null
 
+    /**
+     * The room's background level (RMS), learned from the quiet stretches the
+     * listener hears; hands-free notes measure speech against it.
+     */
+    @Volatile
+    var noiseFloor = DEFAULT_FLOOR
+        private set
+
     val modelPresent: Boolean get() = File(modelDir, "am").isDirectory && File(modelDir, "graph").isDirectory
 
     /** Start listening for [phrase]. Returns an error message, or null when it's listening. */
@@ -104,7 +112,11 @@ class WakeWord(
                 }
                 if (n == 0) continue
                 val now = System.currentTimeMillis()
-                if (rms(chunk, n) >= GATE_RMS) {
+                val level = rms(chunk, n)
+                // Track the floor: fall fast toward quiet, rise slowly with steady noise (a fan, a TV).
+                noiseFloor = if (level < noiseFloor) noiseFloor * 0.7 + level * 0.3 else noiseFloor * 0.995 + level * 0.005
+                noiseFloor = noiseFloor.coerceIn(5.0, 2_000.0)
+                if (level >= maxOf(GATE_RMS, noiseFloor * 2.5)) {
                     if (now >= feedUntil) {
                         // Waking from quiet: replay the pre-roll first.
                         rec.reset()
@@ -176,6 +188,7 @@ class WakeWord(
         /** About -45 dBFS: quieter than speech across a room, louder than the Echo's idle noise floor. */
         const val GATE_RMS = 180.0
         const val HOLD_MS = 2_500L
+        const val DEFAULT_FLOOR = 60.0
         const val PRE_ROLL_CHUNKS = 5
 
         private fun textOf(json: String, key: String): String =

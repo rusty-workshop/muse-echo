@@ -23,6 +23,10 @@ class VoiceRecorder {
     @Volatile
     private var spoke = true
 
+    /** One line about the last hands-free note's levels, for tuning (no audio). */
+    @Volatile
+    var summary: String? = null
+
     /** Live input level, 0..1, for the UI meter. */
     @Volatile
     var level = 0f
@@ -34,7 +38,7 @@ class VoiceRecorder {
      * by [SILENCE_MS] of quiet (or nothing was said within [NO_SPEECH_MS]).
      */
     @SuppressLint("MissingPermission") // checked by the caller before start()
-    fun start(endOnSilence: Boolean = false, onLimit: () -> Unit): Boolean {
+    fun start(endOnSilence: Boolean = false, noiseFloor: Double = 60.0, onLimit: () -> Unit): Boolean {
         val minBuf = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuf <= 0) return false
         val record = try {
@@ -57,6 +61,12 @@ class VoiceRecorder {
             val started = System.currentTimeMillis()
             var heardSpeech = false
             var quietSince = 0L
+            // Adaptive: speech is well above the room's background, silence is back near it.
+            var floor = noiseFloor
+            val speechAbove = { maxOf(floor * 2.5, floor + 90, MIN_SPEECH_RMS) }
+            val silenceBelow = { maxOf(floor * 1.7, floor + 45) }
+            var peakRms = 0.0
+            var reason = "button"
             try {
                 while (recording) {
                     val n = record.read(buf, 0, buf.size)
@@ -70,16 +80,26 @@ class VoiceRecorder {
                     level = peak / 32768f
                     if (endOnSilence) {
                         val now = System.currentTimeMillis()
-                        if (level > SPEECH_LEVEL) {
+                        var sum = 0.0
+                        for (i in 0 until n) sum += buf[i].toDouble() * buf[i]
+                        val rms = kotlin.math.sqrt(sum / n)
+                        peakRms = maxOf(peakRms, rms)
+                        if (rms > speechAbove()) {
                             heardSpeech = true
                             spoke = true
                             quietSince = 0L
-                        } else if (quietSince == 0L) {
-                            quietSince = now
+                        } else if (rms < silenceBelow()) {
+                            if (quietSince == 0L) quietSince = now
+                            // Keep learning the room while nobody's talking yet.
+                            if (!heardSpeech) floor = floor * 0.9 + rms * 0.1
                         }
-                        val done = if (heardSpeech) quietSince != 0L && now - quietSince >= SILENCE_MS
-                        else now - started >= NO_SPEECH_MS
-                        if (done) {
+                        val done = when {
+                            heardSpeech && quietSince != 0L && now - quietSince >= SILENCE_MS -> "silence".also { reason = it }
+                            !heardSpeech && now - started >= NO_SPEECH_MS -> "no speech".also { reason = it }
+                            now - started >= HANDS_FREE_MAX_MS -> "time limit".also { reason = it }
+                            else -> null
+                        }
+                        if (done != null) {
                             recording = false
                             onLimit()
                         }
@@ -96,6 +116,10 @@ class VoiceRecorder {
                 record.stop()
                 record.release()
                 level = 0f
+                if (endOnSilence) {
+                    summary = "hands-free note: floor %.0f, loudest %.0f, speech above %.0f, ended by %s after %.1fs"
+                        .format(noiseFloor, peakRms, speechAbove(), reason, (System.currentTimeMillis() - started) / 1000.0)
+                }
             }
         }
         return true
@@ -121,9 +145,10 @@ class VoiceRecorder {
         const val RATE = 16_000
         const val MAX_SECONDS = 90
         const val MIN_MS = 400
-        const val SPEECH_LEVEL = 0.06f
-        const val SILENCE_MS = 1_300L
-        const val NO_SPEECH_MS = 5_000L
+        const val MIN_SPEECH_RMS = 120.0
+        const val SILENCE_MS = 1_100L
+        const val NO_SPEECH_MS = 6_000L
+        const val HANDS_FREE_MAX_MS = 25_000L
 
         fun wav(pcm: ByteArray, rate: Int = RATE): ByteArray {
             val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {

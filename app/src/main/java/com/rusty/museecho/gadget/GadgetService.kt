@@ -424,7 +424,7 @@ class GadgetService : Service() {
         }
         speaker.stop()
         wakeWord.pause()
-        val ok = recorder.start(endOnSilence = handsFree) { scope.launch { stopTalking() } }
+        val ok = recorder.start(endOnSilence = handsFree, noiseFloor = wakeWord.noiseFloor) { scope.launch { stopTalking() } }
         if (!ok) {
             wakeWord.resume()
             GadgetState.setReply("Couldn't open the microphone")
@@ -437,6 +437,7 @@ class GadgetService : Service() {
             GadgetState.setReplyImages(emptyList())
             GadgetState.setReplySource(null)
         }
+        GadgetState.setHandsFree(handsFree)
         GadgetState.setTalk(Talk.LISTENING)
         return true
     }
@@ -444,6 +445,7 @@ class GadgetService : Service() {
     fun stopTalking() {
         if (GadgetState.talk.value != Talk.LISTENING) return
         val wav = recorder.stop()
+        recorder.summary?.let { GadgetState.log(it); recorder.summary = null }
         val wasFollowUp = GadgetState.followUp.value
         GadgetState.setFollowUp(false)
         wakeWord.resume()
