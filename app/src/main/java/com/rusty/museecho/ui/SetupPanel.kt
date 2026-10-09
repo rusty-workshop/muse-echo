@@ -71,6 +71,12 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     val voiceStatus by actions.voiceStatus().collectAsState()
     var speedResult by remember { mutableStateOf<String?>(null) }
     var wakeSens by remember { mutableStateOf(actions.wakeSensitivity()) }
+    var frameDelay by remember { mutableStateOf(actions.frameDelayMin()) }
+    val photoCount = remember { actions.framePhotos().size }
+    val savedActions = remember { actions.quickActions().value }
+    val qaLabels = remember { androidx.compose.runtime.mutableStateListOf(*Array(4) { savedActions.getOrNull(it)?.label.orEmpty() }) }
+    val qaPrompts = remember { androidx.compose.runtime.mutableStateListOf(*Array(4) { savedActions.getOrNull(it)?.prompt.orEmpty() }) }
+    var qaMessage by remember { mutableStateOf<String?>(null) }
     val uiScope = androidx.compose.runtime.rememberCoroutineScope()
     var lat by remember { mutableStateOf("%.4f".format(prefs.weatherLat)) }
     var lon by remember { mutableStateOf("%.4f".format(prefs.weatherLon)) }
@@ -206,6 +212,41 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     }) { Text("Save") }
                 }
                 laptopMessage?.let { Body(it, Palette.teal) }
+
+                SectionTitle("Quick actions")
+                Body("Buttons on the home screen; each sends its request to $museName. $museName can also change them.", Palette.muted)
+                for (i in 0 until 4) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                        OutlinedTextField(value = qaLabels[i], onValueChange = { qaLabels[i] = it.take(18) }, singleLine = true,
+                            label = { Text("Button") }, modifier = Modifier.width(130.dp))
+                        Spacer(Modifier.width(6.dp))
+                        OutlinedTextField(value = qaPrompts[i], onValueChange = { qaPrompts[i] = it.take(500) }, singleLine = true,
+                            label = { Text("Request") }, modifier = Modifier.weight(1f))
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        actions.saveQuickActions((0 until 4).map { com.rusty.museecho.integrations.QuickAction(qaLabels[it], qaPrompts[it]) })
+                        qaMessage = "Saved"
+                    }) { Text("Save") }
+                    TextButton(onClick = {
+                        com.rusty.museecho.integrations.QuickActions.DEFAULTS.forEachIndexed { i, a -> qaLabels[i] = a.label; qaPrompts[i] = a.prompt }
+                        qaMessage = "Defaults restored; Save to keep them"
+                    }) { Text("Restore defaults") }
+                }
+                qaMessage?.let { Body(it, Palette.teal) }
+
+                SectionTitle("Photo frame")
+                Body(if (photoCount == 0) "No photos yet. $museName can add some (frame.add), or push pictures to " +
+                    "/sdcard/Android/data/com.rusty.museecho/files/frame/." else
+                    "$photoCount photos. Starts after the Echo's been idle this long; a tap ends it.", Palette.muted)
+                ChoiceRow(
+                    options = listOf(0 to "Off", 2 to "2 min", 5 to "5 min", 15 to "15 min", 30 to "30 min").map { (m, l) -> m.toString() to l },
+                    selected = frameDelay.toString(),
+                ) {
+                    frameDelay = it.toInt()
+                    actions.setFrameDelayMin(frameDelay)
+                }
 
                 SectionTitle("Voice quality")
                 Body("Higher sounds more natural but is slower on the Echo: Low keeps up with speech, Medium " +

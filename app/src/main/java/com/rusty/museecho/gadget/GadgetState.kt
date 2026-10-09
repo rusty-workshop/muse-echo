@@ -102,6 +102,18 @@ object GadgetState {
         _weather.value = w
     }
 
+    /** The photo-frame slideshow is showing (asked for now, or started by the idle timer). */
+    private val _frameShowing = MutableStateFlow(false)
+    val frameShowing: StateFlow<Boolean> = _frameShowing.asStateFlow()
+
+    fun showFrame(on: Boolean) {
+        _frameShowing.value = on
+    }
+
+    /** Last time someone touched the screen (for the idle slideshow). */
+    @Volatile
+    var lastTouch = System.currentTimeMillis()
+
     /** A timer or alarm is ringing (the ring screen must stay bright). */
     private val _ringing = MutableStateFlow(false)
     val ringing: StateFlow<Boolean> = _ringing.asStateFlow()

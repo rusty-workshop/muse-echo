@@ -65,6 +65,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.action == android.view.MotionEvent.ACTION_DOWN) {
+            GadgetState.lastTouch = System.currentTimeMillis()
+            // A tap anywhere ends the photo frame (and does nothing else).
+            if (GadgetState.frameShowing.value) {
+                GadgetState.showFrame(false)
+                return true
+            }
+        }
         // A tap anywhere cuts Muse off mid-sentence.
         if (ev.action == android.view.MotionEvent.ACTION_DOWN && GadgetState.speaking.value) {
             GadgetService.instance?.stopSpeaking()
@@ -239,6 +247,22 @@ class MainActivity : ComponentActivity() {
         override fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level) =
             GadgetService.instance?.neural?.installed(level) == true
         override suspend fun voiceSpeedTest() = GadgetService.instance?.voiceSpeedTest() ?: "Not running"
+        private val emptyActions = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.QuickActions.DEFAULTS)
+        override fun quickActions() = GadgetService.instance?.quickActions?.value ?: emptyActions
+        override fun runQuickAction(a: com.rusty.museecho.integrations.QuickAction) {
+            GadgetService.instance?.talk(a.prompt, null, label = a.label)
+        }
+
+        override fun saveQuickActions(list: List<com.rusty.museecho.integrations.QuickAction>) {
+            GadgetService.instance?.quickActions?.set(list)
+        }
+
+        override fun framePhotos(): List<java.io.File> = GadgetService.instance?.frame?.photos().orEmpty()
+        override fun frameDelayMin() = com.rusty.museecho.gadget.Prefs(this@MainActivity).frameDelayMin
+        override fun setFrameDelayMin(min: Int) {
+            com.rusty.museecho.gadget.Prefs(this@MainActivity).frameDelayMin = min
+        }
+
         override fun wakeSensitivity() = com.rusty.museecho.gadget.Prefs(this@MainActivity).wakeSensitivity
         override fun setWakeSensitivity(s: com.rusty.museecho.gadget.WakeWord.Sensitivity) {
             GadgetService.instance?.setWakeSensitivity(s)

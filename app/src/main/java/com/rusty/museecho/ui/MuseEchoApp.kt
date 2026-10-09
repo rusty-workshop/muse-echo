@@ -121,6 +121,12 @@ interface UiActions {
     fun voiceStatus(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.gadget.NeuralVoice.Status>
     fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level): Boolean
     suspend fun voiceSpeedTest(): String
+    fun quickActions(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.QuickAction>>
+    fun runQuickAction(a: com.rusty.museecho.integrations.QuickAction)
+    fun saveQuickActions(list: List<com.rusty.museecho.integrations.QuickAction>)
+    fun framePhotos(): List<java.io.File>
+    fun frameDelayMin(): Int
+    fun setFrameDelayMin(min: Int)
     fun wakeSensitivity(): com.rusty.museecho.gadget.WakeWord.Sensitivity
     fun setWakeSensitivity(s: com.rusty.museecho.gadget.WakeWord.Sensitivity)
     fun wakeWordEnabled(): Boolean
@@ -177,6 +183,7 @@ fun MuseEchoApp(actions: UiActions) {
                     Icon(Icons.Filled.Settings, "Setup", tint = Palette.muted)
                 }
             }
+            QuickActionRow(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 30.dp), actions)
             Captions(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 120.dp, bottom = 18.dp), actions)
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
 
@@ -184,6 +191,8 @@ fun MuseEchoApp(actions: UiActions) {
                 TimerChips(Modifier, actions)
                 NowPlayingChip(Modifier.padding(top = 6.dp), actions)
             }
+            IdleFrameWatcher(actions)
+            Slideshow(actions)
             RingScreen(actions)
             if (showHistory) HistoryPanel(actions, onClose = { showHistory = false })
             if (showKeyboard) TypeSheet(onSend = { actions.sendText(it); showKeyboard = false }, onClose = { showKeyboard = false })
@@ -519,6 +528,85 @@ private fun TimerChips(modifier: Modifier, actions: UiActions) {
                     color = Palette.ink, fontSize = 13.sp, maxLines = 1,
                 )
             }
+        }
+    }
+}
+
+/** Preset requests, tap to send; hidden while a conversation is on screen. */
+@Composable
+private fun QuickActionRow(modifier: Modifier, actions: UiActions) {
+    val list by actions.quickActions().collectAsState()
+    val talk by GadgetState.talk.collectAsState()
+    val heard by GadgetState.heard.collectAsState()
+    val reply by GadgetState.reply.collectAsState()
+    val link by GadgetState.link.collectAsState()
+    if (list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED) return
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        list.forEach { a ->
+            Text(a.label, color = Palette.ink, fontSize = 15.sp, maxLines = 1,
+                modifier = Modifier.background(Palette.card.copy(alpha = 0.92f), RoundedCornerShape(50))
+                    .clickable { actions.runQuickAction(a) }.padding(horizontal = 16.dp, vertical = 10.dp))
+        }
+    }
+}
+
+/** Starts the photo frame after the configured idle time, when nothing else is going on. */
+@Composable
+private fun IdleFrameWatcher(actions: UiActions) {
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(15_000)
+            val minutes = actions.frameDelayMin()
+            val busy = GadgetState.talk.value != Talk.IDLE || GadgetState.speaking.value || GadgetState.ringing.value ||
+                GadgetState.screen.value !is Screen.Idle || GadgetState.quiet.value
+            if (busy) GadgetState.lastTouch = System.currentTimeMillis()
+            if (minutes > 0 && !busy && !GadgetState.frameShowing.value &&
+                System.currentTimeMillis() - GadgetState.lastTouch >= minutes * 60_000L && actions.framePhotos().isNotEmpty()
+            ) {
+                GadgetState.showFrame(true)
+            }
+        }
+    }
+}
+
+/** The photo frame: a slow crossfading slideshow with the clock; any tap ends it. */
+@Composable
+private fun Slideshow(actions: UiActions) {
+    val showing by GadgetState.frameShowing.collectAsState()
+    if (!showing) return
+    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(Unit) {
+        var i = 0
+        while (true) {
+            val photos = actions.framePhotos()
+            if (photos.isEmpty()) {
+                GadgetState.showFrame(false)
+                return@LaunchedEffect
+            }
+            val file = photos[i % photos.size]
+            bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.rusty.museecho.gadget.EchoCommands.decodeScaled(file.readBytes()) }.getOrNull()
+            } ?: bitmap
+            i++
+            delay(30_000)
+            // Stop when something else needs the screen.
+            if (GadgetState.talk.value != Talk.IDLE || GadgetState.ringing.value || GadgetState.quiet.value) {
+                GadgetState.showFrame(false)
+                return@LaunchedEffect
+            }
+        }
+    }
+    val now = rememberNow()
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Crossfade(targetState = bitmap, animationSpec = tween(1500), label = "frame") { b ->
+            if (b != null) Image(b.asImageBitmap(), contentDescription = "Photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        Column(
+            Modifier.align(Alignment.BottomStart).padding(20.dp)
+                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
+        ) {
+            Text(SimpleDateFormat("h:mm", Locale.US).format(now), color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Light)
+            Text(SimpleDateFormat("EEEE, MMMM d", Locale.US).format(now), color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp)
         }
     }
 }

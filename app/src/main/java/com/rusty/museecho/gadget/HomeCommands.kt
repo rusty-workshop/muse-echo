@@ -34,6 +34,9 @@ class HomeCommands(
     private val bringToFront: () -> Unit,
     private val notes: com.rusty.museecho.integrations.Notes? = null,
     private val glance: com.rusty.museecho.integrations.Glance? = null,
+    private val frame: com.rusty.museecho.integrations.PhotoFrame? = null,
+    private val quick: com.rusty.museecho.integrations.QuickActions? = null,
+    private val showFrame: () -> Unit = {},
 ) {
     val specs: JsonObject = buildJsonObject {
         val keys = Roku.KEYS.keys.joinToString(", ")
@@ -81,6 +84,15 @@ class HomeCommands(
             required = mapOf("text" to param("string", "One short line, under ~60 characters.")),
             optional = mapOf("minutes" to param("integer", "Clear it after this many minutes. Omit to keep it.")))
         spec("glance.clear", "Clear the glance line under the clock.")
+        spec("frame.add", "Add a picture to the Echo Show's photo frame (the slideshow it shows when idle). Downloads and keeps it.",
+            required = mapOf("url" to param("string", "http(s) URL of a JPEG, PNG or WebP image.")))
+        spec("frame.list", "List the pictures in the Echo Show's photo frame.")
+        spec("frame.remove", "Remove a picture from the photo frame by file name (from frame.list), or \"all\".",
+            required = mapOf("which" to param("string", "File name, or \"all\".")))
+        spec("frame.show", "Start the photo-frame slideshow on the Echo Show now.")
+        spec("quick_actions.get", "Read the quick-action buttons on the Echo Show's home screen (label and the request each sends to you).")
+        spec("quick_actions.set", "Replace the Echo Show's quick-action buttons (up to 4). Each sends its prompt to you when tapped.",
+            required = mapOf("actions" to param("array", "List of {\"label\": short button text, \"prompt\": the request to send}.")))
         spec("media.control", "Control whatever is playing on the Echo Show (any app, or audio.play_url).",
             required = mapOf("action" to param("string", "One of: play_pause, play, pause, next, previous, stop.")))
         spec("laptop.shortcuts", "List the shortcuts Rusty has allowed on his laptop (same safelist as Sofa's Coding Mode).")
@@ -220,6 +232,43 @@ class HomeCommands(
         "glance.clear" -> glance?.let { g ->
             g.set("", null)
             commandOk(buildJsonObject { put("cleared", true) })
+        } ?: commandError("not available")
+        "frame.add" -> frame?.let { f ->
+            val url = params.str("url") ?: return commandError("url is required")
+            runCatching { f.add(url) }.fold(
+                onSuccess = { commandOk(buildJsonObject { put("added", it); put("count", f.photos().size) }) },
+                onFailure = { commandError(it.message ?: "couldn't add it") },
+            )
+        } ?: commandError("not available")
+        "frame.list" -> frame?.let { f ->
+            commandOk(buildJsonObject { put("photos", JsonArray(f.photos().map { JsonPrimitive(it.name) })) })
+        } ?: commandError("not available")
+        "frame.remove" -> frame?.let { f ->
+            val which = params.str("which") ?: return commandError("which is required")
+            val n = f.remove(which)
+            if (n == 0) commandError("no photo called \"$which\"") else commandOk(buildJsonObject { put("removed", n) })
+        } ?: commandError("not available")
+        "frame.show" -> frame?.let { f ->
+            if (f.photos().isEmpty()) commandError("the frame has no photos yet; add some with frame.add")
+            else {
+                withContext(Dispatchers.Main) { showFrame() }
+                commandOk(buildJsonObject { put("showing", f.photos().size) })
+            }
+        } ?: commandError("not available")
+        "quick_actions.get" -> quick?.let { q ->
+            commandOk(buildJsonObject {
+                put("actions", JsonArray(q.value.value.map { a -> buildJsonObject { put("label", a.label); put("prompt", a.prompt) } }))
+            })
+        } ?: commandError("not available")
+        "quick_actions.set" -> quick?.let { q ->
+            val list = (params["actions"] as? JsonArray)?.mapNotNull { e ->
+                val o = e as? JsonObject ?: return@mapNotNull null
+                val label = o.str("label") ?: return@mapNotNull null
+                val prompt = o.str("prompt") ?: return@mapNotNull null
+                com.rusty.museecho.integrations.QuickAction(label, prompt)
+            } ?: return commandError("actions must be a list of {label, prompt}")
+            val saved = q.set(list)
+            commandOk(buildJsonObject { put("count", saved.size) })
         } ?: commandError("not available")
         "media.control" -> {
             val key = when (params.str("action")?.lowercase()) {

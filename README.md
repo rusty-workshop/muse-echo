@@ -22,6 +22,8 @@ SDKs), plus the push-to-talk chat flow from their ESP32 screen boards.
 | `device.health` | Uptime, memory, storage, Wi-Fi signal, volume, screen state |
 | `notes.get` / `notes.set` / `notes.add` / `notes.remove` / `notes.clear` | The pinned note on the home screen (e.g. a shopping list); tap a line to tick it off |
 | `glance.set` / `glance.clear` | A line under the clock (next event, reminder), next to the Echo's own weather |
+| `frame.add` / `frame.list` / `frame.remove` / `frame.show` | The photo frame: an idle slideshow with the clock (starts after 5 idle minutes by default; a tap ends it). Photos can also be pushed to `/sdcard/Android/data/com.rusty.museecho/files/frame/` |
+| `quick_actions.get` / `quick_actions.set` | The home screen's quick-action buttons (up to 4), each sending a preset request to Muse |
 | `media.control` | Play/pause/next/previous/stop for whatever plays on the Echo |
 | `display.set_profile` | Muse tells the Echo its name, shown instead of "Muse" |
 | `timer.set` / `alarm.set` / `timers.list` / `timers.cancel` | Timers and (repeating) alarms with an on-screen countdown, chime and spoken label |

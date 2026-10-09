@@ -74,6 +74,10 @@ class GadgetService : Service() {
         private set
     lateinit var glance: com.rusty.museecho.integrations.Glance
         private set
+    lateinit var frame: com.rusty.museecho.integrations.PhotoFrame
+        private set
+    lateinit var quickActions: com.rusty.museecho.integrations.QuickActions
+        private set
     private val weather = com.rusty.museecho.integrations.Weather()
 
     /** Set when quiet hours end; the next "hey muse" gets the morning brief. */
@@ -104,7 +108,13 @@ class GadgetService : Service() {
         history = com.rusty.museecho.integrations.History(java.io.File(filesDir, "history.json"))
         glance = com.rusty.museecho.integrations.Glance(java.io.File(filesDir, "glance.json"))
         GadgetState.setMicOff(Prefs(this).micOff)
-        val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance)
+        frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
+        quickActions = com.rusty.museecho.integrations.QuickActions(java.io.File(filesDir, "quick_actions.json"))
+        val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance, frame, quickActions,
+            showFrame = {
+                GadgetState.showFrame(true)
+                bringToFront(force = true)
+            })
         commands = EchoCommands(this, speaker, ::bringToFront, home, ::isQuietNow, { healthExtras() })
         runner = GadgetRunner(
             store = store,
@@ -873,6 +883,11 @@ class Prefs(context: Context) {
     var showGadgetAlerts: Boolean
         get() = prefs.getBoolean("show_gadget_alerts", true)
         set(v) = prefs.edit().putBoolean("show_gadget_alerts", v).apply()
+
+    /** Photo-frame slideshow after this many idle minutes (0 = off). */
+    var frameDelayMin: Int
+        get() = prefs.getInt("frame_delay_min", 5)
+        set(v) = prefs.edit().putInt("frame_delay_min", v).apply()
 
     var micOff: Boolean
         get() = prefs.getBoolean("mic_off", false)
