@@ -84,7 +84,8 @@ class LinkSession(
     noiseHost: String,
     vmId: String,
     private val vmAuthToken: String,
-    private val device: DeviceDescription,
+    /** Null for a chat-only connection: no /link-control, no registration. */
+    private val device: DeviceDescription?,
     private val runCommand: CommandRunner,
     private val connector: WsConnector,
     private val log: (String) -> Unit = { Log.i(TAG, it) },
@@ -114,7 +115,13 @@ class LinkSession(
         }
         try {
             transport = withTimeout(HANDSHAKE_TIMEOUT_MS) { handshake() }
-            openControlStream()
+            if (device != null) {
+                openControlStream()
+            } else {
+                // A chat-only connection is usable as soon as the handshake is done.
+                registeredAt = System.currentTimeMillis()
+                log("chat connection ready")
+            }
             return readLoop()
         } finally {
             scope.cancel()
@@ -147,9 +154,9 @@ class LinkSession(
             put("type", "req")
             put("id", registerId)
             put("method", "link.register")
-            put("params", device.registerParams())
+            put("params", device!!.registerParams())
         })
-        log("sent link.register as ${device.nodeId}")
+        log("sent link.register as ${device!!.nodeId}")
     }
 
     // -- Requests on their own streams -----------------------------------------
@@ -217,7 +224,7 @@ class LinkSession(
         val body = buildJsonObject {
             put("message", message)
             put("output_modality", "text")
-            put("device_id", device.nodeId)
+            device?.let { put("device_id", it.nodeId) }
             if (sessionId != null) put("session_id", sessionId)
         }
         val stream = openRequest("POST", CHAT_PATH, jsonHeaders(APP_ID), body.toString().toByteArray())
@@ -289,7 +296,19 @@ class LinkSession(
                 log("link.register rejected: ${message["error"]}")
             } else {
                 registeredAt = System.currentTimeMillis()
-                log("registered with the Muse")
+                val status = (message["result"] as? JsonObject)?.str("status")
+                log("registered with the Muse (${message.str("type") ?: "?"}, status ${status ?: "none"})")
+                // As the ESP32 firmware does: once registration is confirmed,
+                // heartbeat right away and then daily.
+                if (message.str("type") == "res" && status == "registered") {
+                    scope.launch {
+                        while (true) {
+                            runCatching { send(buildJsonObject { put("method", "link.heartbeat") }) }
+                                .onSuccess { log("sent link.heartbeat") }
+                            kotlinx.coroutines.delay(HEARTBEAT_INTERVAL_MS)
+                        }
+                    }
+                }
             }
             return null
         }
@@ -340,6 +359,7 @@ class LinkSession(
         const val MAX_RESPONSE_BYTES = 1024 * 1024
         const val HANDSHAKE_TIMEOUT_MS = 20_000L
         const val MAX_CONCURRENT_INVOKES = 4
+        const val HEARTBEAT_INTERVAL_MS = 24 * 3600_000L
         const val MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
 
         fun jsonHeaders(appId: String, accept: String = "application/json") = listOf(

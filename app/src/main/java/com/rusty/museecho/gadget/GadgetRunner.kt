@@ -115,7 +115,30 @@ class GadgetRunner(
         }
     }
 
+    @Volatile
+    private var lastTarget: Pair<Vm, PairingRecord>? = null
+
+    /**
+     * A second, chat-only connection to the same Muse: chat and the reply feed
+     * run there, because holding /chat/subscribe open on the registered
+     * device connection stops the VM routing link.invoke to it (the ESP32
+     * boards likewise use a separate connection for chat).
+     */
+    fun chatSession(): LinkSession? {
+        val (vm, pairing) = lastTarget ?: return null
+        return LinkSession(
+            noiseHost = pairing.noise_host.ifEmpty { DEFAULT_NOISE_HOST },
+            vmId = vm.id.ifEmpty { vm.name },
+            vmAuthToken = vm.authToken,
+            device = null,
+            runCommand = { _, _, _ -> LinkSession.commandError("chat-only connection") },
+            connector = connector,
+            log = GadgetState::log,
+        )
+    }
+
     private suspend fun session(vm: Vm, pairing: PairingRecord): Pair<LinkSession.Outcome, Long> {
+        lastTarget = vm to pairing
         val session = LinkSession(
             noiseHost = pairing.noise_host.ifEmpty { DEFAULT_NOISE_HOST },
             vmId = vm.id.ifEmpty { vm.name },

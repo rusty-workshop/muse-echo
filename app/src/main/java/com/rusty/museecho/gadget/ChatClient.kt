@@ -14,6 +14,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.selects.onTimeout
@@ -33,7 +34,6 @@ import kotlinx.serialization.json.put
  * and follows its reply on the same feed.
  */
 class ChatClient(
-    private val session: () -> LinkSession?,
     private val nodeId: String,
 ) {
     class ChatError(message: String) : Exception(message)
@@ -46,6 +46,47 @@ class ChatClient(
     @Volatile
     var feedOpen = false
         private set
+
+    /** The chat-only connection in use, while there is one. */
+    @Volatile
+    private var chatLink: LinkSession? = null
+
+    /**
+     * Keep a chat-only connection (from [open]) and its reply feed up for as
+     * long as the caller runs (it's cancelled when the device session ends);
+     * reconnects after drops.
+     */
+    suspend fun runChat(open: () -> LinkSession?) {
+        while (true) {
+            val side = open()
+            if (side != null) {
+                try {
+                    coroutineScope {
+                        val conn = launch { side.run() }
+                        val ready = kotlinx.coroutines.withTimeoutOrNull(25_000) {
+                            while (side.registeredAt == null && conn.isActive) delay(100)
+                            side.registeredAt != null
+                        } == true
+                        if (ready) {
+                            chatLink = side
+                            val feed = launch { runFeed(side) }
+                            conn.join()
+                            feed.cancel()
+                        }
+                        conn.cancel()
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    GadgetState.log("chat connection: ${e.message}")
+                } finally {
+                    chatLink = null
+                    feedOpen = false
+                }
+            }
+            delay(FEED_RETRY_MS)
+        }
+    }
 
     /** Keep the subscription open on [link] while it's registered; reopens after drops. */
     suspend fun runFeed(link: LinkSession) {
@@ -90,7 +131,7 @@ class ChatClient(
      */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     suspend fun turn(text: String?, wav: ByteArray?, onUpdate: (String, ChatFeed.Reply?) -> Unit): ChatFeed.Reply? {
-        val link = session()?.takeIf { it.registeredAt != null } ?: throw ChatError("Not connected to Muse")
+        val link = chatLink?.takeIf { it.registeredAt != null } ?: throw ChatError("Not connected to Muse")
         if (!feedOpen) throw ChatError("Muse's reply stream isn't open yet")
         val body = buildJsonObject {
             put("message", text ?: "")

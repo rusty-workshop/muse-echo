@@ -28,20 +28,19 @@ class ChatClientTest {
     fun voiceNoteTurnCollectsTheReply() = runBlocking<Unit> {
         withTimeout(20_000) {
             val vm = FakeVm()
-            val session = LinkSession("h", "v", "t", DeviceDescription("homelink-abcdef", "Echo", "1", JsonObject(emptyMap())),
-                { _, _, _ -> JsonObject(emptyMap()) }, vm.connector, log = {})
-            val run = async { session.run() }
+            // A chat-only connection: handshake, then straight to requests (no /link-control, no register).
+            val chat = ChatClient("homelink-abcdef")
+            var opened = 0
+            val chatJob = launch {
+                chat.runChat {
+                    if (opened++ == 0) {
+                        LinkSession("h", "v", "t", null, { _, _, _ -> JsonObject(emptyMap()) }, vm.connector, log = {})
+                    } else {
+                        null
+                    }
+                }
+            }
             vm.handshake()
-            val control = vm.next().streamId
-            val register = vm.nextMessage(MessageDecoder())
-            vm.respond(control, 200, LinkSession.encodeMessage(buildJsonObject {
-                put("id", register.str("id"))
-                putJsonObject("result") {}
-            }), end = false)
-            while (session.registeredAt == null) delay(10)
-
-            val chat = ChatClient({ session }, "homelink-abcdef")
-            val feedJob = launch { chat.runFeed(session) }
             val sub = vm.next()
             assertEquals("/chat/subscribe", (sub.value as ApplicationRequest).path)
             vm.respond(sub.streamId, 200, ByteArray(0), end = false)
@@ -74,10 +73,8 @@ class ChatClientTest {
 
             assertEquals("It's noon.", turn.await()!!.text)
             assertTrue(updates.contains("It's noon."))
-            feedJob.cancel()
+            chatJob.cancel()
 
-            vm.control(control, buildJsonObject { put("event", "link.unpaired") })
-            run.await()
         }
     }
 }

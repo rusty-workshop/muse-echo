@@ -115,9 +115,9 @@ class GadgetService : Service() {
             version = BuildConfig.VERSION_NAME,
             commands = commands.specs,
             runCommand = commands::run,
-            onRegistered = { session -> chat.runFeed(session) },
+            onRegistered = { chat.runChat { runner.chatSession() } },
         )
-        chat = ChatClient({ runner.current }, identity.nodeId)
+        chat = ChatClient(identity.nodeId)
         scope.launch { chat.updates.collect { runCatching { onFeedUpdate(it) } } }
         startInForeground()
         runnerJob = scope.launch { runner.run() }
@@ -488,8 +488,7 @@ class GadgetService : Service() {
         val source = when (reply.origin) {
             // Replies to an Echo turn are handled by talk(); anything else tagged for the Echo shows here.
             ChatFeed.Origin.THIS_DEVICE -> if (turnJob?.isActive == true) return else GadgetState.museName.value
-            ChatFeed.Origin.OTHER_GADGET -> if (!prefs.showGadgetAlerts) return else
-                "Alert" + (reply.prompt?.let { ": ${it.take(80)}" } ?: "")
+            ChatFeed.Origin.OTHER_GADGET -> if (!prefs.showGadgetAlerts) return else alertLabel(reply.prompt)
             ChatFeed.Origin.MUSE_INITIATED -> if (!prefs.showMuseInitiated) return else GadgetState.museName.value
             ChatFeed.Origin.OTHER -> return
         }
@@ -500,6 +499,16 @@ class GadgetService : Service() {
         history.add(com.rusty.museecho.integrations.Exchange(System.currentTimeMillis(), reply.prompt.orEmpty(), reply.text, source))
         if (!QuietHours.isQuiet(prefs)) softChime()
         deliver(reply, source, wakeScreen = true)
+    }
+
+    /** Real alerts (from the ntfy forwarder) say so; anything else from a gadget is just "From the server". */
+    private fun alertLabel(prompt: String?): String {
+        val p = prompt.orEmpty()
+        val isAlert = p.startsWith("URGENT server alert") || p.startsWith("Server notice")
+        if (!isAlert) return "From the server"
+        // "URGENT server alert from my homelab (Title): body" -> "Alert: Title"
+        val title = Regex("""\(([^)]*)\)""").find(p)?.groupValues?.get(1)
+        return "Alert" + (title?.let { ": ${it.take(80)}" } ?: "")
     }
 
     private fun softChime() {
