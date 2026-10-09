@@ -94,6 +94,13 @@ exchanges on the Echo.
 **Quiet hours** (default 22:00 to 07:00): no wake word, no speaking, a dim
 screen and soft timer beeps; alarms still ring.
 
+## Photo frame
+
+`tools/frame-pick.sh` opens a file picker (multi-select, starting in
+`~/Pictures/wallpapers`), shrinks each picture to a 1280 px JPEG and copies
+it to the Echo; `--list` and `--clear` manage what's there. Muse can also add
+pictures by URL (`frame.add`).
+
 ## Keeping it healthy
 
 `device.health` includes app uptime, whether the reply feed and wake word are
