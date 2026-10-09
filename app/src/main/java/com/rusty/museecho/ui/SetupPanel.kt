@@ -106,6 +106,9 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     TextButton(onClick = onClose) { Text("Done") }
                 }
                 Body("This Echo Show is ${actions.bleName()} (${actions.nodeId()}).", Palette.muted)
+                var pinMessage by remember { mutableStateOf<String?>(null) }
+                TextButton(onClick = { pinMessage = actions.pinToHomeScreen() }) { Text("Add Muse Echo to the home screen") }
+                pinMessage?.let { Body(it, Palette.muted) }
 
                 if (paired && !showPairing) {
                     SectionTitle("Muse")

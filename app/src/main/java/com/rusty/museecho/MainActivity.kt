@@ -92,10 +92,13 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        // Remembered across a crash: if the process dies while this is on screen, the service reopens it.
+        getSharedPreferences("museecho", MODE_PRIVATE).edit().putBoolean("ui_in_front", true).commit()
     }
 
     override fun onPause() {
         visible = false
+        getSharedPreferences("museecho", MODE_PRIVATE).edit().putBoolean("ui_in_front", false).apply()
         super.onPause()
     }
 
@@ -277,6 +280,19 @@ class MainActivity : ComponentActivity() {
         override fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level) =
             GadgetService.instance?.neural?.installed(level) == true
         override suspend fun voiceSpeedTest() = GadgetService.instance?.voiceSpeedTest() ?: "Not running"
+        override fun pinToHomeScreen(): String {
+            if (!androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported(this@MainActivity)) {
+                return "Your home-screen app doesn't support adding shortcuts; find Muse Echo in its app list instead."
+            }
+            val info = androidx.core.content.pm.ShortcutInfoCompat.Builder(this@MainActivity, "open-museecho")
+                .setShortLabel("Muse Echo")
+                .setIcon(androidx.core.graphics.drawable.IconCompat.createWithResource(this@MainActivity, R.mipmap.ic_launcher))
+                .setIntent(android.content.Intent(this@MainActivity, MainActivity::class.java).setAction(android.content.Intent.ACTION_MAIN))
+                .build()
+            androidx.core.content.pm.ShortcutManagerCompat.requestPinShortcut(this@MainActivity, info, null)
+            return "Asked your home screen to add Muse Echo; confirm it there."
+        }
+
         override suspend fun testWakePhrase(phrase: String) = GadgetService.instance?.testWakePhrase(phrase) ?: "Not running"
 
         private val emptyAgenda = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.AgendaDay())

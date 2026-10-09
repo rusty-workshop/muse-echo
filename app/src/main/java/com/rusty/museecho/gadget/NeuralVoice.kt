@@ -193,11 +193,7 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
         return try {
             for (part in firstChunks(text)) {
                 if (cancel) break
-                engine.generateWithCallback(part, 0, 1.0f) { samples ->
-                    if (cancel) return@generateWithCallback 0
-                    queue.put(samples.copyOf())
-                    1
-                }
+                engine.generateWithCallback(part, 0, 1.0f, SampleSink(queue))
             }
             queue.put(end)
             player.join()
@@ -215,15 +211,33 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
     }
 
     /**
+     * The audio callback for sherpa-onnx. Its native code looks up
+     * `invoke([F)Ljava/lang/Integer;` by name, which a Kotlin lambda compiled
+     * as invokedynamic doesn't have (only the generic bridge), and the failed
+     * lookup aborts the whole process. A real class implementing
+     * Function1<FloatArray, Int> gets exactly that method.
+     */
+    private inner class SampleSink(private val queue: java.util.concurrent.BlockingQueue<FloatArray>) : (FloatArray) -> Int {
+        override fun invoke(samples: FloatArray): Int {
+            if (cancel) return 0
+            queue.put(samples.copyOf())
+            return if (cancel) 0 else 1
+        }
+    }
+
+    /**
      * Generate [text] without playing it and return how many seconds of audio
      * one second of work produces (above 1.0 = faster than real time).
      */
     fun speedTest(text: String): Double? {
         val engine = synchronized(this) { tts } ?: return null
+        // Same streaming callback path as real speech, just counting instead of playing.
+        val sink = java.util.concurrent.LinkedBlockingQueue<FloatArray>()
+        cancel = false
         val t0 = System.nanoTime()
-        val audio = engine.generate(text, 0, 1.0f)
+        engine.generateWithCallback(text, 0, 1.0f, SampleSink(sink))
         val took = (System.nanoTime() - t0) / 1e9
-        val seconds = audio.samples.size.toDouble() / audio.sampleRate
+        val seconds = sink.sumOf { it.size }.toDouble() / engine.sampleRate()
         return if (took > 0) seconds / took else null
     }
 

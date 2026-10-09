@@ -95,7 +95,7 @@ class GadgetService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        errors = ErrorLog(java.io.File(filesDir, "errors.json")).also { it.installCrashHandler() }
+        errors = ErrorLog(java.io.File(filesDir, "errors.json")).also { it.installCrashHandler(this) }
         store = Store(filesDir)
         importDroppedFiles()
         identity = store.loadOrCreateIdentity()
@@ -162,6 +162,11 @@ class GadgetService : Service() {
             GadgetState.link.collectLatest { updateNotification() }
         }
         GadgetState.log("gadget ${identity.nodeId} started")
+        // The process died (crash, native abort) while the app was on screen: bring it back.
+        if (getSharedPreferences("museecho", MODE_PRIVATE).getBoolean("ui_in_front", false) && !MainActivity.visible) {
+            GadgetState.log("reopening after an unexpected exit")
+            ErrorLog.scheduleRelaunch(this)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

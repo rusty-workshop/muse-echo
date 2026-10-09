@@ -122,6 +122,8 @@ interface UiActions {
     fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level): Boolean
     suspend fun voiceSpeedTest(): String
     suspend fun testWakePhrase(phrase: String): String
+    /** Ask the home-screen app to pin a Muse Echo icon; returns what happened. */
+    fun pinToHomeScreen(): String
     fun agenda(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.integrations.AgendaDay>
     fun installUpdate(onResult: (String) -> Unit)
     suspend fun checkForUpdate(): String
