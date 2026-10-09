@@ -62,6 +62,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var followUp by remember { mutableStateOf(prefs.followUp) }
     var museMsgs by remember { mutableStateOf(prefs.showMuseInitiated) }
     var gadgetAlerts by remember { mutableStateOf(prefs.showGadgetAlerts) }
+    var serverPill by remember { mutableStateOf(prefs.showServerPill) }
     var quietOn by remember { mutableStateOf(prefs.quietEnabled) }
     var quietStart by remember { mutableStateOf(prefs.quietStart) }
     var quietEnd by remember { mutableStateOf(prefs.quietEnd) }
@@ -346,6 +347,11 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 ToggleRow("Messages from $museName", "Show and speak things $museName sends on its own, like reminders", museMsgs) {
                     museMsgs = it
                     prefs.showMuseInitiated = it
+                }
+                ToggleRow("Server status pill", "Show the Latitude's health next to the connection chip", serverPill) {
+                    serverPill = it
+                    prefs.showServerPill = it
+                    GadgetState.setServerPill(it)
                 }
                 ToggleRow("Gadget alerts", "Announce messages from your other gadgets (the server) and $museName's answer", gadgetAlerts) {
                     gadgetAlerts = it

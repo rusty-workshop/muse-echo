@@ -174,7 +174,8 @@ fun MuseEchoApp(actions: UiActions) {
             }
             Row(Modifier.align(Alignment.TopStart).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusChip(Modifier)
-                ServerLight(Modifier)
+                val showPill by GadgetState.serverPill.collectAsState()
+                if (showPill) ServerLight(Modifier)
             }
             UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {

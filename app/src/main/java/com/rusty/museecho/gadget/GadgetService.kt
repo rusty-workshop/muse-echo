@@ -112,6 +112,7 @@ class GadgetService : Service() {
         history = com.rusty.museecho.integrations.History(java.io.File(filesDir, "history.json"))
         glance = com.rusty.museecho.integrations.Glance(java.io.File(filesDir, "glance.json"))
         GadgetState.setMicOff(Prefs(this).micOff)
+        GadgetState.setServerPill(Prefs(this).showServerPill)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
         frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
@@ -1004,6 +1005,11 @@ class Prefs(context: Context) {
     var nightOffMin: Int
         get() = prefs.getInt("night_off_min", 5)
         set(v) = prefs.edit().putInt("night_off_min", v).apply()
+
+    /** Show the server status pill by the connection chip. */
+    var showServerPill: Boolean
+        get() = prefs.getBoolean("show_server_pill", true)
+        set(v) = prefs.edit().putBoolean("show_server_pill", v).apply()
 
     var micOff: Boolean
         get() = prefs.getBoolean("mic_off", false)

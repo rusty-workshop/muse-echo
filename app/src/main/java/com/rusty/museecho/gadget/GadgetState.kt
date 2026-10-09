@@ -110,6 +110,14 @@ object GadgetState {
         _server.value = s
     }
 
+    /** Whether the server status pill is shown (a setup toggle). */
+    private val _serverPill = MutableStateFlow(true)
+    val serverPill: StateFlow<Boolean> = _serverPill.asStateFlow()
+
+    fun setServerPill(on: Boolean) {
+        _serverPill.value = on
+    }
+
     /** A newer Muse Echo build waiting on the echo-hub. */
     private val _update = MutableStateFlow<com.rusty.museecho.integrations.Release?>(null)
     val update: StateFlow<com.rusty.museecho.integrations.Release?> = _update.asStateFlow()
