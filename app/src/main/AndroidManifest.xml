@@ -45,7 +45,10 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.MuseEcho">
+        android:theme="@style/Theme.MuseEcho"
+        android:usesCleartextTraffic="true">
+        <!-- Plain HTTP is needed on the LAN: the Roku's ECP API (port 8060), the
+             laptop companion, and http:// images and radio streams. -->
 
         <activity
             android:name=".MainActivity"
