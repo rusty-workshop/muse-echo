@@ -143,3 +143,20 @@ class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeou
         }
     }
 }
+
+/** One line on the agenda page: a time (free text, e.g. "9:30 AM" or "All day") and what's happening. */
+@Serializable
+data class AgendaItem(val time: String = "", val title: String = "")
+
+@Serializable
+data class AgendaDay(val date: String = "", val items: List<AgendaItem> = emptyList(), val updatedMs: Long = 0)
+
+/** The day's agenda Muse fills in (agenda.set), shown on the page left of the clock. */
+class Agenda(file: File) : JsonFileState<AgendaDay>(file, AgendaDay.serializer(), AgendaDay()) {
+    fun set(date: String, items: List<AgendaItem>) = update {
+        AgendaDay(date.trim().take(40), items.map { AgendaItem(it.time.trim().take(20), it.title.trim().take(100)) }
+            .filter { it.title.isNotEmpty() }.take(20), System.currentTimeMillis())
+    }
+
+    fun clear() = update { AgendaDay() }
+}

@@ -121,6 +121,12 @@ interface UiActions {
     fun voiceStatus(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.gadget.NeuralVoice.Status>
     fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level): Boolean
     suspend fun voiceSpeedTest(): String
+    suspend fun testWakePhrase(phrase: String): String
+    fun agenda(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.integrations.AgendaDay>
+    fun installUpdate(onResult: (String) -> Unit)
+    suspend fun checkForUpdate(): String
+    fun hubHost(): String
+    fun setHubHost(host: String)
     fun quickActions(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.QuickAction>>
     fun runQuickAction(a: com.rusty.museecho.integrations.QuickAction)
     fun saveQuickActions(list: List<com.rusty.museecho.integrations.QuickAction>)
@@ -159,12 +165,16 @@ fun MuseEchoApp(actions: UiActions) {
         Box(Modifier.fillMaxSize().background(Palette.night)) {
             Crossfade(targetState = screen, label = "screen") { s ->
                 when (s) {
-                    Screen.Idle -> IdleFace(actions)
+                    Screen.Idle -> IdlePages(actions)
                     is Screen.Image -> ImageScreen(s, actions::dismissScreen)
                     is Screen.Text -> TextScreen(s, actions::dismissScreen)
                 }
             }
-            StatusChip(Modifier.align(Alignment.TopStart).padding(14.dp))
+            Row(Modifier.align(Alignment.TopStart).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusChip(Modifier)
+                ServerLight(Modifier)
+            }
+            UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
                 IconButton(onClick = { actions.setMicOff(!micOff) }) {
                     Icon(if (micOff) Icons.Filled.MicOff else Icons.Filled.Mic, if (micOff) "Turn mic on" else "Turn mic off",
@@ -194,6 +204,8 @@ fun MuseEchoApp(actions: UiActions) {
             IdleFrameWatcher(actions)
             Slideshow(actions)
             RingScreen(actions)
+            val asleep by GadgetState.asleep.collectAsState()
+            if (asleep) Box(Modifier.fillMaxSize().background(Color.Black))
             if (showHistory) HistoryPanel(actions, onClose = { showHistory = false })
             if (showKeyboard) TypeSheet(onSend = { actions.sendText(it); showKeyboard = false }, onClose = { showKeyboard = false })
             if (showSetup) SetupPanel(actions, onClose = { showSetup = false })
@@ -274,6 +286,104 @@ private fun IdleFace(actions: UiActions) {
         }
         if (hasNote) NoteCard(note, actions)
     }
+}
+
+/** The clock face, and the agenda one swipe to the left. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun IdlePages(actions: UiActions) {
+    val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 2 })
+    val talk by GadgetState.talk.collectAsState()
+    // Anything happening brings the clock back.
+    LaunchedEffect(talk) { if (talk != Talk.IDLE) pager.animateScrollToPage(0) }
+    LaunchedEffect(pager.currentPage) {
+        if (pager.currentPage != 0) {
+            delay(120_000)
+            pager.animateScrollToPage(0)
+        }
+    }
+    androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+        if (page == 0) IdleFace(actions) else AgendaPage(actions)
+    }
+}
+
+@Composable
+private fun AgendaPage(actions: UiActions) {
+    val day by actions.agenda().collectAsState()
+    val name by GadgetState.museName.collectAsState()
+    val today = SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
+    Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = 64.dp, bottom = 24.dp)) {
+        Text(day.date.ifEmpty { today }, color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+        if (day.date.isNotEmpty() && day.date != today) {
+            Text("From an earlier day", color = Palette.coral, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(10.dp))
+        if (day.items.isEmpty()) {
+            Body("Nothing on the agenda. $name fills this in with the morning brief, or ask \"what's on today?\"", Palette.muted)
+        }
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            day.items.forEach { item ->
+                Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+                    Text(item.time, color = Palette.teal, fontSize = 18.sp, modifier = Modifier.width(110.dp))
+                    Text(item.title, color = Palette.ink, fontSize = 20.sp, lineHeight = 26.sp)
+                }
+            }
+        }
+    }
+}
+
+/** Homelab health from the echo-hub: a dot by the status chip; tap for details. */
+@Composable
+private fun ServerLight(modifier: Modifier) {
+    val status by GadgetState.server.collectAsState()
+    val s = status ?: return
+    var open by remember { mutableStateOf(false) }
+    val down = s.monitors.filter { it.status == "down" }
+    val (color, label) = when (s.overall) {
+        "up" -> Palette.teal to "Server OK"
+        "down" -> Palette.coral to "Server: ${down.size} down"
+        else -> Palette.amber to "Server: check"
+    }
+    Column(modifier) {
+        Row(
+            Modifier.background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50)).clickable { open = !open }
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(8.dp).background(color, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = Palette.ink, fontSize = 13.sp)
+        }
+        if (open) {
+            Column(Modifier.padding(top = 6.dp).background(Palette.card, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                s.monitors.forEach { m ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(7.dp).background(when (m.status) {
+                            "up" -> Palette.teal
+                            "down" -> Palette.coral
+                            else -> Palette.amber
+                        }, CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text("${m.name}: ${m.status}", color = Palette.ink, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** "Update ready" chip; tapping it downloads the build and opens Android's install confirmation. */
+@Composable
+private fun UpdateChip(modifier: Modifier, actions: UiActions) {
+    val update by GadgetState.update.collectAsState()
+    val u = update ?: return
+    var msg by remember(u) { mutableStateOf<String?>(null) }
+    Text(msg ?: "Update ${u.versionName} ready, tap to install", color = Palette.night, fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier.background(Palette.amber, RoundedCornerShape(50)).clickable {
+            msg = "Downloading…"
+            actions.installUpdate { msg = it }
+        }.padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
 /** The pinned note: tap a line to tick it off. */
@@ -473,7 +583,8 @@ private fun TalkButton(modifier: Modifier, actions: UiActions) {
         level = 0f
     }
     val micOff by GadgetState.micOff.collectAsState()
-    val enabled = (link == Link.CONNECTED && !micOff) || listening
+    // Works offline too: the Echo answers the basics itself.
+    val enabled = (link != Link.NOT_PAIRED && !micOff) || listening
     Box(
         modifier.size(84.dp).scale(1f + level * 0.35f).clip(CircleShape)
             .background(if (listening) Palette.coral else if (enabled) Palette.violet else Palette.card)

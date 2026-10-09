@@ -22,6 +22,7 @@ SDKs), plus the push-to-talk chat flow from their ESP32 screen boards.
 | `device.health` | Uptime, memory, storage, Wi-Fi signal, volume, screen state |
 | `notes.get` / `notes.set` / `notes.add` / `notes.remove` / `notes.clear` | The pinned note on the home screen (e.g. a shopping list); tap a line to tick it off |
 | `glance.set` / `glance.clear` | A line under the clock (next event, reminder), next to the Echo's own weather |
+| `agenda.set` / `agenda.clear` | The agenda page (swipe left from the clock): today's events, filled in with the morning brief |
 | `frame.add` / `frame.list` / `frame.remove` / `frame.show` | The photo frame: an idle slideshow with the clock (starts after 5 idle minutes by default; a tap ends it). Photos can also be pushed to `/sdcard/Android/data/com.rusty.museecho/files/frame/` |
 | `quick_actions.get` / `quick_actions.set` | The home screen's quick-action buttons (up to 4), each sending a preset request to Muse |
 | `media.control` | Play/pause/next/previous/stop for whatever plays on the Echo |
@@ -92,7 +93,8 @@ which the first "hey muse" after quiet hours also gets. **History** shows past
 exchanges on the Echo.
 
 **Quiet hours** (default 22:00 to 07:00): no wake word, no speaking, a dim
-screen and soft timer beeps; alarms still ring.
+screen and soft timer beeps; alarms still ring. After a few idle minutes the
+screen switches off completely; a tap, alarm or alert brings it back.
 
 ## Photo frame
 
@@ -100,6 +102,20 @@ screen and soft timer beeps; alarms still ring.
 `~/Pictures/wallpapers`), shrinks each picture to a 1280 px JPEG and copies
 it to the Echo; `--list` and `--clear` manage what's there. Muse can also add
 pictures by URL (`frame.add`).
+
+## Offline
+
+When Muse can't be reached, the Echo still handles the basics itself: voice
+notes are transcribed on the device (Vosk) and timers, alarms, the time and
+date, and the last weather are answered locally, marked "Offline".
+
+## The Latitude's echo-hub
+
+[latitude-echo-hub](../latitude-echo-hub) serves homelab health from Uptime
+Kuma (the status light by the connection chip; tap for each monitor) and the
+newest build for updates. Publish with `tools/release.sh "what changed"`; the
+Echo checks every 6 hours (setup > Updates > Check now) and offers it, and
+Android asks to confirm the install. The version code is the commit count.
 
 ## Keeping it healthy
 

@@ -72,6 +72,10 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var speedResult by remember { mutableStateOf<String?>(null) }
     var wakeSens by remember { mutableStateOf(actions.wakeSensitivity()) }
     var frameDelay by remember { mutableStateOf(actions.frameDelayMin()) }
+    var nightOff by remember { mutableStateOf(prefs.nightOffMin) }
+    var hubHost by remember { mutableStateOf(actions.hubHost()) }
+    var updateMessage by remember { mutableStateOf<String?>(null) }
+    val pendingUpdate by GadgetState.update.collectAsState()
     val photoCount = remember { actions.framePhotos().size }
     val savedActions = remember { actions.quickActions().value }
     val qaLabels = remember { androidx.compose.runtime.mutableStateListOf(*Array(4) { savedActions.getOrNull(it)?.label.orEmpty() }) }
@@ -294,6 +298,13 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }, Palette.muted)
 
                 SectionTitle("Wake word")
+                ChoiceRow(
+                    options = listOf("hey muse", "hey ${museName.lowercase()}").distinct().map { it to "\"$it\"" },
+                    selected = wakePhrase.trim().lowercase(),
+                ) {
+                    wakePhrase = it
+                    wakeMessage = actions.setWakeWord(wakeOn, it)
+                }
                 Body(if (wakeModel) "Say the phrase and talk; it sends when you stop. Recognised on the Echo, offline." else
                     "The offline speech model isn't on the Echo yet.", if (wakeModel) Palette.muted else Palette.coral)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -305,10 +316,16 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                         wakeMessage = actions.setWakeWord(it, wakePhrase)
                     })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        wakeMessage = "Testing silently…"
+                        uiScope.launch { wakeMessage = actions.testWakePhrase(wakePhrase) }
+                    }) { Text("Test phrase") }
+                }
                 if (wakeOn && wakePhrase.trim().lowercase() != actions.wakePhrase()) {
                     TextButton(onClick = { wakeMessage = actions.setWakeWord(true, wakePhrase) }) { Text("Use this phrase") }
                 }
-                wakeMessage?.let { Body(it, Palette.coral) }
+                wakeMessage?.let { Body(it, if (it.contains("✓")) Palette.teal else Palette.coral) }
 
                 SectionTitle("Behaviour")
                 ToggleRow("Speak Muse's replies", "Needs a text-to-speech engine (e.g. RHVoice from F-Droid)", speak) {
@@ -358,6 +375,27 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 weatherMessage?.let { Body(it, if (it == "Saved") Palette.teal else Palette.coral) }
 
+                SectionTitle("Updates")
+                Body("New builds come from the Latitude's echo-hub; Android asks you to confirm each install. " +
+                    "This is version ${com.rusty.museecho.BuildConfig.VERSION_NAME}.", Palette.muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = hubHost, onValueChange = { hubHost = it.take(60) }, singleLine = true,
+                        label = { Text("echo-hub") }, modifier = Modifier.width(220.dp))
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        actions.setHubHost(hubHost)
+                        updateMessage = "Checking…"
+                        uiScope.launch { updateMessage = actions.checkForUpdate() }
+                    }) { Text("Check now") }
+                    if (pendingUpdate != null) {
+                        Button(onClick = {
+                            updateMessage = "Downloading…"
+                            actions.installUpdate { updateMessage = it }
+                        }) { Text("Install") }
+                    }
+                }
+                updateMessage?.let { Body(it, Palette.muted) }
+
                 SectionTitle("Quiet hours")
                 Body("No wake word, no speaking, a dim screen, soft timer beeps. Alarms still ring.", Palette.muted)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -387,6 +425,14 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     })
                 }
                 quietMessage?.let { Body(it, if (it == "Saved") Palette.teal else Palette.coral) }
+                Body("During quiet hours, turn the screen off after it's been idle for:", Palette.muted)
+                ChoiceRow(
+                    options = listOf(0 to "Never (just dim)", 2 to "2 min", 5 to "5 min", 15 to "15 min").map { (m, l) -> m.toString() to l },
+                    selected = nightOff.toString(),
+                ) {
+                    nightOff = it.toInt()
+                    prefs.nightOffMin = nightOff
+                }
             }
             Spacer(Modifier.width(16.dp))
             Column(

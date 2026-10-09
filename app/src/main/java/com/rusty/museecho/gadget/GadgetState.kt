@@ -102,12 +102,36 @@ object GadgetState {
         _weather.value = w
     }
 
+    /** Homelab health from the Latitude's echo-hub (null until first fetched or if unreachable). */
+    private val _server = MutableStateFlow<com.rusty.museecho.integrations.ServerStatus?>(null)
+    val server: StateFlow<com.rusty.museecho.integrations.ServerStatus?> = _server.asStateFlow()
+
+    fun setServer(s: com.rusty.museecho.integrations.ServerStatus?) {
+        _server.value = s
+    }
+
+    /** A newer Muse Echo build waiting on the echo-hub. */
+    private val _update = MutableStateFlow<com.rusty.museecho.integrations.Release?>(null)
+    val update: StateFlow<com.rusty.museecho.integrations.Release?> = _update.asStateFlow()
+
+    fun setUpdate(r: com.rusty.museecho.integrations.Release?) {
+        _update.value = r
+    }
+
     /** The photo-frame slideshow is showing (asked for now, or started by the idle timer). */
     private val _frameShowing = MutableStateFlow(false)
     val frameShowing: StateFlow<Boolean> = _frameShowing.asStateFlow()
 
     fun showFrame(on: Boolean) {
         _frameShowing.value = on
+    }
+
+    /** Overnight: backlight off and the screen black until a tap, alarm or alert. */
+    private val _asleep = MutableStateFlow(false)
+    val asleep: StateFlow<Boolean> = _asleep.asStateFlow()
+
+    fun setAsleep(on: Boolean) {
+        _asleep.value = on
     }
 
     /** Last time someone touched the screen (for the idle slideshow). */

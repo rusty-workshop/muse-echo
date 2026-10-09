@@ -238,6 +238,23 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
         }
     }
 
+    /** Synthesize [text] to mono 16 kHz PCM without playing it (for wake-phrase checks). */
+    fun synthesize16k(text: String): ShortArray? {
+        val engine = synchronized(this) { tts } ?: return null
+        val audio = engine.generate(text, 0, 1.0f)
+        val src = audio.samples
+        val ratio = audio.sampleRate / 16_000.0
+        val n = (src.size / ratio).toInt()
+        // Linear resampling is plenty for a recogniser check.
+        return ShortArray(n) { i ->
+            val pos = i * ratio
+            val j = pos.toInt().coerceAtMost(src.size - 1)
+            val k = (j + 1).coerceAtMost(src.size - 1)
+            val v = src[j] + (src[k] - src[j]) * (pos - j).toFloat()
+            (v.coerceIn(-1f, 1f) * 32767).toInt().toShort()
+        }
+    }
+
     fun release() {
         cancel = true
         synchronized(this) {

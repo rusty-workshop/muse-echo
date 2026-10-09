@@ -1,6 +1,10 @@
 import java.net.URI
 import java.security.MessageDigest
 
+// Over-the-air updates need a rising versionCode: use the commit count.
+val gitCommitCount: Int = providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
+    .standardOutput.asText.get().trim().toIntOrNull() ?: 1
+
 val sherpaVersion = "1.13.8"
 val sherpaSha256 = "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
 
@@ -24,8 +28,8 @@ android {
         // The Echo Show 5 runs LineageOS 18 (Android 11 / API 30).
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.2.0"
+        versionCode = gitCommitCount
+        versionName = "0.3.$gitCommitCount"
         // The Echo Show 5 is 32-bit ARM; keeps Vosk's native libs for other ABIs out of the APK.
         ndk {
             abiFilters += "armeabi-v7a"

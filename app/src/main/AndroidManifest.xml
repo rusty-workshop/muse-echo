@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Over-the-air updates from the Latitude's echo-hub (Android still asks before installing). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -67,6 +69,10 @@
             android:name=".gadget.GadgetService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|microphone" />
+
+        <receiver
+            android:name=".integrations.InstallResultReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

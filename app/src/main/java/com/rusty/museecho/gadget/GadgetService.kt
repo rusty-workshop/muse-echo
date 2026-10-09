@@ -76,9 +76,13 @@ class GadgetService : Service() {
         private set
     lateinit var frame: com.rusty.museecho.integrations.PhotoFrame
         private set
+    lateinit var agenda: com.rusty.museecho.integrations.Agenda
+        private set
     lateinit var quickActions: com.rusty.museecho.integrations.QuickActions
         private set
     private val weather = com.rusty.museecho.integrations.Weather()
+    lateinit var hub: com.rusty.museecho.integrations.Hub
+        private set
 
     /** Set when quiet hours end; the next "hey muse" gets the morning brief. */
     @Volatile
@@ -108,13 +112,16 @@ class GadgetService : Service() {
         history = com.rusty.museecho.integrations.History(java.io.File(filesDir, "history.json"))
         glance = com.rusty.museecho.integrations.Glance(java.io.File(filesDir, "glance.json"))
         GadgetState.setMicOff(Prefs(this).micOff)
+        hub = com.rusty.museecho.integrations.Hub(this)
+        agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
         frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
         quickActions = com.rusty.museecho.integrations.QuickActions(java.io.File(filesDir, "quick_actions.json"))
         val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance, frame, quickActions,
             showFrame = {
                 GadgetState.showFrame(true)
                 bringToFront(force = true)
-            })
+            },
+            agenda = agenda)
         commands = EchoCommands(this, speaker, ::bringToFront, home, ::isQuietNow, { healthExtras() })
         runner = GadgetRunner(
             store = store,
@@ -134,6 +141,13 @@ class GadgetService : Service() {
         scope.launch { tickTimers() }
         scope.launch { watchdog() }
         scope.launch { refreshWeather() }
+        scope.launch { watchServer() }
+        scope.launch {
+            while (true) {
+                checkForUpdate()
+                delay(6 * 3600_000L)
+            }
+        }
         scope.launch { applyVoiceLevel() }
         com.rusty.museecho.BootReceiver.scheduleKeepAlive(this)
         wakeWord = WakeWord(
@@ -263,6 +277,17 @@ class GadgetService : Service() {
         scope.launch { applyVoiceLevel() }
     }
 
+    /** Can the recogniser spot [phrase]? Synthesizes it silently and listens to the result. */
+    suspend fun testWakePhrase(phrase: String): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        if (!neural.ready) return@withContext "Pick a neural voice (Voice quality) to run this test"
+        val target = phrase.lowercase().split(Regex("[^a-z']+")).filter { it.isNotBlank() }.joinToString(" ")
+        val pcm = neural.synthesize16k(target) ?: return@withContext "Couldn't synthesize the phrase"
+        val heard = runCatching { wakeWord.recognise(target, pcm) }.getOrElse { return@withContext "Test failed: ${it.message}" }
+        GadgetState.log("wake phrase test \"$target\": heard \"$heard\"")
+        if (heard.contains(target)) "Recognised \"$target\" ✓" else
+            "Heard \"${heard.ifEmpty { "nothing" }}\" instead of \"$target\": a word may not be in the speech model's vocabulary"
+    }
+
     fun setWakeSensitivity(s: WakeWord.Sensitivity) {
         Prefs(this).wakeSensitivity = s
         applyWakeWord()
@@ -313,6 +338,53 @@ class GadgetService : Service() {
             val prefs = Prefs(this)
             weather.fetch(prefs.weatherLat, prefs.weatherLon)?.let { GadgetState.setWeather(it) }
             delay(if (GadgetState.weather.value == null) 2 * 60_000L else 30 * 60_000L)
+        }
+    }
+
+    /** Poll the Latitude's health once a minute; announce when it goes down. */
+    private suspend fun watchServer() {
+        var lastOverall: String? = null
+        while (true) {
+            val status = hub.status()
+            GadgetState.setServer(status)
+            if (status != null && lastOverall != null && status.overall != lastOverall) {
+                GadgetState.log("server is ${status.overall}")
+            }
+            lastOverall = status?.overall
+            delay(60_000)
+        }
+    }
+
+    /** Look for a newer build on the echo-hub; returns a line for the setup panel. */
+    suspend fun checkForUpdate(): String {
+        val latest = hub.latest() ?: run {
+            GadgetState.setUpdate(null)
+            return "Couldn't reach the echo-hub at ${hub.host}"
+        }
+        return if (latest.versionCode > BuildConfig.VERSION_CODE) {
+            GadgetState.setUpdate(latest)
+            GadgetState.log("update available: ${latest.versionName}")
+            "Version ${latest.versionName} is available: ${latest.notes}"
+        } else {
+            GadgetState.setUpdate(null)
+            "Up to date (${BuildConfig.VERSION_NAME})"
+        }
+    }
+
+    /** Download the waiting update and hand it to Android's installer. */
+    fun installUpdate(onResult: (String) -> Unit) {
+        val release = GadgetState.update.value ?: return onResult("No update waiting")
+        scope.launch {
+            val msg = try {
+                val apk = hub.download(release)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { hub.install(apk) }
+                "Installing ${release.versionName}… confirm on screen"
+            } catch (e: Exception) {
+                errors.add("update failed: ${e.message}")
+                "Update failed: ${e.message}"
+            }
+            GadgetState.log(msg)
+            onResult(msg)
         }
     }
 
@@ -417,9 +489,38 @@ class GadgetService : Service() {
     fun reconnect() = runner.poke()
 
     /** Send a typed message ([text]) or a voice note ([wav]); progress shows in [GadgetState]. */
+    private val offline by lazy {
+        OfflineAssistant(timers, { GadgetState.weather.value }, { GadgetState.museName.value })
+    }
+
+    /** Answer on the Echo itself when Muse is unreachable (timers, alarms, time, weather). */
+    private suspend fun offlineTurn(text: String?, wav: ByteArray?) {
+        GadgetState.setReplySource("Offline")
+        val heard = text?.takeIf { it.isNotBlank() } ?: wav?.let {
+            GadgetState.setTalk(Talk.WAITING)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                runCatching { wakeWord.transcribe(it.copyOfRange(44, it.size)) }.getOrDefault("")
+            }
+        }.orEmpty()
+        GadgetState.setHeard(heard)
+        val answer = offline.answer(heard)
+        GadgetState.log("offline: answered locally")
+        history.add(com.rusty.museecho.integrations.Exchange(System.currentTimeMillis(), heard, answer, "Offline"))
+        deliver(ChatFeed.Reply("offline-${System.currentTimeMillis()}", ChatFeed.Origin.THIS_DEVICE, null, answer,
+            emptyList(), true, null, null), source = "Offline", wakeScreen = false)
+    }
+
     fun talk(text: String?, wav: ByteArray?, label: String? = null) {
         turnJob?.cancel()
         turnJob = scope.launch {
+            // Muse unreachable: answer what the Echo can on its own (not for preset requests).
+            if (label == null && (GadgetState.link.value != Link.CONNECTED || !chat.feedOpen)) {
+                GadgetState.setTalk(Talk.SENDING)
+                GadgetState.setReply("")
+                GadgetState.setReplyImages(emptyList())
+                offlineTurn(text, wav)
+                return@launch
+            }
             GadgetState.setTalk(Talk.SENDING)
             GadgetState.setReplySource(label)
             GadgetState.setHeard(if (label != null) "" else text ?: "")
@@ -446,8 +547,13 @@ class GadgetService : Service() {
             } catch (e: Exception) {
                 errors.add("chat failed: ${e.message}")
                 GadgetState.log("chat failed: ${e.message}")
-                GadgetState.setReply(e.message ?: "Something went wrong")
-                GadgetState.setTalk(Talk.ERROR)
+                if (label == null && (text != null || wav != null)) {
+                    // Lost Muse mid-turn: fall back to what the Echo can do itself.
+                    offlineTurn(text, wav)
+                } else {
+                    GadgetState.setReply(e.message ?: "Something went wrong")
+                    GadgetState.setTalk(Talk.ERROR)
+                }
             }
         }
     }
@@ -463,6 +569,9 @@ class GadgetService : Service() {
         GadgetState.setReplySource(source)
         GadgetState.setReply(reply.text)
         GadgetState.setTalk(Talk.REPLIED)
+        // A new reply counts as activity: it wakes a sleeping screen for the usual idle time.
+        GadgetState.lastTouch = System.currentTimeMillis()
+        GadgetState.setAsleep(false)
         if (wakeScreen && !quiet) bringToFront(force = false)
         scope.launch { GadgetState.setReplyImages(downloadImages(reply.images)) }
         if (!prefs.speakReplies || quiet || reply.text.isBlank()) return
@@ -599,12 +708,8 @@ class GadgetService : Service() {
 
     private fun onWake() {
         GadgetState.log("wake word heard")
-        if (GadgetState.link.value != Link.CONNECTED) {
-            wakeWord.resume()
-            return
-        }
         bringToFront(force = true)
-        if (briefPending && Prefs(this).morningBrief) {
+        if (briefPending && Prefs(this).morningBrief && GadgetState.link.value == Link.CONNECTED) {
             briefPending = false
             wakeWord.resume()
             morningBrief()
@@ -803,7 +908,8 @@ class GadgetService : Service() {
         const val RECONNECT_KICK_MS = 5 * 60_000L
         const val BRIEF_PROMPT = "Good morning! Give me my morning brief, under 80 words and written to be spoken aloud " +
             "(no lists or markdown): today's weather here, what's on my calendar today, anything I asked you to remind " +
-            "me about, and whether anything is wrong on the Latitude server."
+            "me about, and whether anything is wrong on the Latitude server. Also call agenda.set on the Echo Show with " +
+            "today's events so its agenda page is current."
 
         @Volatile
         var instance: GadgetService? = null
@@ -888,6 +994,11 @@ class Prefs(context: Context) {
     var frameDelayMin: Int
         get() = prefs.getInt("frame_delay_min", 5)
         set(v) = prefs.edit().putInt("frame_delay_min", v).apply()
+
+    /** Quiet hours: turn the screen off after this many idle minutes (0 = just dim). */
+    var nightOffMin: Int
+        get() = prefs.getInt("night_off_min", 5)
+        set(v) = prefs.edit().putInt("night_off_min", v).apply()
 
     var micOff: Boolean
         get() = prefs.getBoolean("mic_off", false)

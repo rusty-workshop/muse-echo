@@ -172,6 +172,39 @@ class WakeWord(
         }
     }
 
+    /**
+     * Silent check that the recogniser can spot [phrase]: feeds it [pcm16k]
+     * (mono 16 kHz samples, e.g. the phrase synthesized by the neural voice)
+     * and returns what it heard with the same grammar the listener uses.
+     */
+    fun recognise(phrase: String, pcm16k: ShortArray): String {
+        if (!modelPresent) return "(speech model missing)"
+        val words = phrase.lowercase().split(Regex("[^a-z']+")).filter { it.isNotBlank() }
+        val m = synchronized(this) { model ?: Model(modelDir.absolutePath).also { model = it } }
+        val grammar = JsonArray(listOf(JsonPrimitive(words.joinToString(" ")), JsonPrimitive("[unk]"))).toString()
+        return Recognizer(m, RATE.toFloat(), grammar).use { rec ->
+            val bytes = java.nio.ByteBuffer.allocate(pcm16k.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            pcm16k.forEach { bytes.putShort(it) }
+            rec.acceptWaveForm(bytes.array(), bytes.position())
+            textOf(rec.finalResult, "text")
+        }
+    }
+
+    /** Offline transcription of a voice note (16 kHz mono PCM16 bytes), with no grammar limit. */
+    fun transcribe(pcm16le: ByteArray): String {
+        if (!modelPresent) return ""
+        val m = synchronized(this) { model ?: Model(modelDir.absolutePath).also { model = it } }
+        return Recognizer(m, RATE.toFloat()).use { rec ->
+            var off = 0
+            while (off < pcm16le.size) {
+                val n = minOf(8_000, pcm16le.size - off)
+                rec.acceptWaveForm(pcm16le.copyOfRange(off, off + n), n)
+                off += n
+            }
+            textOf(rec.finalResult, "text")
+        }
+    }
+
     /** Hand the microphone over (e.g. to push-to-talk); [resume] takes it back. */
     fun pause() {
         paused = true

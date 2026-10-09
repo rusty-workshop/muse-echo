@@ -37,6 +37,7 @@ class HomeCommands(
     private val frame: com.rusty.museecho.integrations.PhotoFrame? = null,
     private val quick: com.rusty.museecho.integrations.QuickActions? = null,
     private val showFrame: () -> Unit = {},
+    private val agenda: com.rusty.museecho.integrations.Agenda? = null,
 ) {
     val specs: JsonObject = buildJsonObject {
         val keys = Roku.KEYS.keys.joinToString(", ")
@@ -84,6 +85,11 @@ class HomeCommands(
             required = mapOf("text" to param("string", "One short line, under ~60 characters.")),
             optional = mapOf("minutes" to param("integer", "Clear it after this many minutes. Omit to keep it.")))
         spec("glance.clear", "Clear the glance line under the clock.")
+        spec("agenda.set", "Fill in the agenda page on the Echo Show (swipe left from the clock): today's events in order. " +
+            "Replaces what's there; call it each morning (and when plans change).",
+            required = mapOf("items" to param("array", "Events: [{\"time\": \"9:30 AM\" or \"All day\", \"title\": \"Dentist\"}], in order.")),
+            optional = mapOf("date" to param("string", "Heading, e.g. \"Friday, October 9\". Defaults to today.")))
+        spec("agenda.clear", "Clear the agenda page on the Echo Show.")
         spec("frame.add", "Add a picture to the Echo Show's photo frame (the slideshow it shows when idle). Downloads and keeps it.",
             required = mapOf("url" to param("string", "http(s) URL of a JPEG, PNG or WebP image.")))
         spec("frame.list", "List the pictures in the Echo Show's photo frame.")
@@ -231,6 +237,19 @@ class HomeCommands(
         } ?: commandError("not available")
         "glance.clear" -> glance?.let { g ->
             g.set("", null)
+            commandOk(buildJsonObject { put("cleared", true) })
+        } ?: commandError("not available")
+        "agenda.set" -> agenda?.let { a ->
+            val items = (params["items"] as? JsonArray)?.mapNotNull { e ->
+                val o = e as? JsonObject ?: return@mapNotNull null
+                com.rusty.museecho.integrations.AgendaItem(o.str("time").orEmpty(), o.str("title") ?: return@mapNotNull null)
+            } ?: return commandError("items must be a list of {time, title}")
+            val date = params.str("date") ?: SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
+            val saved = a.set(date, items)
+            commandOk(buildJsonObject { put("date", saved.date); put("count", saved.items.size) })
+        } ?: commandError("not available")
+        "agenda.clear" -> agenda?.let { a ->
+            a.clear()
             commandOk(buildJsonObject { put("cleared", true) })
         } ?: commandError("not available")
         "frame.add" -> frame?.let { f ->

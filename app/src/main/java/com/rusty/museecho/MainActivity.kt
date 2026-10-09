@@ -23,6 +23,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -67,6 +69,12 @@ class MainActivity : ComponentActivity() {
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         if (ev.action == android.view.MotionEvent.ACTION_DOWN) {
             GadgetState.lastTouch = System.currentTimeMillis()
+            // The first tap on a sleeping screen only wakes it.
+            if (GadgetState.asleep.value) {
+                GadgetState.setAsleep(false)
+                window.attributes = window.attributes.apply { screenBrightness = 0.05f }
+                return true
+            }
             // A tap anywhere ends the photo frame (and does nothing else).
             if (GadgetState.frameShowing.value) {
                 GadgetState.showFrame(false)
@@ -109,13 +117,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Overnight, keep this window dim unless something's happening on it. */
+    /**
+     * Overnight: dim this window when idle, and after the configured idle
+     * minutes switch the backlight off entirely (the screen stays awake, so a
+     * tap still lands). Anything happening on screen lights it again.
+     */
     private fun dimDuringQuietHours() {
         lifecycleScope.launch {
-            combine(GadgetState.quiet, GadgetState.screen, GadgetState.talk, GadgetState.ringing) { quiet, screen, talk, ringing ->
-                quiet && screen is Screen.Idle && (talk == Talk.IDLE || talk == Talk.REPLIED) && !ringing
-            }.collectLatest { dim ->
-                window.attributes = window.attributes.apply { screenBrightness = if (dim) 0.05f else -1f }
+            while (true) {
+                val quiet = GadgetState.quiet.value
+                val calm = GadgetState.screen.value is Screen.Idle && !GadgetState.ringing.value &&
+                    (GadgetState.talk.value == Talk.IDLE || GadgetState.talk.value == Talk.REPLIED) &&
+                    !GadgetState.speaking.value && !GadgetState.frameShowing.value
+                val offAfter = com.rusty.museecho.gadget.Prefs(this@MainActivity).nightOffMin
+                val idleMs = System.currentTimeMillis() - GadgetState.lastTouch
+                val asleep = quiet && calm && offAfter > 0 && idleMs >= offAfter * 60_000L
+                if (asleep != GadgetState.asleep.value) GadgetState.setAsleep(asleep)
+                val brightness = when {
+                    asleep -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF
+                    quiet && calm -> 0.05f
+                    else -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                }
+                if (window.attributes.screenBrightness != brightness) {
+                    window.attributes = window.attributes.apply { screenBrightness = brightness }
+                }
+                // Wake promptly when something happens; otherwise check every few seconds.
+                kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                    combine(GadgetState.talk, GadgetState.ringing, GadgetState.screen, GadgetState.quiet) { a, b, c, d -> listOf(a, b, c, d) }
+                        .drop(1).first()
+                }
             }
         }
     }
@@ -247,6 +277,20 @@ class MainActivity : ComponentActivity() {
         override fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level) =
             GadgetService.instance?.neural?.installed(level) == true
         override suspend fun voiceSpeedTest() = GadgetService.instance?.voiceSpeedTest() ?: "Not running"
+        override suspend fun testWakePhrase(phrase: String) = GadgetService.instance?.testWakePhrase(phrase) ?: "Not running"
+
+        private val emptyAgenda = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.AgendaDay())
+        override fun agenda() = GadgetService.instance?.agenda?.value ?: emptyAgenda
+        override fun installUpdate(onResult: (String) -> Unit) {
+            GadgetService.instance?.installUpdate { m -> runOnUiThread { onResult(m) } } ?: onResult("Not running")
+        }
+
+        override suspend fun checkForUpdate() = GadgetService.instance?.checkForUpdate() ?: "Not running"
+        override fun hubHost() = GadgetService.instance?.hub?.host ?: com.rusty.museecho.integrations.Hub.DEFAULT_HOST
+        override fun setHubHost(host: String) {
+            GadgetService.instance?.hub?.host = host
+        }
+
         private val emptyActions = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.QuickActions.DEFAULTS)
         override fun quickActions() = GadgetService.instance?.quickActions?.value ?: emptyActions
         override fun runQuickAction(a: com.rusty.museecho.integrations.QuickAction) {
