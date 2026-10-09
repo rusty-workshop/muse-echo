@@ -1,3 +1,9 @@
+import java.net.URI
+import java.security.MessageDigest
+
+val sherpaVersion = "1.13.8"
+val sherpaSha256 = "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -81,8 +87,32 @@ dependencies {
         exclude(group = "net.java.dev.jna")
     }
     implementation("${libs.jna.get()}@aar")
+    // In-app neural voices (Piper via sherpa-onnx, Apache-2.0). The AAR isn't on
+    // Maven; fetchSherpaOnnx downloads the pinned release into libs/.
+    implementation(files("libs/sherpa-onnx-$sherpaVersion.aar"))
+    // Unpacks the downloaded voice models (.tar.bz2).
+    implementation(libs.commons.compress)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
 }
+
+// The sherpa-onnx AAR (47 MB) lives outside git: fetch the pinned release once
+// and check its checksum, so a fresh clone builds without manual steps.
+val fetchSherpaOnnx by tasks.registering {
+    val target = layout.projectDirectory.file("libs/sherpa-onnx-$sherpaVersion.aar").asFile
+    outputs.file(target)
+    doLast {
+        if (target.isFile) return@doLast
+        target.parentFile.mkdirs()
+        val url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/sherpa-onnx-$sherpaVersion.aar"
+        val tmp = File(target.path + ".part")
+        URI(url).toURL().openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+        val digest = MessageDigest.getInstance("SHA-256").digest(tmp.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        check(digest == sherpaSha256) { "sherpa-onnx AAR checksum mismatch: $digest" }
+        tmp.renameTo(target)
+    }
+}
+tasks.named("preBuild") { dependsOn(fetchSherpaOnnx) }

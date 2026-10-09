@@ -18,3 +18,6 @@ __pycache__/
 
 # Personal Muse SDK token
 sdk_token
+
+# Downloaded at build time (fetchSherpaOnnx)
+/app/libs/

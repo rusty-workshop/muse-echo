@@ -116,6 +116,13 @@ interface UiActions {
     fun togglePlayback()
     fun stopPlayback()
     fun saveWeatherLocation(lat: Double, lon: Double)
+    fun voiceLevel(): String
+    fun setVoiceLevel(choice: String)
+    fun voiceStatus(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.gadget.NeuralVoice.Status>
+    fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level): Boolean
+    suspend fun voiceSpeedTest(): String
+    fun wakeSensitivity(): com.rusty.museecho.gadget.WakeWord.Sensitivity
+    fun setWakeSensitivity(s: com.rusty.museecho.gadget.WakeWord.Sensitivity)
     fun wakeWordEnabled(): Boolean
     fun wakePhrase(): String
     fun wakeModelPresent(): Boolean

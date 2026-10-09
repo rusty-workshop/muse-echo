@@ -52,16 +52,30 @@ class WakeWord(
 
     val modelPresent: Boolean get() = File(modelDir, "am").isDirectory && File(modelDir, "graph").isDirectory
 
+    /**
+     * How readily it wakes: the volume gate (RMS floor, and multiple of the
+     * room's background) and whether the phrase's last word alone counts.
+     */
+    enum class Sensitivity(val label: String, val gateRms: Double, val overFloor: Double, val lastWordAlone: Boolean) {
+        LOW("Low", 180.0, 2.5, false),
+        MEDIUM("Medium", 120.0, 2.0, false),
+        HIGH("High", 90.0, 1.8, true),
+    }
+
+    @Volatile
+    private var sensitivity = Sensitivity.HIGH
+
     /** Start listening for [phrase]. Returns an error message, or null when it's listening. */
     @SuppressLint("MissingPermission") // the caller checks RECORD_AUDIO
-    fun start(phrase: String): String? {
+    fun start(phrase: String, sensitivity: Sensitivity = Sensitivity.HIGH): String? {
+        this.sensitivity = sensitivity
         stop()
         if (!modelPresent) return "speech model missing (push vosk-model-small-en-us to the app's files dir)"
         val words = phrase.lowercase().split(Regex("[^a-z']+")).filter { it.isNotBlank() }
         if (words.isEmpty()) return "the wake phrase is empty"
         val target = words.joinToString(" ")
         // "hey" is short and often heard as noise; the phrase's last word alone also counts.
-        val shortTarget = words.last().takeIf { words.size > 1 && it.length >= 3 }
+        val shortTarget = words.last().takeIf { sensitivity.lastWordAlone && words.size > 1 && it.length >= 3 }
         running = true
         paused = false
         worker = thread(name = "wake-word", isDaemon = true) {
@@ -76,7 +90,7 @@ class WakeWord(
                 running = false
             }
         }
-        log("listening for \"$target\"")
+        log("listening for \"$target\" (${sensitivity.label.lowercase()} sensitivity)")
         return null
     }
 
@@ -123,7 +137,7 @@ class WakeWord(
                 // Track the floor: fall fast toward quiet, rise slowly with steady noise (a fan, a TV).
                 noiseFloor = if (level < noiseFloor) noiseFloor * 0.7 + level * 0.3 else noiseFloor * 0.995 + level * 0.005
                 noiseFloor = noiseFloor.coerceIn(5.0, 2_000.0)
-                if (level >= maxOf(GATE_RMS, noiseFloor * GATE_OVER_FLOOR)) {
+                if (level >= maxOf(sensitivity.gateRms, noiseFloor * sensitivity.overFloor)) {
                     if (now >= feedUntil) {
                         // Waking from quiet: replay the pre-roll first.
                         rec.reset()
@@ -201,8 +215,6 @@ class WakeWord(
         }
 
         /** About -45 dBFS: quieter than speech across a room, louder than the Echo's idle noise floor. */
-        const val GATE_RMS = 90.0
-        const val GATE_OVER_FLOOR = 1.8
         const val HOLD_MS = 2_500L
         const val DEFAULT_FLOOR = 60.0
         const val PRE_ROLL_CHUNKS = 8

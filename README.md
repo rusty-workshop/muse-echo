@@ -124,6 +124,21 @@ adb shell mv /sdcard/Android/data/com.rusty.museecho/files/vosk-model-small-en-u
 
 ## Speech
 
+Setup > **Voice quality** picks the voice: the system TTS engine, or Piper
+"lessac" neural voices that run inside the app (sherpa-onnx), Low, Medium or
+High, each downloaded once (63/64/110 MB). Generation overlaps playback and
+the first clause is spoken as soon as it's ready. Measured on the Echo Show 5
+("Test speed" runs silently): Low 1.0x real time, Medium 0.7x, High 0.1x
+(too slow). Full-precision models: the int8 builds ran 3x slower on its
+32-bit ARM userspace. The sherpa-onnx AAR is fetched at build time
+(pinned SHA-256) into `app/libs/`.
+
+Setup > **Wake word sensitivity**: Low (strict, close range), Medium (across
+the room, full phrase), High (quiet/distant speech; the last word alone
+counts, most false wake-ups).
+
+### System voice
+
 The app prefers the neural Piper voice from the sherpa-onnx TTS engine
 (`com.k2fsa.sherpa.onnx.tts.engine`, e.g. the en_US lessac-medium build from
 huggingface.co/csukuangfj/sherpa-onnx-apk, armeabi-v7a) and falls back to

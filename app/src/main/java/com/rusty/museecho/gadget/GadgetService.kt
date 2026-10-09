@@ -50,6 +50,8 @@ class GadgetService : Service() {
     private lateinit var runner: GadgetRunner
     private lateinit var commands: EchoCommands
     private lateinit var speaker: Speaker
+    lateinit var neural: NeuralVoice
+        private set
     private lateinit var chat: ChatClient
     private var runnerJob: Job? = null
     private var pairingJob: Job? = null
@@ -91,7 +93,8 @@ class GadgetService : Service() {
         identity = store.loadOrCreateIdentity()
         val ua = "musegadget/${BuildConfig.VERSION_NAME} (Echo Show 5; Android ${Build.VERSION.RELEASE}) museecho"
         api = MuseApi(ua, log = GadgetState::log)
-        speaker = Speaker(this)
+        neural = NeuralVoice(java.io.File(filesDir, "tts")) { GadgetState.log(it) }
+        speaker = Speaker(this, neural)
         timers = com.rusty.museecho.integrations.Timers(java.io.File(filesDir, "timers.json"))
         laptop = com.rusty.museecho.integrations.Laptop(this)
         roku = com.rusty.museecho.integrations.Roku(this)
@@ -121,6 +124,7 @@ class GadgetService : Service() {
         scope.launch { tickTimers() }
         scope.launch { watchdog() }
         scope.launch { refreshWeather() }
+        scope.launch { applyVoiceLevel() }
         com.rusty.museecho.BootReceiver.scheduleKeepAlive(this)
         wakeWord = WakeWord(
             modelDir = java.io.File(getExternalFilesDir(null), WakeWord.MODEL_DIR_NAME),
@@ -232,6 +236,41 @@ class GadgetService : Service() {
     }
 
     fun isQuietNow() = QuietHours.isQuiet(Prefs(this))
+
+    /** Load the chosen neural voice (downloading it the first time), or go back to the system voice. */
+    suspend fun applyVoiceLevel(): String? {
+        val choice = Prefs(this).voiceLevel
+        val level = NeuralVoice.Level.entries.firstOrNull { it.name == choice }
+        if (level == null) {
+            neural.release()
+            return null
+        }
+        return neural.use(level)
+    }
+
+    fun setVoiceLevel(choice: String) {
+        Prefs(this).voiceLevel = choice
+        scope.launch { applyVoiceLevel() }
+    }
+
+    fun setWakeSensitivity(s: WakeWord.Sensitivity) {
+        Prefs(this).wakeSensitivity = s
+        applyWakeWord()
+    }
+
+    /** Silent speed check of the current neural voice: "1.8x real time" etc. */
+    suspend fun voiceSpeedTest(): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        if (!neural.ready) return@withContext "Pick a neural voice first"
+        val x = neural.speedTest("Good morning! It's seventy five degrees and overcast, with a high of eighty five today.")
+            ?: return@withContext "Speed test failed"
+        val verdict = when {
+            x >= 1.3 -> "fast: starts quickly, no gaps"
+            x >= 0.9 -> "keeps up: a short wait before it starts"
+            x >= 0.6 -> "a bit slow: longer wait, the odd pause"
+            else -> "too slow for this Echo: long waits and gaps"
+        }
+        "%.1fx real time (%s)".format(x, verdict).also { GadgetState.log("voice speed: $it") }
+    }
 
     /** Ask Muse for the morning brief, as a turn on the Echo. */
     fun morningBrief() {
@@ -569,7 +608,7 @@ class GadgetService : Service() {
             return null
         }
         if (!micAllowed()) return "Microphone permission is needed for the wake word"
-        val error = wakeWord.start(prefs.wakePhrase)
+        val error = wakeWord.start(prefs.wakePhrase, prefs.wakeSensitivity)
         if (error != null) GadgetState.log("wake word: $error")
         return error
     }
@@ -855,6 +894,16 @@ class Prefs(context: Context) {
     var quietEnd: String
         get() = prefs.getString("quiet_end", null) ?: "07:00"
         set(v) = prefs.edit().putString("quiet_end", v).apply()
+
+    var wakeSensitivity: WakeWord.Sensitivity
+        get() = runCatching { WakeWord.Sensitivity.valueOf(prefs.getString("wake_sensitivity", null) ?: "HIGH") }
+            .getOrDefault(WakeWord.Sensitivity.HIGH)
+        set(v) = prefs.edit().putString("wake_sensitivity", v.name).apply()
+
+    /** "SYSTEM" for the installed TTS engine, or a [NeuralVoice.Level] name. */
+    var voiceLevel: String
+        get() = prefs.getString("voice_level", null) ?: "SYSTEM"
+        set(v) = prefs.edit().putString("voice_level", v).apply()
 
     var wakePhrase: String
         get() = prefs.getString("wake_phrase", null) ?: "hey muse"

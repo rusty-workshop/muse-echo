@@ -38,6 +38,7 @@ import com.rusty.museecho.gadget.BlePairing
 import com.rusty.museecho.gadget.GadgetState
 import com.rusty.museecho.gadget.Link
 import com.rusty.museecho.gadget.Prefs
+import kotlinx.coroutines.launch
 
 /** Pairing, SDK token, preferences and the connection log, as a two-column overlay. */
 @Composable
@@ -66,6 +67,11 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var quietEnd by remember { mutableStateOf(prefs.quietEnd) }
     var quietMessage by remember { mutableStateOf<String?>(null) }
     var brief by remember { mutableStateOf(prefs.morningBrief) }
+    var voiceChoice by remember { mutableStateOf(actions.voiceLevel()) }
+    val voiceStatus by actions.voiceStatus().collectAsState()
+    var speedResult by remember { mutableStateOf<String?>(null) }
+    var wakeSens by remember { mutableStateOf(actions.wakeSensitivity()) }
+    val uiScope = androidx.compose.runtime.rememberCoroutineScope()
     var lat by remember { mutableStateOf("%.4f".format(prefs.weatherLat)) }
     var lon by remember { mutableStateOf("%.4f".format(prefs.weatherLon)) }
     var weatherMessage by remember { mutableStateOf<String?>(null) }
@@ -201,6 +207,51 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 laptopMessage?.let { Body(it, Palette.teal) }
 
+                SectionTitle("Voice quality")
+                Body("Higher sounds more natural but is slower on the Echo: Low keeps up with speech, Medium " +
+                    "waits a few seconds first, High is too slow for this chip. Each level downloads once.", Palette.muted)
+                ChoiceRow(
+                    options = listOf("SYSTEM" to "System") + com.rusty.museecho.gadget.NeuralVoice.Level.entries.map {
+                        it.name to (it.label + if (actions.voiceInstalled(it)) "" else " · ${it.sizeMb} MB")
+                    },
+                    selected = voiceChoice,
+                ) {
+                    voiceChoice = it
+                    speedResult = null
+                    actions.setVoiceLevel(it)
+                }
+                val voiceLine = when (val st = voiceStatus) {
+                    is com.rusty.museecho.gadget.NeuralVoice.Status.Downloading -> "Downloading ${st.level.label}… ${st.percent}%" to Palette.amber
+                    is com.rusty.museecho.gadget.NeuralVoice.Status.Ready -> "${st.level.label} voice ready" to Palette.teal
+                    is com.rusty.museecho.gadget.NeuralVoice.Status.Failed -> "${st.level.label}: ${st.why}" to Palette.coral
+                    com.rusty.museecho.gadget.NeuralVoice.Status.Idle -> (if (voiceChoice == "SYSTEM") "Using the system voice" else "Loading…") to Palette.muted
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Body(voiceLine.first, voiceLine.second)
+                    Spacer(Modifier.weight(1f))
+                    if (voiceStatus is com.rusty.museecho.gadget.NeuralVoice.Status.Ready) {
+                        TextButton(onClick = {
+                            speedResult = "Testing silently…"
+                            uiScope.launch { speedResult = actions.voiceSpeedTest() }
+                        }) { Text("Test speed") }
+                    }
+                }
+                speedResult?.let { Body(it, Palette.muted) }
+
+                SectionTitle("Wake word sensitivity")
+                ChoiceRow(
+                    options = com.rusty.museecho.gadget.WakeWord.Sensitivity.entries.map { it.name to it.label },
+                    selected = wakeSens.name,
+                ) {
+                    wakeSens = com.rusty.museecho.gadget.WakeWord.Sensitivity.valueOf(it)
+                    actions.setWakeSensitivity(wakeSens)
+                }
+                Body(when (wakeSens) {
+                    com.rusty.museecho.gadget.WakeWord.Sensitivity.LOW -> "Needs a clear, close \"${actions.wakePhrase()}\". Fewest false wake-ups."
+                    com.rusty.museecho.gadget.WakeWord.Sensitivity.MEDIUM -> "Hears you across the room; still needs the whole phrase."
+                    com.rusty.museecho.gadget.WakeWord.Sensitivity.HIGH -> "Hears quiet and distant speech, and the last word alone counts. Most false wake-ups."
+                }, Palette.muted)
+
                 SectionTitle("Wake word")
                 Body(if (wakeModel) "Say the phrase and talk; it sends when you stop. Recognised on the Echo, offline." else
                     "The offline speech model isn't on the Echo yet.", if (wakeModel) Palette.muted else Palette.coral)
@@ -305,6 +356,26 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 Spacer(Modifier.height(4.dp))
                 log.asReversed().forEach { Mono(it) }
             }
+        }
+    }
+}
+
+/** A row of mutually exclusive options, like a segmented control. */
+@Composable
+private fun ChoiceRow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
+    Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.forEach { (key, label) ->
+            val on = key == selected
+            Text(
+                label,
+                color = if (on) Palette.night else Palette.ink,
+                fontSize = 13.sp,
+                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier
+                    .background(if (on) Palette.violet else Palette.card, RoundedCornerShape(50))
+                    .clickable { onSelect(key) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            )
         }
     }
 }

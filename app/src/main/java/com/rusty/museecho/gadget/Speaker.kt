@@ -10,14 +10,18 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * On-device text-to-speech. LineageOS ships without a TTS engine, so this
- * reports [available] = false until one (e.g. RHVoice or eSpeak NG from
- * F-Droid) is installed; callers then fall back to captions.
+ * On-device text-to-speech: the in-app neural voice ([NeuralVoice]) when a
+ * quality level is chosen and loaded, otherwise the system TTS engine.
+ * Without either, [available] is false and callers fall back to captions.
  */
-class Speaker(context: Context) {
+class Speaker(context: Context, private val neural: NeuralVoice? = null) {
     @Volatile
-    var available = false
-        private set
+    private var systemAvailable = false
+
+    val available: Boolean get() = neural?.ready == true || systemAvailable
+
+    /** Plays neural speech off the main thread, one utterance at a time. */
+    private val neuralWorker = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "neural-voice").apply { isDaemon = true } }
 
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val appContext = context.applicationContext
@@ -45,8 +49,8 @@ class Speaker(context: Context) {
                 return
             }
         }
-        available = status == TextToSpeech.SUCCESS && configure()
-        GadgetState.log(if (available) "text-to-speech ready (${engine ?: tts.defaultEngine})" else "no text-to-speech engine; replies are captions only")
+        systemAvailable = status == TextToSpeech.SUCCESS && configure()
+        GadgetState.log(if (systemAvailable) "system text-to-speech ready (${engine ?: tts.defaultEngine})" else "no system text-to-speech engine")
     }
 
     private fun configure(): Boolean {
@@ -80,8 +84,30 @@ class Speaker(context: Context) {
     var current = ""
         private set
 
+    private fun neuralReady() = neural?.ready == true
+
+    /** Neural speech for [text]; completes [done] when finished or stopped. */
+    private fun speakNeural(text: String, done: CompletableDeferred<Boolean>?) {
+        current = text
+        val asked = System.currentTimeMillis()
+        neuralWorker.execute {
+            val ok = neural!!.speakBlocking(text) {
+                GadgetState.setSpeaking(true)
+                GadgetState.log("speech started after ${System.currentTimeMillis() - asked} ms")
+            }
+            GadgetState.setSpeaking(false)
+            if (current == text) current = ""
+            done?.complete(ok)
+        }
+    }
+
     fun speak(text: String) {
-        if (!available) return
+        if (neuralReady()) {
+            neural!!.stop()
+            speakNeural(text, null)
+            return
+        }
+        if (!systemAvailable) return
         current = text
         val id = UUID.randomUUID().toString()
         startedAt[id] = System.currentTimeMillis()
@@ -90,7 +116,15 @@ class Speaker(context: Context) {
 
     /** Speak [text] and wait (up to 2 minutes) until it has been said. */
     suspend fun speakAndWait(text: String): Boolean {
-        if (!available) return false
+        if (neuralReady()) {
+            neural!!.stop()
+            val done = CompletableDeferred<Boolean>()
+            val id = UUID.randomUUID().toString()
+            pending[id] = done
+            speakNeural(text, done)
+            return (withTimeoutOrNull(300_000) { done.await() } ?: false).also { pending.remove(id) }
+        }
+        if (!systemAvailable) return false
         val id = UUID.randomUUID().toString()
         current = text
         val done = CompletableDeferred<Boolean>()
@@ -109,6 +143,7 @@ class Speaker(context: Context) {
     }
 
     fun stop() {
+        neural?.stop()
         tts.stop()
         GadgetState.setSpeaking(false)
         current = ""
@@ -118,6 +153,8 @@ class Speaker(context: Context) {
     }
 
     fun shutdown() {
+        neural?.release()
+        neuralWorker.shutdownNow()
         tts.shutdown()
     }
 }

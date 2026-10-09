@@ -228,6 +228,22 @@ class MainActivity : ComponentActivity() {
             GadgetService.instance?.reloadWeather()
         }
 
+        override fun voiceLevel() = com.rusty.museecho.gadget.Prefs(this@MainActivity).voiceLevel
+        override fun setVoiceLevel(choice: String) {
+            GadgetService.instance?.setVoiceLevel(choice)
+        }
+
+        private val idleVoice = kotlinx.coroutines.flow.MutableStateFlow<com.rusty.museecho.gadget.NeuralVoice.Status>(
+            com.rusty.museecho.gadget.NeuralVoice.Status.Idle)
+        override fun voiceStatus() = GadgetService.instance?.neural?.status ?: idleVoice
+        override fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level) =
+            GadgetService.instance?.neural?.installed(level) == true
+        override suspend fun voiceSpeedTest() = GadgetService.instance?.voiceSpeedTest() ?: "Not running"
+        override fun wakeSensitivity() = com.rusty.museecho.gadget.Prefs(this@MainActivity).wakeSensitivity
+        override fun setWakeSensitivity(s: com.rusty.museecho.gadget.WakeWord.Sensitivity) {
+            GadgetService.instance?.setWakeSensitivity(s)
+        }
+
         override fun refreshQuiet() {
             GadgetService.instance?.refreshQuiet()
         }
