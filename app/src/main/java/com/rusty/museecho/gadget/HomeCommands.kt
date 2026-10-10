@@ -89,7 +89,9 @@ class HomeCommands(
         spec("glance.clear", "Clear the glance line under the clock.")
         spec("agenda.set", "Fill in the agenda page on the Echo Show (swipe left from the clock): today's events in order. " +
             "Replaces what's there; call it each morning (and when plans change).",
-            required = mapOf("items" to param("array", "Events: [{\"time\": \"9:30 AM\" or \"All day\", \"title\": \"Dentist\"}], in order.")),
+            required = mapOf("items" to param("array", "Events: [{\"time\": \"9:30 AM\" or \"All day\", \"title\": \"Dentist\", " +
+                "\"location\": \"street address (optional)\"}], in order. With a time and an address the Echo works out " +
+                "the drive and shows when to leave, with a nudge.")),
             optional = mapOf(
                 "date" to param("string", "Heading, e.g. \"Friday, October 9\". Defaults to today."),
                 "upcoming" to param("array", "The next few days for the \"Coming up\" section (up to 7 days, 8 events each): " +
@@ -264,14 +266,14 @@ class HomeCommands(
         "agenda.set" -> agenda?.let { a ->
             val items = (params["items"] as? JsonArray)?.mapNotNull { e ->
                 val o = e as? JsonObject ?: return@mapNotNull null
-                com.rusty.museecho.integrations.AgendaItem(o.str("time").orEmpty(), o.str("title") ?: return@mapNotNull null)
+                com.rusty.museecho.integrations.AgendaItem(o.str("time").orEmpty(), o.str("title") ?: return@mapNotNull null, o.str("location").orEmpty())
             } ?: return commandError("items must be a list of {time, title}")
             val date = params.str("date") ?: SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
             val upcoming = (params["upcoming"] as? JsonArray).orEmpty().mapNotNull { d ->
                 val o = d as? JsonObject ?: return@mapNotNull null
                 val dayItems = (o["items"] as? JsonArray).orEmpty().mapNotNull { e ->
                     val io = e as? JsonObject ?: return@mapNotNull null
-                    com.rusty.museecho.integrations.AgendaItem(io.str("time").orEmpty(), io.str("title") ?: return@mapNotNull null)
+                    com.rusty.museecho.integrations.AgendaItem(io.str("time").orEmpty(), io.str("title") ?: return@mapNotNull null, io.str("location").orEmpty())
                 }
                 com.rusty.museecho.integrations.UpcomingDay(o.str("date") ?: return@mapNotNull null, dayItems)
             }

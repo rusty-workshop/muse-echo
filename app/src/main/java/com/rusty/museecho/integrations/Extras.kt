@@ -38,7 +38,7 @@ class QuickActions(file: File) : JsonFileState<List<QuickAction>>(file, ListSeri
  * Photos for the idle slideshow: files pushed to the app's `frame/` folder
  * (adb or the laptop) plus pictures Muse adds by URL, cached locally.
  */
-class PhotoFrame(private val dir: File, private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()) {
+class PhotoFrame(val dir: File, private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()) {
     init {
         dir.mkdirs()
     }

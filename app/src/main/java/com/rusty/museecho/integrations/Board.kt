@@ -153,7 +153,7 @@ class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeou
 
 /** One line on the agenda page: a time (free text, e.g. "9:30 AM" or "All day") and what's happening. */
 @Serializable
-data class AgendaItem(val time: String = "", val title: String = "")
+data class AgendaItem(val time: String = "", val title: String = "", val location: String = "")
 
 /** A later day's events, for the agenda page's "Coming up". */
 @Serializable
@@ -175,7 +175,8 @@ class Agenda(file: File) : JsonFileState<AgendaDay>(file, AgendaDay.serializer()
     }
 
     private fun clean(items: List<AgendaItem>) =
-        items.map { AgendaItem(it.time.trim().take(20), it.title.trim().take(100)) }.filter { it.title.isNotEmpty() }.take(20)
+        items.map { AgendaItem(it.time.trim().take(20), it.title.trim().take(100), it.location.trim().take(120)) }
+            .filter { it.title.isNotEmpty() }.take(20)
 
     fun clear() = update { AgendaDay() }
 }

@@ -72,7 +72,17 @@ class MainActivity : ComponentActivity() {
             GadgetState.lastTouch = System.currentTimeMillis()
             GadgetState.setAlertGlow(false)
             // Back after a while: the blob waves hello.
-            if (away > 30 * 60_000L && !GadgetState.quiet.value) GadgetState.react(com.rusty.museecho.gadget.Reaction.WAVE)
+            if (away > 30 * 60_000L && !GadgetState.quiet.value) {
+                GadgetState.react(com.rusty.museecho.gadget.Reaction.WAVE)
+                // ...with a hello for the time of day.
+                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                GadgetState.say(when (hour) {
+                    in 5..10 -> "Morning! ☀️"
+                    in 11..16 -> "Welcome back!"
+                    in 17..21 -> "Evening! 🌙"
+                    else -> "Hi there! 👋"
+                }, 6)
+            }
             // Tucked in for the night: a touch gets it up again.
             if (GadgetState.tuckedIn.value) {
                 GadgetState.setTuckedIn(false)
@@ -293,6 +303,22 @@ class MainActivity : ComponentActivity() {
         override fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level) =
             GadgetService.instance?.neural?.installed(level) == true
         override suspend fun voiceSpeedTest() = GadgetService.instance?.voiceSpeedTest() ?: "Not running"
+        override suspend fun homelab() = GadgetService.instance?.hub?.homelab()
+
+        override fun ask(prompt: String, label: String) {
+            GadgetService.instance?.talk(prompt, null, label = label)
+        }
+
+        override suspend fun backupNow(): String? = GadgetService.instance?.chores?.backupNow() ?: "the service isn't running"
+
+        override fun restoreBackup(onResult: (String) -> Unit) {
+            GadgetService.instance?.restoreFromBackup(onResult) ?: onResult("the service isn't running")
+        }
+
+        override fun lastBackupMs() = GadgetService.instance?.chores?.lastBackupMs() ?: 0L
+
+        override suspend fun syncPhotosNow() = GadgetService.instance?.chores?.syncPhotos() ?: 0
+
         override fun pinToHomeScreen(): String {
             if (!androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported(this@MainActivity)) {
                 return "Your home-screen app doesn't support adding shortcuts; find Muse Echo in its app list instead."

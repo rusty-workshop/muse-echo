@@ -1,6 +1,12 @@
 package com.rusty.museecho.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.LaunchedEffect
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -244,10 +250,23 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 qaMessage?.let { Body(it, Palette.teal) }
 
+                SectionTitle("Clock face")
+                ClockFacePicker()
+
                 SectionTitle("Photo frame")
-                Body(if (photoCount == 0) "No photos yet. $museName can add some (frame.add), or push pictures to " +
-                    "/sdcard/Android/data/com.rusty.museecho/files/frame/." else
-                    "$photoCount photos. Starts after the Echo's been idle this long; a tap ends it.", Palette.muted)
+                Body(if (photoCount == 0) "No photos yet. Drop pictures in \"Pictures/Echo Frame\" on the laptop (Syncthing " +
+                    "brings them over within 15 minutes), or $museName can add some (frame.add)." else
+                    "$photoCount photos. Starts after the Echo's been idle this long; a tap ends it. New pictures in the " +
+                    "laptop's \"Pictures/Echo Frame\" folder arrive by themselves.", Palette.muted)
+                var syncMsg by remember { mutableStateOf<String?>(null) }
+                TextButton(onClick = {
+                    syncMsg = "Checking the Latitude…"
+                    uiScope.launch {
+                        val n = actions.syncPhotosNow()
+                        syncMsg = if (n == 0) "Up to date." else "Added $n photo${if (n == 1) "" else "s"}."
+                    }
+                }) { Text("Sync photos now") }
+                syncMsg?.let { Body(it, Palette.muted) }
                 ChoiceRow(
                     options = listOf(0 to "Off", 2 to "2 min", 5 to "5 min", 15 to "15 min", 30 to "30 min").map { (m, l) -> m.toString() to l },
                     selected = frameDelay.toString(),
@@ -303,6 +322,11 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     energy < 0.9f -> "Lively: quicker breathing, antics every 10 minutes."
                     else -> "Hyper: bouncy, and up to something every few minutes."
                 }, Palette.muted)
+                var sounds by remember { mutableStateOf(com.rusty.museecho.gadget.Prefs(ctx).blobSounds) }
+                ToggleRow("Blob sounds", "Tiny, quiet chirps when it hops, yawns or celebrates. Never during quiet hours or while talking.", sounds) {
+                    sounds = it
+                    com.rusty.museecho.gadget.Prefs(ctx).blobSounds = it
+                }
 
                 SectionTitle("Wake word sensitivity")
                 ChoiceRow(
@@ -356,6 +380,11 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 ToggleRow("Come to the front", "When Muse shows something, jump over other apps, then step back after a minute idle", front) {
                     front = it
                     prefs.comeToFront = it
+                }
+                var stayFront by remember { mutableStateOf(prefs.returnToFront) }
+                ToggleRow("Stay in front", "If another app (or a stray tap) takes over the screen, come back after a minute", stayFront) {
+                    stayFront = it
+                    prefs.returnToFront = it
                 }
                 ToggleRow("Follow-up listening", "After $museName answers, listen a few seconds for your reply, no wake word needed", followUp) {
                     followUp = it
@@ -421,6 +450,33 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     }
                 }
                 updateMessage?.let { Body(it, Palette.muted) }
+
+                SectionTitle("Backup")
+                var backupMsg by remember { mutableStateOf<String?>(null) }
+                var confirmRestore by remember { mutableStateOf(false) }
+                val last = actions.lastBackupMs()
+                Body(if (last == 0L) "Backs up settings, pairing, notes and the rest to the Latitude each night (around 3 a.m.). No backup yet."
+                    else "Backed up to the Latitude each night. Last: " +
+                        SimpleDateFormat("EEE MMM d, h:mm a", Locale.US).format(Date(last)), Palette.muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        backupMsg = "Backing up…"
+                        uiScope.launch { backupMsg = actions.backupNow() ?: "Backed up." }
+                    }) { Text("Back up now") }
+                    TextButton(onClick = { confirmRestore = true }) { Text("Restore from backup…") }
+                }
+                if (confirmRestore) {
+                    Body("Replace this Echo's settings, pairing and notes with the newest backup from the Latitude? The app restarts.", Palette.amber)
+                    Row {
+                        TextButton(onClick = {
+                            confirmRestore = false
+                            backupMsg = "Restoring…"
+                            actions.restoreBackup { backupMsg = it }
+                        }) { Text("Restore") }
+                        TextButton(onClick = { confirmRestore = false }) { Text("Cancel") }
+                    }
+                }
+                backupMsg?.let { Body(it, Palette.muted) }
 
                 SectionTitle("Quiet hours")
                 Body("No wake word, no speaking, a dim screen, soft timer beeps. Alarms still ring.", Palette.muted)
@@ -501,5 +557,43 @@ private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChang
             Text(subtitle, color = Palette.muted, fontSize = 12.sp)
         }
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** The clock styles side by side, each a live miniature; tap one to use it. */
+@Composable
+private fun ClockFacePicker() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val current by GadgetState.clockFace.collectAsState()
+    var now by remember { mutableStateOf(java.util.Date()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000L - System.currentTimeMillis() % 1000L)
+            now = java.util.Date()
+        }
+    }
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+    ) {
+        ClockFace.entries.forEach { face ->
+            val selected = face.name == current
+            Column(
+                Modifier.width(150.dp)
+                    .background(if (selected) Palette.violet.copy(alpha = 0.22f) else Palette.card, RoundedCornerShape(14.dp))
+                    .border(if (selected) 2.dp else 0.dp, if (selected) Palette.violet else Color.Transparent, RoundedCornerShape(14.dp))
+                    .clickable {
+                        GadgetState.setClockFace(face.name)
+                        com.rusty.museecho.gadget.Prefs(ctx).clockFace = face.name
+                    }
+                    .padding(10.dp),
+            ) {
+                Box(Modifier.fillMaxWidth().height(72.dp), contentAlignment = Alignment.CenterStart) {
+                    ClockFaceView(face, now, scale = 0.42f)
+                }
+                Text(face.label, color = Palette.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(face.blurb, color = Palette.muted, fontSize = 11.sp, maxLines = 2)
+            }
+        }
     }
 }

@@ -118,6 +118,7 @@ class GadgetService : Service() {
         GadgetState.setMicOff(Prefs(this).micOff)
         GadgetState.setServerPill(Prefs(this).showServerPill)
         GadgetState.setBlobEnergy(Prefs(this).blobEnergy)
+        GadgetState.setClockFace(Prefs(this).clockFace)
         GadgetState.setDismissedAlerts(Prefs(this).dismissedAlerts)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
@@ -155,6 +156,15 @@ class GadgetService : Service() {
         scope.launch { watchServer() }
         scope.launch { watchMuseElsewhere() }
         scope.launch { watchLaptop() }
+        chores = Chores(this, scope, hub, timers, frame, agenda,
+            say = { text -> if (Prefs(this).speakReplies) speaker.speak(text) },
+            chime = ::softChime,
+            toFront = { bringToFront(force = true) },
+            isQuiet = ::isQuietNow,
+        ).also { it.start() }
+        // The blob's little sounds: its reactions, and taps from the screen.
+        scope.launch { GadgetState.reaction.collect { r -> r?.let { BlobSounds.forReaction(it.reaction)?.let(::playBlobSound) } } }
+        scope.launch { GadgetState.sounds.collect(::playBlobSound) }
         scope.launch { specialDays.value.collect { GadgetState.setSpecialDays(it.days) } }
         scope.launch { reminders.value.collect { GadgetState.setReminders(it) } }
         scope.launch { watchAlerts() }
@@ -549,7 +559,8 @@ class GadgetService : Service() {
         turnJob?.cancel()
         turnJob = scope.launch {
             // Muse unreachable: answer what the Echo can on its own (not for preset requests).
-            if (label == null && (GadgetState.link.value != Link.CONNECTED || !chat.feedOpen)) {
+            // Also straight away when the internet itself is down (rather than waiting to time out).
+            if (label == null && (GadgetState.link.value != Link.CONNECTED || !chat.feedOpen || GadgetState.internet.value == false)) {
                 GadgetState.setTalk(Talk.SENDING)
                 GadgetState.setReply("")
                 GadgetState.setReplyImages(emptyList())
@@ -561,6 +572,7 @@ class GadgetService : Service() {
             GadgetState.setHeard(if (label != null) "" else text ?: "")
             GadgetState.setReply("")
             GadgetState.setReplyImages(emptyList())
+            GadgetState.setTurnActive(true)
             try {
                 var heardText = if (label != null) label else text.orEmpty()
                 val reply = chat.turn(text, wav) { heard, partial ->
@@ -589,6 +601,8 @@ class GadgetService : Service() {
                     GadgetState.setReply(e.message ?: "Something went wrong")
                     GadgetState.setTalk(Talk.ERROR)
                 }
+            } finally {
+                GadgetState.setTurnActive(false)
             }
         }
     }
@@ -679,7 +693,7 @@ class GadgetService : Service() {
         return "Alert" + (title?.let { ": ${it.take(80)}" } ?: "")
     }
 
-    private fun softChime() {
+    internal fun softChime() {
         val beep = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 50)
         beep.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 200)
         scope.launch {
@@ -890,6 +904,34 @@ class GadgetService : Service() {
         }
     }
 
+    lateinit var chores: Chores
+        private set
+    private val blobSounds = BlobSounds()
+
+    /** Very quiet, and never while it could get in the way: quiet hours, talking, listening, music, ringing. */
+    private fun playBlobSound(sound: BlobSound) {
+        if (!Prefs(this).blobSounds || isQuietNow() || GadgetState.speaking.value || GadgetState.ringing.value ||
+            GadgetState.talk.value == Talk.LISTENING || GadgetState.nowPlaying.value != null
+        ) return
+        blobSounds.play(sound)
+    }
+
+    /** Restores the newest Latitude backup, then restarts the app so everything reloads it. */
+    fun restoreFromBackup(onResult: (String) -> Unit) {
+        scope.launch {
+            val problem = chores.restore()
+            if (problem != null) {
+                onResult(problem)
+                return@launch
+            }
+            onResult("Restored. Restarting…")
+            delay(1_500)
+            getSharedPreferences("museecho", MODE_PRIVATE).edit().putLong("last_crash_relaunch", 0).commit()
+            ErrorLog.scheduleRelaunch(this@GadgetService)
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
+
     /** The blob acts out the quick action you tapped. */
     fun quickActionReaction(label: String) {
         val l = label.lowercase()
@@ -1060,6 +1102,8 @@ class GadgetService : Service() {
             return
         }
         GadgetState.log("wake word heard")
+        // Ears up first, so you can see it heard you before the beep.
+        GadgetState.earsAt = System.currentTimeMillis()
         bringToFront(force = true)
         if (briefPending && Prefs(this).morningBrief && GadgetState.link.value == Link.CONNECTED) {
             briefPending = false
@@ -1270,7 +1314,10 @@ class GadgetService : Service() {
             "church, family and the rest, not just the primary one, which is usually empty). Also, on the Echo Show: " +
             "call agenda.set with today's events from all of them plus the next 3 days as upcoming, and reminders.set " +
             "with anything I should be reminded of today (with times when they have one). If something big is coming " +
-            "up (a trip, a birthday, a holiday) and isn't on its countdowns yet, add it with countdown.add."
+            "up (a trip, a birthday, a holiday) and isn't on its countdowns yet, add it with countdown.add. Give events " +
+            "a location (street address) when they have one, so the Echo can say when to leave. Finally, pick today's " +
+            "look for the blob with blob.style (hours 14): a colour and/or accessory that suits the weather or what's " +
+            "on today (e.g. umbrella weather, a church day, a birthday)."
 
         @Volatile
         var instance: GadgetService? = null
@@ -1369,6 +1416,19 @@ class Prefs(context: Context) {
     var announcedAlerts: Set<String>
         get() = prefs.getStringSet("announced_alerts", emptySet()) ?: emptySet()
         set(v) = prefs.edit().putStringSet("announced_alerts", v.toSet()).apply()
+
+    /** Come back to the front after a minute behind another app. */
+    var returnToFront: Boolean
+        get() = prefs.getBoolean("return_to_front", true)
+        set(v) = prefs.edit().putBoolean("return_to_front", v).apply()
+
+    var blobSounds: Boolean
+        get() = prefs.getBoolean("blob_sounds", true)
+        set(v) = prefs.edit().putBoolean("blob_sounds", v).apply()
+
+    var clockFace: String
+        get() = prefs.getString("clock_face", "CLASSIC") ?: "CLASSIC"
+        set(v) = prefs.edit().putString("clock_face", v).apply()
 
     var blobEnergy: Float
         get() = prefs.getFloat("blob_energy", 0.5f)

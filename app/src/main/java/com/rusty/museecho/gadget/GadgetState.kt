@@ -32,7 +32,7 @@ enum class Reaction(val ms: Long) {
 }
 
 /** Something the blob holds up (blob.hold, or its own forecast props). */
-enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN }
+enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN, HOURGLASS }
 
 data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
@@ -358,6 +358,74 @@ object GadgetState {
 
     fun setReminders(day: com.rusty.museecho.integrations.ReminderDay) {
         _reminders.value = day
+    }
+
+    /** The internet answers (null: not checked yet). Wi-Fi can be up while this is false. */
+    private val _internet = MutableStateFlow<Boolean?>(null)
+    val internet: StateFlow<Boolean?> = _internet.asStateFlow()
+
+    fun setInternet(on: Boolean?) {
+        _internet.value = on
+    }
+
+    /** When to leave for today's events: "title|time" to minutes after midnight. */
+    private val _leaveBy = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val leaveBy: StateFlow<Map<String, Int>> = _leaveBy.asStateFlow()
+
+    fun setLeaveBy(map: Map<String, Int>) {
+        _leaveBy.value = map
+    }
+
+    /** A turn the Echo started is in flight (its reply streams into the caption). */
+    private val _turnActive = MutableStateFlow(false)
+    val turnActive: StateFlow<Boolean> = _turnActive.asStateFlow()
+
+    fun setTurnActive(on: Boolean) {
+        _turnActive.value = on
+    }
+
+    /** When the wake word was last heard (the blob's ears pop up). */
+    @Volatile
+    var earsAt = 0L
+
+    /** The homelab page's data, fetched while it's on screen. */
+    private val _homelab = MutableStateFlow<com.rusty.museecho.integrations.Homelab?>(null)
+    val homelab: StateFlow<com.rusty.museecho.integrations.Homelab?> = _homelab.asStateFlow()
+
+    fun setHomelab(h: com.rusty.museecho.integrations.Homelab?) {
+        _homelab.value = h
+    }
+
+    /** Which idle page is showing: 0 clock, 1 agenda, 2 homelab. */
+    private val _idlePage = MutableStateFlow(0)
+    val idlePage: StateFlow<Int> = _idlePage.asStateFlow()
+
+    fun setIdlePage(p: Int) {
+        _idlePage.value = p
+    }
+
+    /** The cards under the blob (soon events, labels, signs), shown above the quick actions. */
+    private val _blobCards = MutableStateFlow<List<Pair<String, Long>>>(emptyList())
+    val blobCards: StateFlow<List<Pair<String, Long>>> = _blobCards.asStateFlow()
+
+    fun setBlobCards(cards: List<Pair<String, Long>>) {
+        _blobCards.value = cards
+    }
+
+    /** Little blob sounds asked for by the screen (a tap); the service plays them if allowed. */
+    private val _sounds = kotlinx.coroutines.flow.MutableSharedFlow<BlobSound>(extraBufferCapacity = 4)
+    val sounds: kotlinx.coroutines.flow.SharedFlow<BlobSound> = _sounds
+
+    fun chirp(sound: BlobSound) {
+        _sounds.tryEmit(sound)
+    }
+
+    /** The idle screen's clock style (a ClockFace name). */
+    private val _clockFace = MutableStateFlow("CLASSIC")
+    val clockFace: StateFlow<String> = _clockFace.asStateFlow()
+
+    fun setClockFace(name: String) {
+        _clockFace.value = name
     }
 
     /** Loudness of music from audio.play_url, 0..1, or -1 when unknown. */

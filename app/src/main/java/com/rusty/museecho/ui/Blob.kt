@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.geometry.Rect
@@ -123,6 +124,8 @@ internal fun Blob(
     val reminderDay by GadgetState.reminders.collectAsState()
     val specialDays by GadgetState.specialDays.collectAsState()
     val replyText by GadgetState.reply.collectAsState()
+    val turnActive by GadgetState.turnActive.collectAsState()
+    val leaveBy by GadgetState.leaveBy.collectAsState()
     var dreamPhoto by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var litAtMs by remember { mutableStateOf(0L) }
 
@@ -223,7 +226,10 @@ internal fun Blob(
         if (sizePx <= 0f || System.currentTimeMillis() - tapAtMs > 1_000) return@LaunchedEffect
         val c = Offset(sizePx / 2, sizePx / 2)
         val d = at - c
-        if (sqrt(d.x * d.x + d.y * d.y) < sizePx * 0.32f) checkIn(weather, agenda, server, morning = false, seconds = 12)
+        if (sqrt(d.x * d.x + d.y * d.y) < sizePx * 0.32f) {
+            GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.TAP)
+            checkIn(weather, agenda, server, morning = false, seconds = 12)
+        }
     }
 
     // The server coming back is worth a little cheer.
@@ -471,6 +477,17 @@ internal fun Blob(
             // Watching the TV.
             if (!looking && tvPlaying && !quiet) { lookX = -0.85f; lookY = 0.1f }
 
+            // A running timer: the hourglass shows how much is left, and turns over when a new one starts
+            // or time is added.
+            val runningTimer = timers.filter { it.kind == "timer" && it.dueAtMs > nowMs }.minByOrNull { it.dueAtMs }
+            val timerKey = runningTimer?.let { "${it.id}@${it.dueAtMs}" }
+            if (timerKey != sm.timerKey) {
+                if (timerKey != null && sm.timerKey != null) sm.flipAt = t
+                sm.timerKey = timerKey
+            }
+            val sand = runningTimer?.let { ((it.dueAtMs - nowMs).toFloat() / it.durationMs.coerceAtLeast(1)).coerceIn(0f, 1f) } ?: 0f
+            val flipP = ((t - sm.flipAt) / 0.7f).coerceIn(0f, 1f)
+
             // Getting ready: in the hour before the day's first timed event, it fidgets and checks the clock.
             val nowMin = hour * 60 + cal.get(Calendar.MINUTE)
             if (firstToday != null && firstToday - nowMin in 15..60 && react == null && talk == Talk.IDLE && !quiet) {
@@ -484,6 +501,7 @@ internal fun Blob(
             val prop = presenting
                 ?: (if (react == Reaction.TEAR_PAGE) HeldItem.CALENDAR else null)
                 ?: held?.takeIf { it.untilMs > nowMs }?.item
+                ?: (if (runningTimer != null) HeldItem.HOURGLASS else null)
                 ?: (if (wetAlert) HeldItem.UMBRELLA else null)
                 ?: (if (remindersToday) HeldItem.NOTE else null)
                 ?: (if (hour >= 18 && !quiet && hasTomorrow) HeldItem.BAG else null)
@@ -577,13 +595,17 @@ internal fun Blob(
                 if (accF < 1f) popIn(1f - accF, core) { sm.prevAccessory?.let { drawAccessory(it, core, r, t) } }
                 if (!mini) {
                     val hand = core + Offset(-r * 0.44f, r * 0.36f)
-                    popIn(propF, hand) { sm.prop?.let { drawHeld(it, core, r, t) } }
-                    if (propF < 1f) popIn(1f - propF, hand) { sm.prevProp?.let { drawHeld(it, core, r, t) } }
+                    popIn(propF, hand) { sm.prop?.let { drawHeld(it, core, r, t, sand, flipP) } }
+                    if (propF < 1f) popIn(1f - propF, hand) { sm.prevProp?.let { drawHeld(it, core, r, t, sand, flipP) } }
                     if (react == Reaction.TEAR_PAGE) drawTornPage(hand, r, p)
                 }
                 if (museBusy && talk == Talk.IDLE && !mini) drawGear(core + Offset(r * 0.52f, -r * 0.46f), r * 0.09f, t * 1.5f)
                 if (mood == Mood.SLEEPY && react == null && !mini) drawDream(core, r, t, weather, dreamPhoto)
                 if (react == Reaction.COVER_EARS) drawEarCovers(core, r, p, tint)
+                // Ears perk up while it listens, and pop up the moment it hears the wake word.
+                val earsTarget = if (talk == Talk.LISTENING || System.currentTimeMillis() - GadgetState.earsAt < 2_500) 1f else 0f
+                sm.ears += (earsTarget - sm.ears) * ease(if (earsTarget > sm.ears) 14f else 6f)
+                if (sm.ears > 0.02f) drawEars(core, r, sm.ears, tint, t)
                 if (muted && !mini) drawMuted(core + Offset(-r * 0.5f, -r * 0.42f), r * 0.07f)
             }
 
@@ -593,8 +615,9 @@ internal fun Blob(
             // Thinking out loud: a thought cloud with dots while waiting, then the first words as they stream in.
             if (!mini) {
                 if (replyText.length != sm.replyLen) { sm.replyLen = replyText.length; sm.replyAt = t }
-                val streaming = talk == Talk.REPLIED && !speaking && replyText.isNotBlank() && t - sm.replyAt < 4f
-                val waiting = talk == Talk.SENDING || talk == Talk.WAITING
+                // Only for questions asked here, not messages Pixel sends on its own.
+                val streaming = turnActive && talk == Talk.REPLIED && !speaking && replyText.isNotBlank() && t - sm.replyAt < 4f
+                val waiting = turnActive && (talk == Talk.SENDING || talk == Talk.WAITING)
                 val thinkTarget = if (waiting || streaming) 1f else 0f
                 sm.think += (thinkTarget - sm.think) * ease(8f)
                 thinking.value = sm.think
@@ -642,6 +665,16 @@ internal fun Blob(
         // Cards under the blob: an event starting soon, the label on what it's holding, and the
         // sign it holds up when something on the server is wrong.
         val cards = mutableListOf<Pair<String, Color>>()
+        // Time to head out for something with an address (see Chores.leaveBy).
+        run {
+            val nowCal = Calendar.getInstance().apply { timeInMillis = tick }
+            val nowMin = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
+            leaveBy.entries.filter { it.value - nowMin in -10..45 }.minByOrNull { it.value }?.let { (key, at) ->
+                val title = key.substringBefore('|')
+                val clock = "%d:%02d".format(((at / 60 + 11) % 12) + 1, at % 60)
+                cards += (if (at - nowMin <= 0) "🚗 Leave now for $title" else "🚗 Leave by $clock · $title") to Palette.coral
+            }
+        }
         soonEvent?.let { (title, mins) ->
             cards += when {
                 mins > 0 -> "⏰ $title in $mins min"
@@ -674,35 +707,9 @@ internal fun Blob(
             } to (if (s.overall == "down") Palette.coral else Palette.amber)
         }
         if (cards.size > 3) cards.subList(3, cards.size).clear()
-        if (cards.isNotEmpty() && !mini) {
-            androidx.compose.foundation.layout.Column(
-                Modifier.align(Alignment.BottomCenter).layout { m, cons ->
-                    val placeable = m.measure(cons.copy(minWidth = 0, maxWidth = 240.dp.roundToPx()))
-                    // Hangs just below the blob's box.
-                    layout(placeable.width, placeable.height) { placeable.place(0, placeable.height - 4.dp.roundToPx()) }
-                }.animateContentSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                cards.forEach { (text, color) ->
-                    // New cards slide and fade in.
-                    androidx.compose.runtime.key(text) {
-                        val shown = remember { androidx.compose.animation.core.MutableTransitionState(false).apply { targetState = true } }
-                        androidx.compose.animation.AnimatedVisibility(
-                            visibleState = shown,
-                            enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(300)) +
-                                androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(300)),
-                        ) {
-                    Text(
-                        text, color = Palette.night, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(bottom = 3.dp)
-                            .background(color, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
-                        }
-                    }
-                }
-            }
-        }
+        // Shown by the home screen just above the quick-action buttons, so neither hides the other.
+        val published = cards.map { (text, color) -> text to color.toArgb().toLong() }
+        LaunchedEffect(published, mini) { if (!mini) GadgetState.setBlobCards(published) }
     }
 }
 
@@ -1127,7 +1134,7 @@ private val tape = Color(0xFFE8C99B)
 private val frosting = Color(0xFFFFB3DE)
 
 /** A prop held at the blob's lower left (blob.hold, or the evening forecast hint). */
-private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float) {
+private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float, sand: Float = 0f, flip: Float = 1f) {
     val a = core + Offset(-r * 0.44f, r * 0.36f)
     when (item) {
         HeldItem.NONE -> {}
@@ -1243,6 +1250,7 @@ private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float)
                 drawLine(Palette.amber, a + Offset(cos(ang) * r * 0.1f, sin(ang) * r * 0.1f), a + Offset(cos(ang) * r * 0.14f, sin(ang) * r * 0.14f), r * 0.02f, StrokeCap.Round)
             }
         }
+        HeldItem.HOURGLASS -> drawHourglass(a, r, sand, flip, t)
         HeldItem.SUNGLASSES -> rotate(-15f, a) {
             val lens = Size(r * 0.11f, r * 0.08f)
             drawRoundRect(shades, Offset(a.x - r * 0.125f, a.y - lens.height / 2), lens, CornerRadius(r * 0.025f))
@@ -1444,6 +1452,9 @@ private class Smooth {
     var replyLen = 0
     var replyAt = -10f
     var think = 0f
+    var ears = 0f
+    var timerKey: String? = null
+    var flipAt = -10f
 }
 
 /** Draws [block] scaled up from [anchor] with a little overshoot as [f] goes 0 to 1 (and faded). */
@@ -1532,4 +1543,71 @@ private fun nextReminder(day: com.rusty.museecho.integrations.ReminderDay, nowMs
     val upcoming = day.items.filter { r -> BlobBrain.minutesOfDay(r.time)?.let { it + 5 >= nowMin } ?: true }
     val next = upcoming.minByOrNull { BlobBrain.minutesOfDay(it.time) ?: Int.MAX_VALUE } ?: return null
     return (if (next.time.isNotBlank()) "${next.time} " else "") + next.text
+}
+
+/** Two rounded ears perking up from the top of the head; [up] eases 0..1 (with a little overshoot). */
+private fun DrawScope.drawEars(core: Offset, r: Float, up: Float, tint: Color, t: Float) {
+    val c1 = 1.7f
+    val x = up - 1f
+    val k = (1f + (c1 + 1f) * x * x * x + c1 * x * x).coerceAtLeast(0f)
+    for (side in listOf(-1f, 1f)) {
+        val base = core + Offset(side * r * 0.24f, -r * 0.36f)
+        val twitch = sin(t * 9f + side) * 3f * up
+        rotate(side * (18f + twitch), base) {
+            val h = r * 0.26f * k
+            val w = r * 0.13f
+            val ear = Path().apply {
+                moveTo(base.x - w, base.y + r * 0.04f)
+                quadraticTo(base.x - w * 0.9f, base.y - h * 0.9f, base.x, base.y - h)
+                quadraticTo(base.x + w * 0.9f, base.y - h * 0.9f, base.x + w, base.y + r * 0.04f)
+                close()
+            }
+            drawPath(ear, tint)
+            val inner = Path().apply {
+                moveTo(base.x - w * 0.5f, base.y)
+                quadraticTo(base.x - w * 0.45f, base.y - h * 0.65f, base.x, base.y - h * 0.72f)
+                quadraticTo(base.x + w * 0.45f, base.y - h * 0.65f, base.x + w * 0.5f, base.y)
+                close()
+            }
+            drawPath(inner, Palette.coral.copy(alpha = 0.55f))
+        }
+    }
+}
+
+/** An hourglass: [sand] is the share still to fall (top bulb), and [flip] 0..1 turns it over. */
+private fun DrawScope.drawHourglass(a: Offset, r: Float, sand: Float, flip: Float, t: Float) {
+    val turn = if (flip < 1f) 180f * (1f - (1f - flip) * (1f - flip)) - 180f else 0f
+    rotate(turn, a) {
+        val w = r * 0.11f
+        val h = r * 0.16f
+        val glass = Palette.ink.copy(alpha = 0.35f)
+        // Frame: caps top and bottom.
+        drawRoundRect(lerp(Palette.amber, Palette.night, 0.35f), Offset(a.x - w * 1.25f, a.y - h - r * 0.03f), Size(w * 2.5f, r * 0.035f), CornerRadius(r * 0.015f))
+        drawRoundRect(lerp(Palette.amber, Palette.night, 0.35f), Offset(a.x - w * 1.25f, a.y + h), Size(w * 2.5f, r * 0.035f), CornerRadius(r * 0.015f))
+        val bulbs = Path().apply {
+            moveTo(a.x - w, a.y - h); lineTo(a.x + w, a.y - h)
+            quadraticTo(a.x + w, a.y - h * 0.2f, a.x + w * 0.12f, a.y)
+            quadraticTo(a.x + w, a.y + h * 0.2f, a.x + w, a.y + h)
+            lineTo(a.x - w, a.y + h)
+            quadraticTo(a.x - w, a.y + h * 0.2f, a.x - w * 0.12f, a.y)
+            quadraticTo(a.x - w, a.y - h * 0.2f, a.x - w, a.y - h)
+            close()
+        }
+        drawPath(bulbs, glass)
+        val sandColor = Palette.amber
+        // Top: sand left, sinking toward the neck.
+        if (sand > 0.01f) {
+            val top = a.y - h * 0.85f * sand
+            val half = w * (0.15f + 0.8f * sand)
+            drawPath(Path().apply { moveTo(a.x - half, top); lineTo(a.x + half, top); lineTo(a.x, a.y - r * 0.005f); close() }, sandColor)
+            // The falling stream, flickering.
+            if (flip >= 1f) drawLine(sandColor.copy(alpha = 0.7f + 0.3f * sin(t * 20f)), Offset(a.x, a.y), Offset(a.x, a.y + h * 0.95f), r * 0.012f)
+        }
+        // Bottom: a growing pile.
+        val pile = 1f - sand
+        if (pile > 0.01f) {
+            val peak = a.y + h - h * 0.8f * pile
+            drawPath(Path().apply { moveTo(a.x - w * 0.95f, a.y + h); lineTo(a.x + w * 0.95f, a.y + h); lineTo(a.x, peak); close() }, sandColor)
+        }
+    }
 }

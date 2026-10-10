@@ -10,6 +10,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -143,6 +145,14 @@ interface UiActions {
     fun wakePhrase(): String
     fun wakeModelPresent(): Boolean
     fun setWakeWord(enabled: Boolean, phrase: String): String?
+    /** The homelab page: fresh details from the echo-hub. */
+    suspend fun homelab(): com.rusty.museecho.integrations.Homelab?
+    /** Ask Muse something from a button (shown with [label] instead of what was "heard"). */
+    fun ask(prompt: String, label: String)
+    suspend fun backupNow(): String?
+    fun restoreBackup(onResult: (String) -> Unit)
+    fun lastBackupMs(): Long
+    suspend fun syncPhotosNow(): Int
 }
 
 internal object Palette {
@@ -167,7 +177,15 @@ fun MuseEchoApp(actions: UiActions) {
         val micOff by GadgetState.micOff.collectAsState()
 
         Box(Modifier.fillMaxSize().background(Palette.night)) {
-            Crossfade(targetState = screen, label = "screen") { s ->
+            // Pictures and cards fade and grow in; the clock eases back afterwards.
+            androidx.compose.animation.AnimatedContent(
+                targetState = screen,
+                transitionSpec = {
+                    (fadeIn(tween(450)) + androidx.compose.animation.scaleIn(tween(450), initialScale = 0.96f)) togetherWith
+                        (fadeOut(tween(300)) + androidx.compose.animation.scaleOut(tween(300), targetScale = 1.02f))
+                },
+                label = "screen",
+            ) { s ->
                 when (s) {
                     Screen.Idle -> IdlePages(actions)
                     is Screen.Image -> ImageScreen(s, actions::dismissScreen)
@@ -199,10 +217,12 @@ fun MuseEchoApp(actions: UiActions) {
                 }
             }
             QuickActionRow(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 30.dp), actions)
+            BlobCards(Modifier.align(Alignment.BottomStart), actions)
             Captions(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 120.dp, bottom = 18.dp), actions)
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
 
             Column(Modifier.align(Alignment.TopCenter).padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                InternetBanner()
                 AlertBanner()
                 TimerChips(Modifier, actions)
                 NowPlayingChip(Modifier.padding(top = 6.dp), actions)
@@ -211,10 +231,16 @@ fun MuseEchoApp(actions: UiActions) {
             Slideshow(actions)
             RingScreen(actions)
             val asleep by GadgetState.asleep.collectAsState()
-            if (asleep) Box(Modifier.fillMaxSize().background(Color.Black))
-            if (showHistory) HistoryPanel(actions, onClose = { showHistory = false })
-            if (showKeyboard) TypeSheet(onSend = { actions.sendText(it); showKeyboard = false }, onClose = { showKeyboard = false })
-            if (showSetup) SetupPanel(actions, onClose = { showSetup = false })
+            AnimatedVisibility(asleep, enter = fadeIn(tween(1200)), exit = fadeOut(tween(400))) {
+                Box(Modifier.fillMaxSize().background(Color.Black))
+            }
+            val panelIn = fadeIn(tween(250)) + androidx.compose.animation.slideInVertically(tween(300)) { it / 12 }
+            val panelOut = fadeOut(tween(200)) + androidx.compose.animation.slideOutVertically(tween(250)) { it / 12 }
+            AnimatedVisibility(showHistory, enter = panelIn, exit = panelOut) { HistoryPanel(actions, onClose = { showHistory = false }) }
+            AnimatedVisibility(showKeyboard, enter = panelIn, exit = panelOut) {
+                TypeSheet(onSend = { actions.sendText(it); showKeyboard = false }, onClose = { showKeyboard = false })
+            }
+            AnimatedVisibility(showSetup, enter = panelIn, exit = panelOut) { SetupPanel(actions, onClose = { showSetup = false }) }
         }
     }
 }
@@ -253,8 +279,36 @@ private fun IdleFace(actions: UiActions) {
                             // Eyes follow the finger as soon as it touches.
                             downAt = change.position
                             downMs = System.currentTimeMillis()
-                            lookAt = blob.localPositionOf(row, change.position)
+                            val inBlob = blob.localPositionOf(row, change.position)
+                            lookAt = inBlob
                             lookAtMs = downMs
+                            // Press and hold the blob itself: talk while held, send on release (walkie-talkie).
+                            val c = Offset(blob.size.width / 2f, blob.size.height / 2f)
+                            if ((inBlob - c).getDistance() < blob.size.width * 0.34f) {
+                                val start = change.position
+                                val early = withTimeoutOrNull(HOLD_TO_TALK_MS) {
+                                    while (true) {
+                                        val c2 = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.firstOrNull() ?: continue
+                                        if (!c2.pressed || (c2.position - start).getDistance() > 24f) return@withTimeoutOrNull c2
+                                    }
+                                    @Suppress("UNREACHABLE_CODE") null
+                                }
+                                if (early == null) {
+                                    if (GadgetState.talk.value != Talk.LISTENING) actions.toggleTalk()
+                                    do {
+                                        val ev = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                                    } while (ev.changes.any { it.pressed })
+                                    if (GadgetState.talk.value == Talk.LISTENING) actions.toggleTalk()
+                                    downAt = null
+                                } else if (!early.pressed) {
+                                    // Let go quickly without moving: an ordinary tap.
+                                    if ((early.position - start).getDistance() < 24f) {
+                                        tapAt = blob.localPositionOf(row, early.position)
+                                        tapAtMs = System.currentTimeMillis()
+                                    }
+                                    downAt = null
+                                }
+                            }
                         } else if (!change.pressed && change.previousPressed) {
                             // A real tap (short, didn't move) is what counts as poking the blob.
                             val start = downAt
@@ -278,7 +332,9 @@ private fun IdleFace(actions: UiActions) {
         }
         Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
         Column(Modifier.weight(1f)) {
-            Text(SimpleDateFormat("h:mm", Locale.US).format(now), color = Palette.ink, fontSize = if (hasNote) 72.sp else 84.sp, fontWeight = FontWeight.Light)
+            val faceName by GadgetState.clockFace.collectAsState()
+            ClockFaceView(ClockFace.of(faceName), now, compact = hasNote)
+            if (faceName != ClockFace.CLASSIC.name) Spacer(Modifier.height(8.dp))
             Text(SimpleDateFormat("EEEE, MMMM d", Locale.US).format(now), color = Palette.muted, fontSize = 20.sp)
             weather?.let { w ->
                 Text("${w.tempF}° ${w.summary}  ·  H ${w.highF}° L ${w.lowF}°", color = Palette.ink.copy(alpha = 0.85f), fontSize = 17.sp,
@@ -350,7 +406,8 @@ private fun AlertBanner() {
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun IdlePages(actions: UiActions) {
-    val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 2 })
+    val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 3 })
+    LaunchedEffect(pager.currentPage) { GadgetState.setIdlePage(pager.currentPage) }
     val talk by GadgetState.talk.collectAsState()
     // Anything happening brings the clock back.
     LaunchedEffect(talk) { if (talk != Talk.IDLE) pager.animateScrollToPage(0) }
@@ -383,7 +440,11 @@ private fun IdlePages(actions: UiActions) {
         }
     }
     androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        if (page == 0) IdleFace(actions) else AgendaPage(actions)
+        when (page) {
+            0 -> IdleFace(actions)
+            1 -> AgendaPage(actions)
+            else -> HomelabPage(actions)
+        }
     }
 }
 
@@ -410,7 +471,7 @@ private fun AgendaPage(actions: UiActions) {
                 else -> null
             },
         )
-    Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 180.dp, top = 64.dp, bottom = 24.dp)) {
+    Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 180.dp, top = 64.dp, bottom = 84.dp)) {
         Text(day.date.ifEmpty { today }, color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
         if (!isToday) {
             Text("From an earlier day", color = Palette.coral, fontSize = 13.sp)
@@ -453,6 +514,103 @@ private fun friendlyDate(date: String): String {
         today -> "Today"
         today.plusDays(1) -> "Tomorrow"
         else -> d.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.US))
+    }
+}
+
+private const val HOLD_TO_TALK_MS = 380L
+private const val CAPTION_ASIDE_MS = 8_000L
+
+/** The Latitude in detail: Kuma monitors with 24-hour uptime, disk, memory, load, battery, containers and the last backup. */
+@Composable
+private fun HomelabPage(actions: UiActions) {
+    val lab by GadgetState.homelab.collectAsState()
+    var failed by remember { mutableStateOf(false) }
+    // Fresh while the page is on screen.
+    LaunchedEffect(Unit) {
+        while (true) {
+            val h = actions.homelab()
+            if (h != null) GadgetState.setHomelab(h)
+            failed = h == null
+            delay(30_000)
+        }
+    }
+    Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = 64.dp, bottom = 84.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Homelab", color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(12.dp))
+            val h = lab
+            if (h != null) {
+                val (color, label) = when (h.overall) {
+                    "up" -> Palette.teal to "all up"
+                    "down" -> Palette.coral to "something's down"
+                    else -> Palette.amber to "checking"
+                }
+                Box(Modifier.size(10.dp).background(color, CircleShape))
+                Text("  $label", color = Palette.muted, fontSize = 15.sp)
+            }
+            if (failed && h == null) Text("can't reach the Latitude", color = Palette.coral, fontSize = 15.sp)
+        }
+        val h = lab ?: return@Column
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxSize()) {
+            // Services: tap one to have Pixel look into it.
+            Column(Modifier.weight(1.1f).verticalScroll(rememberScrollState())) {
+                Text("Services · 24 h uptime  (tap to ask Pixel)", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+                h.monitors.forEach { m ->
+                    val color = when (m.status) { "up" -> Palette.teal; "down" -> Palette.coral; else -> Palette.amber }
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                            actions.ask("Check on ${m.name} on the Latitude and tell me in a sentence or two how it's doing " +
+                                "(Kuma says ${m.status}). Don't change anything.", "Checking ${m.name}")
+                        }.padding(vertical = 7.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(10.dp).background(color, CircleShape))
+                        Text(m.name, color = Palette.ink, fontSize = 18.sp, modifier = Modifier.padding(start = 10.dp).weight(1f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(m.uptime_24h?.let { "%.1f%%".format(it) } ?: "—", color = Palette.muted, fontSize = 16.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.width(24.dp))
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                @Composable
+                fun meter(label: String, pct: Double?, detail: String) {
+                    val p = ((pct ?: 0.0) / 100).toFloat().coerceIn(0f, 1f)
+                    val color = when { p >= 0.9f -> Palette.coral; p >= 0.75f -> Palette.amber; else -> Palette.teal }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, color = Palette.muted, fontSize = 14.sp, modifier = Modifier.width(70.dp))
+                        Box(Modifier.weight(1f).height(8.dp).background(Palette.card, RoundedCornerShape(50))) {
+                            Box(Modifier.fillMaxWidth(p).height(8.dp).background(color, RoundedCornerShape(50)))
+                        }
+                        Text(detail, color = Palette.ink, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp).width(80.dp))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                meter("Disk", h.disk.used_pct, "${h.disk.used_pct.toInt()}% of ${h.disk.total_gb.toInt()} GB")
+                meter("Memory", h.memory.used_pct, "${h.memory.used_pct?.toInt() ?: "?"}%")
+                val load = h.load.firstOrNull() ?: 0.0
+                meter("Load", 100.0 * load / h.cpus.coerceAtLeast(1), "%.2f".format(load))
+                h.battery?.let { b -> meter("Battery", b.percent.toDouble().let { 100 - it }, "${b.percent}%${if (b.on_ac) " ⚡" else " (battery!)"}") }
+                val backupLine = h.backup.at?.let { at ->
+                    val then = runCatching { java.time.OffsetDateTime.parse(at).toInstant().toEpochMilli() }.getOrNull()
+                    val ago = then?.let { ((System.currentTimeMillis() - it) / 3_600_000).toInt() }
+                    (if (h.backup.ok) "✓ " else "✗ ") + (ago?.let { if (it < 48) "${it}h ago" else "${it / 24}d ago" } ?: at)
+                } ?: "never"
+                Text("Backup  $backupLine${if (h.backup.running) " (running)" else ""}",
+                    color = if (h.backup.ok) Palette.ink else Palette.coral, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp))
+                h.uptime_s?.let { Text("Up ${it / 86_400}d ${(it % 86_400) / 3600}h", color = Palette.muted, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp)) }
+                Text("Containers", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    h.containers.forEach { c ->
+                        val bad = c.state != "running" || c.health == "unhealthy"
+                        Text(c.name, color = Palette.night, fontSize = 12.sp,
+                            modifier = Modifier.background(if (bad) Palette.coral else Palette.teal.copy(alpha = 0.85f), RoundedCornerShape(50))
+                                .padding(horizontal = 9.dp, vertical = 3.dp))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -654,10 +812,23 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
     val source by GadgetState.replySource.collectAsState()
     val followUp by GadgetState.followUp.collectAsState()
     val handsFree by GadgetState.handsFree.collectAsState()
-    val visible = heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE
+    val page by GadgetState.idlePage.collectAsState()
+    val speaking by GadgetState.speaking.collectAsState()
+    // On the agenda and homelab pages the caption sits smaller, and steps aside after a few
+    // seconds once nothing is happening, so the page underneath stays readable.
+    val compact = page != 0
+    var stepAside by remember { mutableStateOf(false) }
+    LaunchedEffect(reply, heard, talk, compact, speaking) {
+        stepAside = false
+        if (compact && !speaking && (talk == Talk.IDLE || talk == Talk.REPLIED || talk == Talk.ERROR)) {
+            delay(CAPTION_ASIDE_MS)
+            stepAside = true
+        }
+    }
+    val visible = (heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE) && !stepAside
     AnimatedVisibility(visible, modifier, enter = fadeIn(), exit = fadeOut()) {
         Column(
-            Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.92f), RoundedCornerShape(18.dp))
+            Modifier.then(if (compact) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()).animateContentSize().background(Palette.card.copy(alpha = 0.92f), RoundedCornerShape(18.dp))
                 .clickable(onClick = actions::clearCaptions).padding(horizontal = 18.dp, vertical = 12.dp),
         ) {
             val name = GadgetState.museName.value
@@ -675,9 +846,11 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
             if (reply.isNotEmpty() || images.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.Top) {
                     if (reply.isNotEmpty()) {
-                        Column(Modifier.weight(1f).heightIn(max = 150.dp).verticalScroll(rememberScrollState())) {
+                        Column(Modifier.weight(1f).heightIn(max = if (compact) 56.dp else 150.dp).verticalScroll(rememberScrollState())) {
                             Text(com.rusty.museecho.gadget.Markdown.toAnnotated(reply),
-                                color = if (talk == Talk.ERROR) Palette.coral else Palette.ink, fontSize = 20.sp, lineHeight = 27.sp)
+                                color = if (talk == Talk.ERROR) Palette.coral else Palette.ink,
+                                fontSize = if (compact) 15.sp else 20.sp, lineHeight = if (compact) 20.sp else 27.sp,
+                                maxLines = if (compact) 2 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     images.take(3).forEach { bitmap ->
@@ -775,13 +948,70 @@ private fun QuickActionRow(modifier: Modifier, actions: UiActions) {
     val heard by GadgetState.heard.collectAsState()
     val reply by GadgetState.reply.collectAsState()
     val link by GadgetState.link.collectAsState()
-    if (list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED) return
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val show = !(list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED)
+    AnimatedVisibility(show, modifier, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         list.forEach { a ->
             Text(a.label, color = Palette.ink, fontSize = 15.sp, maxLines = 1,
                 modifier = Modifier.background(Palette.card.copy(alpha = 0.92f), RoundedCornerShape(50))
                     .clickable { actions.runQuickAction(a) }.padding(horizontal = 16.dp, vertical = 10.dp))
         }
+    }
+    }
+}
+
+/** Whether the quick-action row is on screen (the blob's cards sit above it then). */
+@Composable
+private fun quickActionsShowing(actions: UiActions): Boolean {
+    val list by actions.quickActions().collectAsState()
+    val talk by GadgetState.talk.collectAsState()
+    val heard by GadgetState.heard.collectAsState()
+    val reply by GadgetState.reply.collectAsState()
+    val link by GadgetState.link.collectAsState()
+    return !(list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED)
+}
+
+/**
+ * The blob's cards (an event soon, when to leave, reminders, what it's holding, server signs),
+ * under the blob on the clock page and always above the quick-action buttons, so neither
+ * hides the other. Hidden while a reply caption is up.
+ */
+@Composable
+private fun BlobCards(modifier: Modifier, actions: UiActions) {
+    val cards by GadgetState.blobCards.collectAsState()
+    val page by GadgetState.idlePage.collectAsState()
+    val screen by GadgetState.screen.collectAsState()
+    val heard by GadgetState.heard.collectAsState()
+    val reply by GadgetState.reply.collectAsState()
+    val talk by GadgetState.talk.collectAsState()
+    val quick = quickActionsShowing(actions)
+    val captions = heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE
+    val bottom by androidx.compose.animation.core.animateDpAsState(if (quick) 86.dp else 20.dp, tween(300), label = "cardsBottom")
+    AnimatedVisibility(
+        cards.isNotEmpty() && page == 0 && screen is Screen.Idle && !captions,
+        modifier.padding(start = 20.dp, bottom = bottom).width(260.dp),
+        enter = fadeIn(tween(300)), exit = fadeOut(tween(200)),
+    ) {
+        Column(Modifier.animateContentSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            cards.forEach { (text, color) ->
+                androidx.compose.runtime.key(text) {
+                    Text(text, color = Palette.night, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 3.dp).background(Color(color), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp))
+                }
+            }
+        }
+    }
+}
+
+/** A chip when the internet itself is down (Wi-Fi may still be up); the Echo answers offline meanwhile. */
+@Composable
+private fun InternetBanner() {
+    val internet by GadgetState.internet.collectAsState()
+    AnimatedVisibility(internet == false, enter = fadeIn() + androidx.compose.animation.expandVertically(),
+        exit = fadeOut() + androidx.compose.animation.shrinkVertically()) {
+        Text("📡 No internet: answering offline", color = Palette.night, fontSize = 14.sp,
+            modifier = Modifier.padding(bottom = 4.dp).background(Palette.muted, RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 5.dp))
     }
 }
 
@@ -808,7 +1038,11 @@ private fun IdleFrameWatcher(actions: UiActions) {
 @Composable
 private fun Slideshow(actions: UiActions) {
     val showing by GadgetState.frameShowing.collectAsState()
-    if (!showing) return
+    AnimatedVisibility(showing, enter = fadeIn(tween(900)), exit = fadeOut(tween(600))) { SlideshowContent(actions) }
+}
+
+@Composable
+private fun SlideshowContent(actions: UiActions) {
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(Unit) {
         var i = 0
@@ -849,8 +1083,16 @@ private fun Slideshow(actions: UiActions) {
 /** Full-screen while a timer or alarm rings; any tap silences it. */
 @Composable
 private fun RingScreen(actions: UiActions) {
-    val ringing by actions.ringing().collectAsState()
-    if (ringing.isEmpty()) return
+    val ringingNow by actions.ringing().collectAsState()
+    // Keep the last labels while it fades out.
+    var ringing by remember { mutableStateOf(ringingNow) }
+    if (ringingNow.isNotEmpty() && ringingNow != ringing) ringing = ringingNow
+    AnimatedVisibility(ringingNow.isNotEmpty(), enter = fadeIn(tween(250)) + androidx.compose.animation.scaleIn(tween(250), initialScale = 1.05f),
+        exit = fadeOut(tween(400))) { RingContent(ringing, actions) }
+}
+
+@Composable
+private fun RingContent(ringing: List<com.rusty.museecho.integrations.Countdown>, actions: UiActions) {
     val transition = rememberInfiniteTransition(label = "ring")
     val pulse by transition.animateFloat(0.85f, 1.1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pulse")
     Box(

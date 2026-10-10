@@ -57,3 +57,18 @@ class BlobBrainTest {
         assertEquals(Mood.WORRIED, BlobBrain.tone("Not great: the backup failed.")?.mood)
     }
 }
+
+class BlobSoundsTest {
+    @org.junit.Test
+    fun everySoundIsShortAndQuiet() {
+        for (s in BlobSound.entries) {
+            val pcm = BlobSounds.render(s)
+            org.junit.Assert.assertTrue("$s is empty", pcm.isNotEmpty())
+            org.junit.Assert.assertTrue("$s is too long", pcm.size < BlobSounds.RATE)
+            val peak = pcm.maxOf { kotlin.math.abs(it.toInt()) }
+            org.junit.Assert.assertTrue("$s is too loud ($peak)", peak < Short.MAX_VALUE * 0.15)
+            // Starts and ends near silence: no clicks.
+            org.junit.Assert.assertTrue("$s clicks at the start", kotlin.math.abs(pcm.first().toInt()) < 200)
+        }
+    }
+}

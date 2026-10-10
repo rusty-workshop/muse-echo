@@ -5,6 +5,11 @@ import java.security.MessageDigest
 val gitCommitCount: Int = providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
     .standardOutput.asText.get().trim().toIntOrNull() ?: 1
 
+// The newest changes, shown once on the Echo after an update.
+val whatsNew: String = providers.exec { commandLine("git", "log", "-6", "--format=%s") }
+    .standardOutput.asText.get().trim().lines().filter { it.isNotBlank() }
+    .joinToString("\n") { "• " + it.trim() }
+
 val sherpaVersion = "1.13.8"
 val sherpaSha256 = "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
 
@@ -30,6 +35,7 @@ android {
         targetSdk = 34
         versionCode = gitCommitCount
         versionName = "0.3.$gitCommitCount"
+        buildConfigField("String", "WHATS_NEW", "\"" + whatsNew.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"")
         // The Echo Show 5 is 32-bit ARM; keeps Vosk's native libs for other ABIs out of the APK.
         ndk {
             abiFilters += "armeabi-v7a"

@@ -12,6 +12,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -20,6 +24,43 @@ data class MonitorState(val name: String, val status: String, val since: String 
 
 @Serializable
 data class ServerStatus(val overall: String, val monitors: List<MonitorState> = emptyList(), val checked_at: String = "")
+
+@Serializable
+data class HomelabMonitor(val name: String, val status: String, val since: String = "", val uptime_24h: Double? = null)
+
+@Serializable
+data class HomelabDisk(val total_gb: Double = 0.0, val used_pct: Double = 0.0)
+
+@Serializable
+data class HomelabMemory(val total_mb: Int = 0, val used_pct: Double? = null)
+
+@Serializable
+data class HomelabBattery(val percent: Int = 0, val on_ac: Boolean = true)
+
+@Serializable
+data class HomelabContainer(val name: String, val state: String, val health: String = "")
+
+@Serializable
+data class HomelabBackup(val at: String? = null, val ok: Boolean = false, val running: Boolean = false)
+
+/** The Latitude in more detail, for the Echo's homelab page. */
+@Serializable
+data class Homelab(
+    val overall: String = "",
+    val monitors: List<HomelabMonitor> = emptyList(),
+    val disk: HomelabDisk = HomelabDisk(),
+    val memory: HomelabMemory = HomelabMemory(),
+    val load: List<Double> = emptyList(),
+    val cpus: Int = 1,
+    val battery: HomelabBattery? = null,
+    val containers: List<HomelabContainer> = emptyList(),
+    val backup: HomelabBackup = HomelabBackup(),
+    val uptime_s: Long? = null,
+)
+
+/** A photo in the Latitude's Syncthing "Echo Photos" folder. */
+@Serializable
+data class HubPhoto(val name: String, val size: Long = 0, val mtime: Long = 0)
 
 @Serializable
 data class Activity(val busy: Boolean = false, val kinds: List<String> = emptyList())
@@ -48,6 +89,77 @@ class Hub(private val context: Context) {
 
     suspend fun status(): ServerStatus? = withContext(Dispatchers.IO) {
         get("/status")?.let { runCatching { json.decodeFromString(ServerStatus.serializer(), it) }.getOrNull() }
+    }
+
+    private val jsonType = "application/json".toMediaType()
+
+    private fun post(path: String, body: String, headers: Map<String, String> = emptyMap()): Pair<Int, String?> = runCatching {
+        val req = Request.Builder().url("http://$host$path").post(body.toRequestBody(jsonType))
+        headers.forEach { (k, v) -> req.header(k, v) }
+        http.newCall(req.build()).execute().use { it.code to it.body?.string() }
+    }.getOrDefault(0 to null)
+
+    /** Every minute: the Echo is alive (echo-hub turns this into a health check Kuma can watch). */
+    suspend fun heartbeat(info: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/heartbeat", info.toString()).first == 200 }
+
+    /** Timers etc., for the watch. */
+    suspend fun postState(state: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/state", state.toString()).first == 200 }
+
+    /** Commands queued for the Echo (from the watch); each is handed over once. */
+    suspend fun inbox(): List<JsonObject> = withContext(Dispatchers.IO) {
+        get("/echo/inbox")?.let { runCatching { (json.parseToJsonElement(it) as JsonArray).mapNotNull { e -> e as? JsonObject } }.getOrNull() }.orEmpty()
+    }
+
+    suspend fun homelab(): Homelab? = withContext(Dispatchers.IO) {
+        get("/homelab")?.let { runCatching { json.decodeFromString(Homelab.serializer(), it) }.getOrNull() }
+    }
+
+    suspend fun photos(): List<HubPhoto>? = withContext(Dispatchers.IO) {
+        get("/photos")?.let { runCatching { json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(HubPhoto.serializer()), it) }.getOrNull() }
+    }
+
+    suspend fun photo(name: String): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = "http://$host/photos/" + java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+            http.newCall(Request.Builder().url(url).build()).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
+        }.getOrNull()
+    }
+
+    /**
+     * The key that guards this Echo's backups on the hub. Made once; echo-hub trusts the
+     * first key it's shown (after a reflash, reset it there: `echo_hub.py reset-echo-key`).
+     */
+    private val backupKey: String
+        get() = prefs.getString("hub_backup_key", null) ?: java.security.SecureRandom().let { rnd ->
+            ByteArray(24).also(rnd::nextBytes).joinToString("") { "%02x".format(it) }
+        }.also { prefs.edit().putString("hub_backup_key", it).apply() }
+
+    /** Registers the key (if the hub has none yet) and uploads [bundle]. Returns null or what went wrong. */
+    suspend fun backup(bundle: String): String? = withContext(Dispatchers.IO) {
+        val key = backupKey
+        val (reg, _) = post("/echo/register", """{"key":"$key"}""")
+        if (reg == 0) return@withContext "couldn't reach the echo-hub at $host"
+        if (reg != 200) return@withContext "the echo-hub knows a different Echo (reset its key on the Latitude)"
+        val (code, body) = post("/echo/backup", bundle, mapOf("X-Echo-Key" to key))
+        if (code == 200) null else "backup failed (HTTP $code${body?.let { ": " + it.take(80) } ?: ""})"
+    }
+
+    /** The newest backup, or null with why. */
+    suspend fun restore(): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        val key = backupKey
+        val (reg, _) = post("/echo/register", """{"key":"$key"}""")
+        if (reg == 0) return@withContext null to "couldn't reach the echo-hub at $host"
+        if (reg != 200) return@withContext null to "the echo-hub knows a different Echo: on the Latitude run " +
+            "`python3 ~/.local/share/echo-hub/echo_hub.py reset-echo-key`, then try again"
+        runCatching {
+            http.newCall(Request.Builder().url("http://$host/echo/backup").header("X-Echo-Key", key).build()).execute().use {
+                when {
+                    it.isSuccessful -> it.body?.string() to null
+                    it.code == 404 -> null to "no backup on the Latitude yet"
+                    else -> null to "restore failed (HTTP ${it.code})"
+                }
+            }
+        }.getOrElse { null to "couldn't reach the echo-hub at $host" }
     }
 
     suspend fun activity(): Activity? = withContext(Dispatchers.IO) {
