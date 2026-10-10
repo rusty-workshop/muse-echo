@@ -96,8 +96,25 @@ class EchoCommands(
             optional = mapOf("seconds" to param("integer", "How long to hold it, 5 to 3600. Default 60.")))
         spec("blob.react",
             "Play a one-off animation on the Echo Show's blob: celebrate (confetti, for good news or a win), " +
-                "hop, nod, shake (head shake, 'no'), wink (for a joke), yawn, stretch, hiccup, peek, wander.",
+                "hop, nod, shake (head shake, 'no'), wink (for a joke), yawn, stretch, hiccup, peek, wander, " +
+                "wave (hello/goodbye), startle.",
             required = mapOf("reaction" to param("string", "One of: ${Reaction.entries.joinToString { it.name.lowercase() }}.")))
+        spec("blob.style",
+            "Change how the Echo Show's blob looks: its colour and/or something it wears. Left alone it picks " +
+                "accessories itself (santa hat in December, witch hat at Halloween, sunglasses when it's hot, " +
+                "a scarf when it's cold, headphones with music, popcorn while the TV plays in the evening). " +
+                "Give either or both; \"auto\" hands that part back to the automatic choice.",
+            optional = mapOf(
+                "color" to param("string", "auto, a name (${BlobStyles.COLORS.keys.joinToString()}) or #RRGGBB."),
+                "accessory" to param("string", "auto, or one of: ${Accessory.entries.joinToString { it.name.lowercase() }} " +
+                    "(none = wear nothing, even when it would pick something). party_hat suits birthdays."),
+                "hours" to param("integer", "How long to keep it, 1 to 720. Default: until changed."),
+            ))
+        spec("blob.say",
+            "Show a short silent speech bubble beside the Echo Show's blob, e.g. \"Don't forget the trash!\". " +
+                "Nothing is spoken, so it suits quiet hours. Empty text clears it.",
+            required = mapOf("text" to param("string", "Up to 120 characters.")),
+            optional = mapOf("seconds" to param("integer", "How long it stays, 5 to 86400. Default 600.")))
     }
 
     suspend fun run(command: String, params: JsonObject, timeoutMs: Long?): JsonObject = try {
@@ -120,6 +137,13 @@ class EchoCommands(
                     val mood = Mood.entries.firstOrNull { it.name.equals(params.string("mood")?.trim(), ignoreCase = true) }
                         ?: return@withTimeout commandError("mood must be one of: ${Mood.entries.joinToString { it.name.lowercase() }}")
                     GadgetState.setMood(mood, (params.int("seconds") ?: 60).coerceIn(5, 3600))
+                    commandOk(JsonObject(emptyMap()))
+                }
+                "blob.style" -> blobStyle(params.string("color"), params.string("accessory"), params.int("hours"))
+                "blob.say" -> {
+                    val text = params.string("text").orEmpty()
+                    if (text.length > 120) return@withTimeout commandError("text must be 120 characters or fewer")
+                    GadgetState.say(text, (params.int("seconds") ?: 600).coerceIn(5, 86_400))
                     commandOk(JsonObject(emptyMap()))
                 }
                 "blob.react" -> {
@@ -268,6 +292,7 @@ class EchoCommands(
             )
             mp.setOnPreparedListener {
                 it.start()
+                startMeter(it.audioSessionId)
                 GadgetState.setNowPlaying(title?.takeIf { t -> t.isNotBlank() } ?: android.net.Uri.parse(url).host ?: "Audio")
                 started.complete(Result.success(it.duration))
             }
@@ -293,6 +318,30 @@ class EchoCommands(
         )
     }
 
+    private fun blobStyle(color: String?, accessory: String?, hours: Int?): JsonObject {
+        if (color == null && accessory == null) return commandError("give color and/or accessory")
+        val old = GadgetState.style.value.takeIf { it.active(System.currentTimeMillis()) } ?: BlobStyle()
+        val newColor = when {
+            color == null -> old.color
+            color.trim().equals("auto", ignoreCase = true) -> null
+            else -> BlobStyles.parseColor(color) ?: return commandError("color must be auto, a name (${BlobStyles.COLORS.keys.joinToString()}) or #RRGGBB")
+        }
+        val newAccessory = when {
+            accessory == null -> old.accessory
+            accessory.trim().equals("auto", ignoreCase = true) -> null
+            else -> Accessory.entries.firstOrNull { it.name.equals(accessory.trim().replace(' ', '_'), ignoreCase = true) }
+                ?: return commandError("accessory must be auto or one of: ${Accessory.entries.joinToString { it.name.lowercase() }}")
+        }
+        val until = hours?.coerceIn(1, 720)?.let { System.currentTimeMillis() + it * 3_600_000L } ?: 0L
+        val style = BlobStyle(newColor, newAccessory, until)
+        GadgetState.setStyle(style)
+        BlobStyles.save(context, style)
+        return commandOk(buildJsonObject {
+            put("color", newColor?.let { c -> BlobStyles.COLORS.entries.firstOrNull { it.value == c }?.key ?: "#%06x".format(c and 0xFFFFFF) } ?: "auto")
+            put("accessory", newAccessory?.name?.lowercase() ?: "auto")
+        })
+    }
+
     private fun setProfile(name: String?): JsonObject {
         val clean = name?.trim()?.take(32)
         if (clean.isNullOrEmpty()) return commandError("name is required")
@@ -307,7 +356,37 @@ class EchoCommands(
         return commandOk(buildJsonObject { put("stopped", was) })
     }
 
+    // Measures how loud the music is, so the blob can bob along. Not every ROM
+    // allows a Visualizer; then the blob just bobs at a steady pace.
+    private var meter: android.media.audiofx.Visualizer? = null
+
+    private fun startMeter(session: Int) {
+        stopMeter()
+        meter = runCatching {
+            android.media.audiofx.Visualizer(session).apply {
+                measurementMode = android.media.audiofx.Visualizer.MEASUREMENT_MODE_PEAK_RMS
+                enabled = true
+            }
+        }.getOrNull()
+        val m = meter ?: return
+        val reading = android.media.audiofx.Visualizer.MeasurementPeakRms()
+        GadgetState.musicLevel = {
+            runCatching {
+                m.getMeasurementPeakRms(reading)
+                // Millibels: about -4500 is quiet music, 0 is full scale.
+                ((reading.mRms + 4500) / 3500f).coerceIn(0f, 1f)
+            }.getOrDefault(-1f)
+        }
+    }
+
+    private fun stopMeter() {
+        GadgetState.musicLevel = { -1f }
+        meter?.let { runCatching { it.enabled = false }; it.release() }
+        meter = null
+    }
+
     fun stopPlayer() {
+        stopMeter()
         player?.let { runCatching { it.stop() }; it.release() }
         player = null
         GadgetState.setNowPlaying(null)

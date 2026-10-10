@@ -33,6 +33,8 @@ class WakeWord(
     private val onStopWord: () -> Unit = {},
     /** While true (the Echo is speaking), only the full phrase counts, so it can't wake itself. */
     private val strict: () -> Boolean = { false },
+    /** A sudden loud bang (a door slam, a dropped pan): far above the room's usual level. */
+    private val onLoud: () -> Unit = {},
 ) {
     @Volatile
     private var running = false
@@ -134,6 +136,7 @@ class WakeWord(
                 if (n == 0) continue
                 val now = System.currentTimeMillis()
                 val level = rms(chunk, n)
+                if (level > maxOf(LOUD_RMS, noiseFloor * 12)) onLoud()
                 // Track the floor: fall fast toward quiet, rise slowly with steady noise (a fan, a TV).
                 noiseFloor = if (level < noiseFloor) noiseFloor * 0.7 + level * 0.3 else noiseFloor * 0.995 + level * 0.005
                 noiseFloor = noiseFloor.coerceIn(5.0, 2_000.0)
@@ -229,6 +232,9 @@ class WakeWord(
     }
 
     companion object {
+        /** RMS (16-bit) that counts as a bang, whatever the room's floor. */
+        const val LOUD_RMS = 4_000.0
+
         const val RATE = 16_000
         const val MODEL_DIR_NAME = "vosk-model"
         const val STOP_WORD = "stop"

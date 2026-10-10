@@ -68,8 +68,11 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         if (ev.action == android.view.MotionEvent.ACTION_DOWN) {
+            val away = System.currentTimeMillis() - GadgetState.lastTouch
             GadgetState.lastTouch = System.currentTimeMillis()
             GadgetState.setAlertGlow(false)
+            // Back after a while: the blob waves hello.
+            if (away > 30 * 60_000L && !GadgetState.quiet.value) GadgetState.react(com.rusty.museecho.gadget.Reaction.WAVE)
             // The first tap on a sleeping screen only wakes it.
             if (GadgetState.asleep.value) {
                 GadgetState.setAsleep(false)

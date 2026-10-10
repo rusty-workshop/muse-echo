@@ -50,6 +50,12 @@ class Roku(private val context: Context) {
         APP_RE.find(xml)?.let { App(it.groupValues[1], unescape(it.groupValues[2].trim())) }
     }
 
+    /** True while the Roku's media player is playing, false if not, null if it didn't answer. */
+    suspend fun playing(ip: String): Boolean? = withContext(Dispatchers.IO) {
+        val xml = get(ip, "/query/media-player") ?: return@withContext null
+        Regex("<player[^>]*\\sstate=\"([a-z]+)\"").find(xml)?.groupValues?.get(1) == "play"
+    }
+
     suspend fun keypress(ip: String, key: String): Boolean = withContext(Dispatchers.IO) {
         post(ip, "/keypress/${URLEncoder.encode(key, "UTF-8")}")
     }

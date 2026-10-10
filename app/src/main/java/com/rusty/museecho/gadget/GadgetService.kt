@@ -133,7 +133,7 @@ class GadgetService : Service() {
             displayName = Prefs(this).displayName,
             version = BuildConfig.VERSION_NAME,
             commands = commands.specs,
-            runCommand = commands::run,
+            runCommand = ::runWatched,
             onRegistered = { chat.runChat { runner.chatSession() } },
         )
         chat = ChatClient(identity.nodeId)
@@ -141,6 +141,8 @@ class GadgetService : Service() {
         startInForeground()
         runnerJob = scope.launch { runner.run() }
         scope.launch { tickTimers() }
+        scope.launch { watchTv() }
+        GadgetState.setStyle(BlobStyles.load(this))
         scope.launch { watchdog() }
         scope.launch { refreshWeather() }
         scope.launch { watchServer() }
@@ -158,6 +160,7 @@ class GadgetService : Service() {
             log = GadgetState::log,
             onStopWord = { scope.launch { onStopWord() } },
             strict = { GadgetState.speaking.value },
+            onLoud = ::onLoudNoise,
         )
         applyWakeWord()
         scope.launch {
@@ -718,6 +721,46 @@ class GadgetService : Service() {
     }
 
     fun micLevel(): Float = recorder.level
+
+    // -- The blob's view of the room ------------------------------------------------------
+
+    @Volatile
+    private var lastStartle = 0L
+
+    /** A bang the wake-word listener heard: the blob jumps, unless the Echo itself is making noise. */
+    private fun onLoudNoise() {
+        val now = System.currentTimeMillis()
+        if (now - lastStartle < 20_000) return
+        if (GadgetState.speaking.value || GadgetState.talk.value != Talk.IDLE || GadgetState.ringing.value ||
+            GadgetState.nowPlaying.value != null || GadgetState.tvPlaying.value) return
+        lastStartle = now
+        GadgetState.react(Reaction.STARTLE)
+    }
+
+    /** Commands on the laptop and TV make the blob look over, then nod (worked) or shake its head (didn't). */
+    private suspend fun runWatched(command: String, params: kotlinx.serialization.json.JsonObject, timeoutMs: Long?): kotlinx.serialization.json.JsonObject {
+        val watched = command.startsWith("laptop.") || command.startsWith("tv.")
+        if (!watched) return commands.run(command, params, timeoutMs)
+        GadgetState.setWorkingOn(command)
+        try {
+            val result = commands.run(command, params, timeoutMs)
+            val ok = (result["ok"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+            GadgetState.react(if (ok) Reaction.NOD else Reaction.SHAKE)
+            return result
+        } finally {
+            GadgetState.setWorkingOn(null)
+        }
+    }
+
+    /** Polls the Roku now and then, so the blob can watch along. Never searches the network for it. */
+    private suspend fun watchTv() {
+        while (true) {
+            val ip = roku.savedIp
+            val playing = if (ip == null || isQuietNow()) false else roku.playing(ip) == true
+            GadgetState.setTvPlaying(playing)
+            delay(if (playing) 60_000 else 120_000)
+        }
+    }
 
     private fun onWake() {
         GadgetState.log("wake word heard")

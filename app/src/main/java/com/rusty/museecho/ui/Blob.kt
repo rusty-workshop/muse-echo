@@ -1,6 +1,12 @@
 package com.rusty.museecho.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -10,7 +16,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -22,11 +30,24 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.rusty.museecho.gadget.Accessory
 import com.rusty.museecho.gadget.GadgetState
 import com.rusty.museecho.gadget.Link
 import com.rusty.museecho.gadget.Mood
 import com.rusty.museecho.gadget.Reaction
 import com.rusty.museecho.gadget.Talk
+import com.rusty.museecho.integrations.AgendaDay
+import com.rusty.museecho.integrations.ServerStatus
+import com.rusty.museecho.integrations.WeatherNow
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -35,12 +56,15 @@ import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
 private const val TAU = (2 * PI).toFloat()
+private const val PIF = PI.toFloat()
 
 /**
  * Pixel's on-screen body: a breathing orb with a face. It blinks, looks where
- * you tap, follows the real loudness of your voice and its own, thinks while
- * waiting, sleeps through quiet hours, frets when the server is down, shows
- * the weather, and now and then does something silly on its own.
+ * you tap, follows the real loudness of your voice, its own and the music,
+ * thinks while waiting, sleeps through quiet hours (drowsy if you're still up),
+ * frets when the server is down, shows the weather, dresses for the season,
+ * watches the TV, keeps an eye on timers, and now and then does something silly.
+ * Tapping it gives a quick check-in on the day.
  *
  * [lookAt] is a tap position in this composable's own pixels, made at [lookAtMs].
  */
@@ -51,20 +75,32 @@ internal fun Blob(modifier: Modifier, actions: UiActions, lookAt: Offset?, lookA
     val talk by GadgetState.talk.collectAsState()
     val link by GadgetState.link.collectAsState()
     val server by GadgetState.server.collectAsState()
+    val showServer by GadgetState.serverPill.collectAsState()
     val weather by GadgetState.weather.collectAsState()
     val moodSet by GadgetState.mood.collectAsState()
     val reaction by GadgetState.reaction.collectAsState()
     val alertGlow by GadgetState.alertGlow.collectAsState()
+    val style by GadgetState.style.collectAsState()
+    val nowPlaying by GadgetState.nowPlaying.collectAsState()
+    val tvPlaying by GadgetState.tvPlaying.collectAsState()
+    val workingOn by GadgetState.workingOn.collectAsState()
+    val bubble by GadgetState.bubble.collectAsState()
+    val timers by actions.timers().collectAsState()
+    val agenda by actions.agenda().collectAsState()
 
     var t by remember { mutableFloatStateOf(0f) }
     var mic by remember { mutableFloatStateOf(0f) }
     var voice by remember { mutableFloatStateOf(0f) }
+    var music by remember { mutableFloatStateOf(0f) }
     var nextBlink by remember { mutableFloatStateOf(3f) }
     var blinkAt by remember { mutableFloatStateOf(-1f) }
+    var sizePx by remember { mutableFloatStateOf(0f) }
 
     val state = rememberUpdatedState(Triple(quiet, speaking, talk))
     val reactionNow = rememberUpdatedState(reaction)
     val glowNow = rememberUpdatedState(alertGlow)
+    val musicOn = rememberUpdatedState(nowPlaying != null)
+    val timerSoon = rememberUpdatedState(timers.filter { it.kind == "timer" }.minOfOrNull { it.dueAtMs })
 
     // One clock for everything. The frame rate follows what's on screen: smooth
     // while something moves fast, 12 fps for the slow breath, and a few frames
@@ -82,6 +118,10 @@ internal fun Blob(modifier: Modifier, actions: UiActions, lookAt: Offset?, lookA
                 val target = if (out >= 0f) out else (0.5f + 0.5f * sin(t * 17f)) * (0.6f + 0.4f * sin(t * 5.3f))
                 voice * 0.45f + target * 0.55f
             } else voice * 0.5f
+            music = if (musicOn.value) {
+                val m = GadgetState.musicLevel()
+                music * 0.6f + (if (m >= 0f) m else 0.6f) * 0.4f
+            } else 0f
             if (t > nextBlink + 0.18f) {
                 blinkAt = nextBlink
                 // Mostly single blinks, sometimes a quick double.
@@ -89,7 +129,8 @@ internal fun Blob(modifier: Modifier, actions: UiActions, lookAt: Offset?, lookA
             }
             val r = reactionNow.value
             val reacting = r != null && now - r.atMs < r.reaction.ms
-            val fast = s || tk == Talk.LISTENING || tk == Talk.SENDING || tk == Talk.WAITING || reacting
+            val antsy = timerSoon.value?.let { it - now in 1..60_000 } == true
+            val fast = s || tk == Talk.LISTENING || tk == Talk.SENDING || tk == Talk.WAITING || reacting || musicOn.value || antsy
             delay(
                 when {
                     fast -> 40L
@@ -101,13 +142,43 @@ internal fun Blob(modifier: Modifier, actions: UiActions, lookAt: Offset?, lookA
         }
     }
 
-    // Quiet hours start with a yawn and end with a stretch.
+    // Quiet hours start with a yawn and end with a stretch and a look at the day ahead.
     var wasQuiet by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(quiet) {
         val before = wasQuiet
         wasQuiet = quiet
         if (before == false && quiet) GadgetState.react(Reaction.YAWN)
-        if (before == true && !quiet) GadgetState.react(Reaction.STRETCH)
+        if (before == true && !quiet) {
+            GadgetState.react(Reaction.STRETCH)
+            delay(Reaction.STRETCH.ms + 200)
+            checkIn(weather, agenda, server, morning = true, seconds = 600)
+        }
+        // Still up after quiet hours start? It keeps yawning at you.
+        while (quiet) {
+            delay(120_000L + (Math.random() * 120_000).toLong())
+            if (System.currentTimeMillis() - GadgetState.lastTouch < 10 * 60_000L) GadgetState.react(Reaction.YAWN)
+        }
+    }
+
+    // A tap on the blob itself: a quick check-in on the day.
+    LaunchedEffect(lookAtMs) {
+        val at = lookAt ?: return@LaunchedEffect
+        if (sizePx <= 0f || System.currentTimeMillis() - lookAtMs > 1_000) return@LaunchedEffect
+        val c = Offset(sizePx / 2, sizePx / 2)
+        val d = at - c
+        if (sqrt(d.x * d.x + d.y * d.y) < sizePx * 0.32f) checkIn(weather, agenda, server, morning = false, seconds = 12)
+    }
+
+    // The server coming back is worth a little cheer.
+    var lastOverall by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(server?.overall) {
+        val before = lastOverall
+        lastOverall = server?.overall
+        if (before == "down" && server?.overall == "up") {
+            GadgetState.react(Reaction.HOP)
+            GadgetState.setMood(Mood.HAPPY, 60)
+            GadgetState.say("All fixed! 🎉", 60)
+        }
     }
 
     // Idle antics: every 10-20 minutes, if nobody's around and nothing's going on.
@@ -117,130 +188,288 @@ internal fun Blob(modifier: Modifier, actions: UiActions, lookAt: Offset?, lookA
             delay(600_000L + (Math.random() * 600_000).toLong())
             val (q, s, tk) = state.value
             val idleFor = System.currentTimeMillis() - GadgetState.lastTouch
-            if (!q && !s && tk == Talk.IDLE && !GadgetState.ringing.value && idleFor > 60_000) {
+            if (!q && !s && tk == Talk.IDLE && !GadgetState.ringing.value && !musicOn.value && idleFor > 60_000) {
                 GadgetState.react(antics.random())
             }
         }
     }
 
-    Canvas(modifier) {
-        val nowMs = System.currentTimeMillis()
-        val r = size.minDimension / 2
-        val c = center
-
-        // -- What it's feeling ----------------------------------------------------
-        val active = reaction?.takeIf { nowMs - it.atMs < it.reaction.ms }
-        val react = active?.reaction
-        val p = active?.let { ((nowMs - it.atMs).toFloat() / it.reaction.ms).coerceIn(0f, 1f) } ?: 0f
-        val serverDown = server?.overall == "down"
-        val pixelMood = moodSet?.takeIf { it.untilMs > nowMs }?.mood
-        val sleeping = quiet && !speaking && talk == Talk.IDLE
-        var mood = when {
-            pixelMood != null -> pixelMood
-            sleeping -> Mood.SLEEPY
-            talk == Talk.LISTENING -> Mood.CURIOUS
-            talk == Talk.ERROR -> Mood.SAD
-            serverDown && talk == Talk.IDLE && !speaking -> Mood.WORRIED
-            else -> Mood.NEUTRAL
+    // The speech bubble disappears on time even if nothing else changes.
+    var bubbleShown by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(bubble) {
+        val b = bubble
+        if (b == null || b.untilMs <= System.currentTimeMillis()) {
+            bubbleShown = null
+            return@LaunchedEffect
         }
-        when (react) {
-            Reaction.CELEBRATE, Reaction.STRETCH -> mood = Mood.HAPPY
-            Reaction.WINK -> mood = Mood.WINK
-            Reaction.YAWN -> mood = Mood.SLEEPY
-            Reaction.HICCUP -> if (hiccupSpike(p) > 0.3f) mood = Mood.SURPRISED
-            else -> {}
-        }
-
-        var tint = when {
-            speaking -> Palette.teal
-            talk == Talk.LISTENING -> Palette.coral
-            talk == Talk.SENDING || talk == Talk.WAITING -> Palette.amber
-            link == Link.CONNECTED -> Palette.violet
-            else -> Palette.muted
-        }
-        if (serverDown && talk == Talk.IDLE && !speaking) tint = lerp(tint, Palette.coral, 0.55f)
-
-        // -- How it moves ------------------------------------------------------------
-        val breathe = 0.99f + 0.07f * sin(t * TAU / 7.2f) + 0.08f * voice + 0.12f * mic
-        var dx = 0f
-        var dy = 0f
-        var sx = 1f
-        var sy = 1f
-        var lookX = 0f
-        var lookY = 0f
-        when (react) {
-            Reaction.HOP, Reaction.CELEBRATE -> {
-                val hops = if (react == Reaction.HOP) 2 else 3
-                val phase = (p * hops) % 1f
-                dy = -abs(sin(phase * PI.toFloat())) * r * 0.2f
-                // Squash a little on each landing.
-                val land = 1f - abs(sin(phase * PI.toFloat()))
-                sy = 1f - 0.08f * land * land
-                sx = 1f + 0.06f * land * land
-                lookY = -0.5f
-            }
-            Reaction.NOD -> { dy = sin(p * TAU * 2) * r * 0.05f; lookY = 0.3f + 0.5f * sin(p * TAU * 2) }
-            Reaction.SHAKE -> { dx = sin(p * TAU * 3) * r * 0.08f * (1 - p); lookX = sin(p * TAU * 3) }
-            Reaction.YAWN -> { val o = sin(p * PI.toFloat()); sy = 1f + 0.08f * o; sx = 1f - 0.03f * o }
-            Reaction.STRETCH -> { val o = sin(p * PI.toFloat()); sy = 1f + 0.15f * o; sx = 1f - 0.08f * o; dy = -o * r * 0.05f }
-            Reaction.HICCUP -> { val k = hiccupSpike(p); sx = 1f + 0.09f * k; sy = 1f + 0.09f * k; dy = -k * r * 0.05f }
-            Reaction.PEEK -> { lookX = sin(p * TAU) ; lookY = -0.2f }
-            Reaction.WANDER -> {
-                dx = sin(p * TAU) * r * 0.35f
-                dy = sin(p * TAU * 3) * r * 0.04f
-                lookX = cos(p * TAU).coerceIn(-1f, 1f)
-            }
-            else -> {}
-        }
-        // Thinking: eyes drift up and to the side.
-        if (react == null && (talk == Talk.SENDING || talk == Talk.WAITING)) { lookX = 0.6f; lookY = -0.7f }
-        // A recent tap pulls the eyes towards it.
-        if (lookAt != null && nowMs - lookAtMs < 2_500 && react == null) {
-            val v = lookAt - c
-            val len = sqrt(v.x * v.x + v.y * v.y).coerceAtLeast(1f)
-            val reach = (len / r).coerceAtMost(1f)
-            lookX = v.x / len * reach
-            lookY = v.y / len * reach
-        }
-
-        val drift = (t / 14f) % 1f
-        val angle = drift * TAU
-        val shift = Offset(cos(angle) * r * 0.18f, sin(angle) * r * 0.18f)
-        val body = c + Offset(dx, dy)
-
-        // -- Behind the body: weather and the alert glow ---------------------------------
-        drawWeather(weather?.summary, body, r, t)
-        if (alertGlow) {
-            val a = 0.22f + 0.18f * sin(t * 3f)
-            drawCircle(Brush.radialGradient(listOf(Color.Transparent, Palette.amber.copy(alpha = a), Color.Transparent), body, r * 1.05f), r * 1.05f, body)
-        }
-
-        // -- The body ----------------------------------------------------------------
-        withTransform({
-            translate(dx, dy)
-            scale(breathe * sx, breathe * sy, Offset(c.x, c.y + r * 0.5f))
-        }) {
-            drawCircle(Brush.radialGradient(listOf(tint.copy(alpha = 0.35f), Color.Transparent), c, r), r, c)
-            drawCircle(Brush.radialGradient(listOf(Palette.teal.copy(alpha = 0.55f), Color.Transparent), c + shift, r * 0.7f), r * 0.62f, c + shift)
-            val core = c - shift * 0.6f
-            drawCircle(Brush.radialGradient(listOf(tint, tint.copy(alpha = 0.15f)), core, r * 0.55f), r * 0.48f, core)
-
-            // Thinking: three dots circling the core.
-            if (talk == Talk.SENDING || talk == Talk.WAITING) {
-                for (i in 0 until 3) {
-                    val a = t * 2.4f + i * TAU / 3
-                    val pos = core + Offset(cos(a) * r * 0.66f, sin(a) * r * 0.66f * 0.55f)
-                    drawCircle(Palette.amber.copy(alpha = 0.55f + 0.35f * sin(t * 3f + i)), r * 0.04f, pos)
-                }
-            }
-
-            val blinking = t >= blinkAt && t < blinkAt + 0.16f
-            drawFace(core + Offset(0f, -r * 0.03f), r, mood, Offset(lookX, lookY), blinking, voice, react, p, t)
-        }
-
-        // -- In front: confetti --------------------------------------------------------
-        if (react == Reaction.CELEBRATE) drawConfetti(body, r, (nowMs - active!!.atMs) / 1000f, p)
+        bubbleShown = b.text
+        delay(b.untilMs - System.currentTimeMillis())
+        bubbleShown = null
     }
+
+    Box(modifier.onSizeChanged { sizePx = it.width.toFloat() }) {
+        Canvas(Modifier.fillMaxSize()) {
+            val nowMs = System.currentTimeMillis()
+            val r = size.minDimension / 2
+            val c = center
+            val cal = Calendar.getInstance()
+            val hour = cal.get(Calendar.HOUR_OF_DAY)
+
+            // -- What it's feeling ----------------------------------------------------
+            val active = reaction?.takeIf { nowMs - it.atMs < it.reaction.ms }
+            val react = active?.reaction
+            val p = active?.let { ((nowMs - it.atMs).toFloat() / it.reaction.ms).coerceIn(0f, 1f) } ?: 0f
+            val serverDown = server?.overall == "down"
+            val pixelMood = moodSet?.takeIf { it.untilMs > nowMs }?.mood
+            val upLate = nowMs - GadgetState.lastTouch < 10 * 60_000L || talk != Talk.IDLE || speaking
+            val playingMusic = nowPlaying != null
+            var mood = when {
+                pixelMood != null -> pixelMood
+                quiet && !upLate -> Mood.SLEEPY
+                quiet -> Mood.DROWSY
+                talk == Talk.LISTENING -> Mood.CURIOUS
+                talk == Talk.ERROR -> Mood.SAD
+                serverDown && talk == Talk.IDLE && !speaking -> Mood.WORRIED
+                playingMusic && !speaking && talk == Talk.IDLE -> Mood.HAPPY
+                else -> Mood.NEUTRAL
+            }
+            when (react) {
+                Reaction.CELEBRATE, Reaction.STRETCH, Reaction.WAVE -> mood = Mood.HAPPY
+                Reaction.WINK -> mood = Mood.WINK
+                Reaction.YAWN -> mood = Mood.SLEEPY
+                Reaction.STARTLE -> mood = Mood.SURPRISED
+                Reaction.HICCUP -> if (hiccupSpike(p) > 0.3f) mood = Mood.SURPRISED
+                else -> {}
+            }
+
+            val ownColor = style.takeIf { it.active(nowMs) }?.color?.let { Color(it) }
+            var tint = when {
+                speaking -> Palette.teal
+                talk == Talk.LISTENING -> Palette.coral
+                talk == Talk.SENDING || talk == Talk.WAITING -> Palette.amber
+                link == Link.CONNECTED -> ownColor ?: Palette.violet
+                else -> Palette.muted
+            }
+            if (serverDown && talk == Talk.IDLE && !speaking) tint = lerp(tint, Palette.coral, 0.55f)
+
+            val evening = hour >= 17
+            val accessory = style.takeIf { it.active(nowMs) }?.accessory
+                ?: autoAccessory(cal, weather, playingMusic, tvPlaying && evening)
+
+            // -- How it moves ------------------------------------------------------------
+            val breathe = 0.99f + 0.07f * sin(t * TAU / 7.2f) + 0.08f * voice + 0.12f * mic
+            var dx = 0f
+            var dy = 0f
+            var sx = 1f
+            var sy = 1f
+            var lookX = 0f
+            var lookY = 0f
+            var looking = false
+            when (react) {
+                Reaction.HOP, Reaction.CELEBRATE -> {
+                    val hops = if (react == Reaction.HOP) 2 else 3
+                    val phase = (p * hops) % 1f
+                    dy = -abs(sin(phase * PIF)) * r * 0.2f
+                    // Squash a little on each landing.
+                    val land = 1f - abs(sin(phase * PIF))
+                    sy = 1f - 0.08f * land * land
+                    sx = 1f + 0.06f * land * land
+                    lookY = -0.5f
+                }
+                Reaction.NOD -> { dy = sin(p * TAU * 2) * r * 0.05f; lookY = 0.3f + 0.5f * sin(p * TAU * 2) }
+                Reaction.SHAKE -> { dx = sin(p * TAU * 3) * r * 0.08f * (1 - p); lookX = sin(p * TAU * 3) }
+                Reaction.YAWN -> { val o = sin(p * PIF); sy = 1f + 0.08f * o; sx = 1f - 0.03f * o }
+                Reaction.STRETCH -> { val o = sin(p * PIF); sy = 1f + 0.15f * o; sx = 1f - 0.08f * o; dy = -o * r * 0.05f }
+                Reaction.HICCUP -> { val k = hiccupSpike(p); sx = 1f + 0.09f * k; sy = 1f + 0.09f * k; dy = -k * r * 0.05f }
+                Reaction.PEEK -> { lookX = sin(p * TAU); lookY = -0.2f }
+                Reaction.WANDER -> {
+                    dx = sin(p * TAU) * r * 0.35f
+                    dy = sin(p * TAU * 3) * r * 0.04f
+                    lookX = cos(p * TAU).coerceIn(-1f, 1f)
+                }
+                Reaction.WAVE -> { dy = -sin(p * PIF) * r * 0.03f; lookX = 0.3f }
+                Reaction.STARTLE -> {
+                    val jump = if (p < 0.12f) p / 0.12f else (1f - (p - 0.12f) / 0.3f).coerceAtLeast(0f)
+                    dy = -jump * r * 0.2f
+                    dx = sin(p * TAU * 6) * r * 0.03f * (1 - p)
+                    sx = 1f - 0.05f * jump
+                    sy = 1f + 0.08f * jump
+                }
+                else -> {}
+            }
+            if (react != null) looking = true
+
+            // Music: bob along (to its real loudness when the ROM lets us measure it).
+            if (playingMusic && react == null) {
+                val bob = abs(sin(t * PIF * 2f))
+                dy -= bob * r * 0.05f * (0.4f + 0.6f * music)
+                sy *= 1f - 0.03f * (1 - bob)
+            }
+            // A timer about to go off: glance up at it and fidget, faster near the end.
+            val soon = timers.filter { it.kind == "timer" }.minOfOrNull { it.dueAtMs }?.minus(nowMs)
+            if (soon != null && soon in 1..60_000 && react == null) {
+                val period = if (soon < 10_000) 0.6f else 2.5f
+                val ph = (t % period) / period
+                if (ph < 0.25f) dy -= sin(ph / 0.25f * PIF) * r * 0.06f
+                lookX = 0.5f; lookY = -0.9f; looking = true
+            }
+            // Looking over at what Pixel is working on: the laptop to one side, the TV to the other.
+            workingOn?.let { cmd ->
+                if (!looking) { lookX = if (cmd.startsWith("laptop.")) 0.9f else -0.9f; lookY = -0.1f; looking = true }
+            }
+            // Thinking: eyes drift up and to the side.
+            if (!looking && (talk == Talk.SENDING || talk == Talk.WAITING)) { lookX = 0.6f; lookY = -0.7f; looking = true }
+            // A recent tap pulls the eyes towards it.
+            if (!looking && lookAt != null && nowMs - lookAtMs < 2_500) {
+                val v = lookAt - c
+                val len = sqrt(v.x * v.x + v.y * v.y).coerceAtLeast(1f)
+                val reach = (len / r).coerceAtMost(1f)
+                lookX = v.x / len * reach
+                lookY = v.y / len * reach
+                looking = true
+            }
+            // Watching the TV.
+            if (!looking && tvPlaying && !quiet) { lookX = -0.85f; lookY = 0.1f }
+
+            // Munching popcorn now and then.
+            val munch = if (accessory == Accessory.POPCORN && (t % 5f) < 1.5f) abs(sin(t * 9f)) else 0f
+
+            val drift = (t / 14f) % 1f
+            val angle = drift * TAU
+            val shift = Offset(cos(angle) * r * 0.18f, sin(angle) * r * 0.18f)
+            val body = c + Offset(dx, dy)
+
+            // -- Behind the body: weather and the alert glow ---------------------------------
+            drawWeather(weather?.summary, body, r, t)
+            if (alertGlow) {
+                val a = 0.22f + 0.18f * sin(t * 3f)
+                drawCircle(Brush.radialGradient(listOf(Color.Transparent, Palette.amber.copy(alpha = a), Color.Transparent), body, r * 1.05f), r * 1.05f, body)
+            }
+
+            // -- The body ----------------------------------------------------------------
+            withTransform({
+                translate(dx, dy)
+                scale(breathe * sx, breathe * sy, Offset(c.x, c.y + r * 0.5f))
+            }) {
+                drawCircle(Brush.radialGradient(listOf(tint.copy(alpha = 0.35f), Color.Transparent), c, r), r, c)
+                drawCircle(Brush.radialGradient(listOf(Palette.teal.copy(alpha = 0.55f), Color.Transparent), c + shift, r * 0.7f), r * 0.62f, c + shift)
+                val core = c - shift * 0.6f
+                if (react == Reaction.WAVE) drawWave(core, r, p, tint)
+                drawCircle(Brush.radialGradient(listOf(tint, tint.copy(alpha = 0.15f)), core, r * 0.55f), r * 0.48f, core)
+
+                // Thinking: three dots circling the core.
+                if (talk == Talk.SENDING || talk == Talk.WAITING) {
+                    for (i in 0 until 3) {
+                        val a = t * 2.4f + i * TAU / 3
+                        val pos = core + Offset(cos(a) * r * 0.66f, sin(a) * r * 0.66f * 0.55f)
+                        drawCircle(Palette.amber.copy(alpha = 0.55f + 0.35f * sin(t * 3f + i)), r * 0.04f, pos)
+                    }
+                }
+
+                val blinking = t >= blinkAt && t < blinkAt + 0.16f
+                drawFace(core + Offset(0f, -r * 0.03f), r, mood, Offset(lookX, lookY), blinking, voice, munch, react, p, t)
+                if (accessory != null) drawAccessory(accessory, core, r, t)
+            }
+
+            // -- In front: confetti --------------------------------------------------------
+            if (react == Reaction.CELEBRATE) drawConfetti(body, r, (nowMs - active!!.atMs) / 1000f, p)
+        }
+
+        // Speech bubble, above the blob.
+        bubbleShown?.let { text ->
+            Text(
+                text, color = Palette.night, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.TopCenter)
+                    .layout { m, cons ->
+                        val placeable = m.measure(cons.copy(minWidth = 0, maxWidth = 270.dp.roundToPx()))
+                        layout(placeable.width, placeable.height) { placeable.place(0, -placeable.height + 34.dp.roundToPx()) }
+                    }
+                    .background(Palette.ink.copy(alpha = 0.94f), RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp))
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            )
+        }
+
+        // The sign it holds up when something on the server is wrong.
+        val s = server
+        if (showServer && s != null && s.overall != "up") {
+            val down = s.monitors.filter { it.status == "down" }.map { it.name }
+            val sign = when {
+                s.overall == "down" && down.isNotEmpty() -> "⚠ " + down.take(2).joinToString(", ") +
+                    (if (down.size > 2) " +${down.size - 2}" else "") + " down"
+                s.overall == "down" -> "⚠ Server down"
+                else -> "🔧 Checking servers…"
+            }
+            Text(
+                sign, color = Palette.night, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .layout { m, cons ->
+                        val placeable = m.measure(cons.copy(minWidth = 0, maxWidth = 240.dp.roundToPx()))
+                        layout(placeable.width, placeable.height) { placeable.place(0, placeable.height - 4.dp.roundToPx()) }
+                    }
+                    .background(if (s.overall == "down") Palette.coral else Palette.amber, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+/** What it wears when Pixel hasn't chosen: music, TV, the season, then the weather. */
+private fun autoAccessory(cal: Calendar, weather: WeatherNow?, music: Boolean, tvEvening: Boolean): Accessory? {
+    if (music) return Accessory.HEADPHONES
+    if (tvEvening) return Accessory.POPCORN
+    val month = cal.get(Calendar.MONTH)
+    val day = cal.get(Calendar.DAY_OF_MONTH)
+    when {
+        month == Calendar.DECEMBER && day <= 26 -> return Accessory.SANTA_HAT
+        month == Calendar.OCTOBER && day >= 24 -> return Accessory.WITCH_HAT
+        month == Calendar.JANUARY && day == 1 -> return Accessory.PARTY_HAT
+        month == Calendar.JULY && day == 4 -> return Accessory.PARTY_HAT
+    }
+    val w = weather ?: return null
+    val hour = cal.get(Calendar.HOUR_OF_DAY)
+    val sunny = w.summary.lowercase().let { "clear" in it || "partly" in it }
+    if (w.tempF >= 90 && sunny && hour in 8..18) return Accessory.SUNGLASSES
+    if (w.tempF <= 50) return Accessory.SCARF
+    return null
+}
+
+/** A quick read on the day, said in a bubble with a matching face. */
+private fun checkIn(weather: WeatherNow?, agenda: AgendaDay, server: ServerStatus?, morning: Boolean, seconds: Int) {
+    val parts = mutableListOf<String>()
+    var worries = 0
+    weather?.let { w ->
+        parts += "${w.tempF}° and ${w.summary.lowercase()}"
+        val s = w.summary.lowercase()
+        if ("rain" in s || "shower" in s || "thunder" in s || "snow" in s) worries++
+        if (w.tempF >= 95 || w.tempF <= 40) worries++
+    }
+    val today = SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
+    if (agenda.date.isEmpty() || agenda.date == today) {
+        val n = agenda.items.size
+        parts += when (n) { 0 -> "nothing planned"; 1 -> "1 thing today"; else -> "$n things today" }
+        if (n >= 5) worries++
+    }
+    server?.let { s ->
+        parts += when (s.overall) {
+            "up" -> "servers all good"
+            "down" -> {
+                worries++
+                val down = s.monitors.filter { it.status == "down" }.map { it.name }
+                if (down.size == 1) "${down[0]} is down" else "${down.size} services down"
+            }
+            else -> "servers being checked"
+        }
+    }
+    val opener = if (morning) "Good morning!" else "Today:"
+    GadgetState.say(if (parts.isEmpty()) "$opener Nothing to report." else "$opener " + parts.joinToString(" · "), seconds)
+    GadgetState.setMood(
+        when {
+            worries == 0 -> Mood.HAPPY
+            worries == 1 -> Mood.CURIOUS
+            else -> Mood.WORRIED
+        },
+        seconds,
+    )
 }
 
 /** Two sharp bumps over the reaction: hic... hic. */
@@ -253,7 +482,7 @@ private val eyeInk = Palette.night.copy(alpha = 0.88f)
 
 private fun DrawScope.drawFace(
     at: Offset, r: Float, mood: Mood, look: Offset, blinking: Boolean,
-    voice: Float, react: Reaction?, p: Float, t: Float,
+    voice: Float, munch: Float, react: Reaction?, p: Float, t: Float,
 ) {
     val gap = r * 0.17f
     val w = r * 0.075f
@@ -267,6 +496,11 @@ private fun DrawScope.drawFace(
         val ew = w * scale
         val eh = (if (blinking) h * 0.12f else h * squash) * scale
         drawOval(eyeInk, Offset(center.x - ew, center.y - eh), Size(ew * 2, eh * 2))
+    }
+    // Half-closed: just the lower half of the eye under a heavy lid.
+    fun lidded(center: Offset) {
+        val eh = if (blinking) h * 0.12f else h * 0.75f
+        drawArc(eyeInk, 0f, 180f, true, Offset(center.x - w, center.y - eh * 0.5f), Size(w * 2, eh))
     }
     fun happyArc(center: Offset) {
         val path = Path().apply {
@@ -298,10 +532,11 @@ private fun DrawScope.drawFace(
 
     when (mood) {
         Mood.NEUTRAL -> { oval(left); oval(right) }
-        Mood.HAPPY -> { happyArc(left); happyArc(right); smile(w * 1.4f, h * 0.7f) }
+        Mood.HAPPY -> { happyArc(left); happyArc(right); if (munch < 0.05f) smile(w * 1.4f, h * 0.7f) }
         Mood.CURIOUS -> { oval(left, 1.22f); oval(right, 0.92f) }
         Mood.WORRIED -> { oval(left); oval(right); brows(0.45f); smile(w * 0.9f, -h * 0.2f) }
         Mood.SAD -> { oval(left, squash = 0.8f); oval(right, squash = 0.8f); brows(0.55f); smile(w * 1.1f, -h * 0.55f) }
+        Mood.DROWSY -> { lidded(left); lidded(right) }
         Mood.SURPRISED -> {
             drawCircle(eyeInk, w * 1.35f, left)
             drawCircle(eyeInk, w * 1.35f, right)
@@ -311,7 +546,7 @@ private fun DrawScope.drawFace(
         Mood.SLEEPY -> {
             closedArc(left); closedArc(right)
             if (react == Reaction.YAWN) {
-                val o = sin(p * PI.toFloat())
+                val o = sin(p * PIF)
                 drawOval(eyeInk, Offset(mouth.x - w * 0.9f * o, mouth.y - h * 0.2f), Size(w * 1.8f * o, h * 1.4f * o))
             } else {
                 drawZs(at + Offset(r * 0.32f, -r * 0.3f), r, t)
@@ -322,6 +557,121 @@ private fun DrawScope.drawFace(
     if (voice > 0.04f && mood != Mood.SURPRISED && react != Reaction.YAWN) {
         val open = h * (0.15f + 0.85f * voice)
         drawOval(eyeInk, Offset(mouth.x - w * 0.8f, mouth.y - open * 0.3f), Size(w * 1.6f, open))
+    } else if (munch > 0.05f) {
+        val open = h * 0.5f * munch
+        drawOval(eyeInk, Offset(mouth.x - w * 0.6f, mouth.y - open * 0.3f), Size(w * 1.2f, open))
+    }
+}
+
+/** A little hand popping out of the side, waving. */
+private fun DrawScope.drawWave(core: Offset, r: Float, p: Float, tint: Color) {
+    val fade = (minOf(p, 1 - p) / 0.15f).coerceIn(0f, 1f)
+    val pivot = core + Offset(r * 0.4f, r * 0.12f)
+    val angle = (25f + 30f * sin(p * TAU * 3)) * PIF / 180f
+    val hand = pivot + Offset(sin(angle) * r * 0.24f, -cos(angle) * r * 0.24f)
+    drawLine(tint.copy(alpha = fade), pivot, hand, r * 0.1f, StrokeCap.Round)
+    drawCircle(tint.copy(alpha = fade), r * 0.08f, hand)
+}
+
+private val hatRed = Color(0xFFE5484D)
+private val witchPurple = Color(0xFF3B2A5C)
+private val shades = Color(0xF2111018)
+private val cream = Color(0xFFFFF4D6)
+
+private fun DrawScope.drawAccessory(a: Accessory, core: Offset, r: Float, t: Float) {
+    val top = core + Offset(0f, -r * 0.42f)
+    when (a) {
+        Accessory.NONE -> {}
+        Accessory.PARTY_HAT -> rotate(12f, top) {
+            val path = Path().apply {
+                moveTo(top.x - r * 0.16f, top.y); lineTo(top.x + r * 0.16f, top.y); lineTo(top.x, top.y - r * 0.38f); close()
+            }
+            drawPath(path, Palette.coral)
+            drawLine(Palette.amber, Offset(top.x - r * 0.1f, top.y - r * 0.12f), Offset(top.x + r * 0.1f, top.y - r * 0.12f), r * 0.03f)
+            drawLine(Palette.amber, Offset(top.x - r * 0.05f, top.y - r * 0.25f), Offset(top.x + r * 0.05f, top.y - r * 0.25f), r * 0.03f)
+            drawCircle(Palette.amber, r * 0.05f, Offset(top.x, top.y - r * 0.38f))
+        }
+        Accessory.SANTA_HAT -> rotate(-8f, top) {
+            val path = Path().apply {
+                moveTo(top.x - r * 0.27f, top.y)
+                quadraticTo(top.x - r * 0.05f, top.y - r * 0.5f, top.x + r * 0.3f, top.y - r * 0.3f)
+                lineTo(top.x + r * 0.27f, top.y)
+                close()
+            }
+            drawPath(path, hatRed)
+            drawRoundRect(Color.White, Offset(top.x - r * 0.31f, top.y - r * 0.05f), Size(r * 0.62f, r * 0.11f), CornerRadius(r * 0.05f))
+            drawCircle(Color.White, r * 0.07f, Offset(top.x + r * 0.3f, top.y - r * 0.3f))
+        }
+        Accessory.WITCH_HAT -> rotate(-6f, top) {
+            drawOval(witchPurple, Offset(top.x - r * 0.4f, top.y - r * 0.05f), Size(r * 0.8f, r * 0.12f))
+            val path = Path().apply {
+                moveTo(top.x - r * 0.2f, top.y); lineTo(top.x + r * 0.2f, top.y); lineTo(top.x + r * 0.12f, top.y - r * 0.5f); close()
+            }
+            drawPath(path, witchPurple)
+            drawRect(Palette.amber, Offset(top.x - r * 0.19f, top.y - r * 0.08f), Size(r * 0.38f, r * 0.05f))
+        }
+        Accessory.CROWN -> {
+            val y = top.y + r * 0.02f
+            val path = Path().apply {
+                moveTo(top.x - r * 0.22f, y)
+                lineTo(top.x - r * 0.22f, y - r * 0.2f); lineTo(top.x - r * 0.11f, y - r * 0.09f)
+                lineTo(top.x, y - r * 0.24f); lineTo(top.x + r * 0.11f, y - r * 0.09f)
+                lineTo(top.x + r * 0.22f, y - r * 0.2f); lineTo(top.x + r * 0.22f, y)
+                close()
+            }
+            drawPath(path, Palette.amber)
+            drawCircle(Palette.coral, r * 0.03f, Offset(top.x, y - r * 0.07f))
+        }
+        Accessory.BOW -> {
+            val at = core + Offset(r * 0.3f, -r * 0.36f)
+            val pink = Color(0xFFFF8FD8)
+            drawPath(Path().apply { moveTo(at.x, at.y); lineTo(at.x - r * 0.14f, at.y - r * 0.09f); lineTo(at.x - r * 0.14f, at.y + r * 0.09f); close() }, pink)
+            drawPath(Path().apply { moveTo(at.x, at.y); lineTo(at.x + r * 0.14f, at.y - r * 0.09f); lineTo(at.x + r * 0.14f, at.y + r * 0.09f); close() }, pink)
+            drawCircle(Palette.coral, r * 0.04f, at)
+        }
+        Accessory.FLOWER -> {
+            val at = core + Offset(-r * 0.3f, -r * 0.36f)
+            for (i in 0 until 5) {
+                val a = i * TAU / 5 + t * 0.2f
+                drawCircle(Color(0xFFFFB3DE), r * 0.055f, at + Offset(cos(a) * r * 0.065f, sin(a) * r * 0.065f))
+            }
+            drawCircle(Palette.amber, r * 0.04f, at)
+        }
+        Accessory.SUNGLASSES -> {
+            val eyes = core + Offset(0f, -r * 0.03f)
+            val lens = Size(r * 0.2f, r * 0.14f)
+            for (side in listOf(-1f, 1f)) {
+                val cx = eyes.x + side * r * 0.17f
+                drawRoundRect(shades, Offset(cx - lens.width / 2, eyes.y - lens.height / 2), lens, CornerRadius(r * 0.04f))
+                drawLine(Color.White.copy(alpha = 0.35f), Offset(cx - r * 0.06f, eyes.y - r * 0.03f), Offset(cx - r * 0.02f, eyes.y - r * 0.05f), r * 0.015f, StrokeCap.Round)
+            }
+            drawLine(shades, Offset(eyes.x - r * 0.07f, eyes.y - r * 0.02f), Offset(eyes.x + r * 0.07f, eyes.y - r * 0.02f), r * 0.025f)
+        }
+        Accessory.SCARF -> {
+            val y = core.y + r * 0.3f
+            drawRoundRect(Palette.coral, Offset(core.x - r * 0.4f, y), Size(r * 0.8f, r * 0.12f), CornerRadius(r * 0.06f))
+            for (i in -2..2) drawLine(Palette.teal, Offset(core.x + i * r * 0.14f, y + r * 0.01f), Offset(core.x + i * r * 0.14f, y + r * 0.11f), r * 0.025f)
+            rotate(10f, Offset(core.x + r * 0.2f, y + r * 0.08f)) {
+                drawRoundRect(Palette.coral, Offset(core.x + r * 0.15f, y + r * 0.06f), Size(r * 0.12f, r * 0.28f), CornerRadius(r * 0.04f))
+            }
+        }
+        Accessory.HEADPHONES -> {
+            drawArc(Palette.ink.copy(alpha = 0.9f), 200f, 140f, false, core - Offset(r * 0.52f, r * 0.56f), Size(r * 1.04f, r * 1.04f),
+                style = Stroke(width = r * 0.05f, cap = StrokeCap.Round))
+            for (side in listOf(-1f, 1f)) {
+                drawRoundRect(Palette.coral, Offset(core.x + side * r * 0.5f - r * 0.065f, core.y - r * 0.17f), Size(r * 0.13f, r * 0.24f), CornerRadius(r * 0.05f))
+            }
+        }
+        Accessory.POPCORN -> {
+            val base = core + Offset(r * 0.4f, r * 0.42f)
+            val bucket = Path().apply {
+                moveTo(base.x - r * 0.13f, base.y - r * 0.26f); lineTo(base.x + r * 0.13f, base.y - r * 0.26f)
+                lineTo(base.x + r * 0.1f, base.y); lineTo(base.x - r * 0.1f, base.y); close()
+            }
+            drawPath(bucket, hatRed)
+            for (i in -1..1) drawLine(Color.White, Offset(base.x + i * r * 0.08f, base.y - r * 0.25f), Offset(base.x + i * r * 0.065f, base.y - r * 0.01f), r * 0.025f)
+            for (i in 0 until 5) drawCircle(cream, r * 0.05f, Offset(base.x + (i - 2) * r * 0.055f, base.y - r * 0.28f - (i % 2) * r * 0.04f))
+        }
     }
 }
 
@@ -346,7 +696,7 @@ private fun DrawScope.drawZs(from: Offset, r: Float, t: Float) {
 /** Rain, snow, sun or storm around the blob, from the glance weather. */
 private fun DrawScope.drawWeather(summary: String?, c: Offset, r: Float, t: Float) {
     val s = summary?.lowercase() ?: return
-    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val daytime = hour in 7..18
     when {
         "rain" in s || "drizzle" in s || "shower" in s || "thunder" in s -> {
@@ -358,7 +708,7 @@ private fun DrawScope.drawWeather(summary: String?, c: Offset, r: Float, t: Floa
                 val phase = (t * speed + i * 0.37f) % 1f
                 val y = -0.95f + phase * 1.9f
                 val top = c + Offset(x * r - y * r * 0.05f, y * r)
-                drawLine(Palette.teal.copy(alpha = 0.4f * sin(phase * PI.toFloat())), top, top + Offset(-r * 0.02f, r * 0.1f),
+                drawLine(Palette.teal.copy(alpha = 0.4f * sin(phase * PIF)), top, top + Offset(-r * 0.02f, r * 0.1f),
                     r * 0.018f, StrokeCap.Round)
             }
             // The odd flash of lightning.
@@ -371,7 +721,7 @@ private fun DrawScope.drawWeather(summary: String?, c: Offset, r: Float, t: Floa
                 val x = ((i * 0.618f) % 1f) * 1.7f - 0.85f
                 val phase = (t * 0.15f + i * 0.29f) % 1f
                 val pos = c + Offset((x + 0.05f * sin(t * 1.3f + i)) * r, (-0.95f + phase * 1.9f) * r)
-                drawCircle(Palette.ink.copy(alpha = 0.6f * sin(phase * PI.toFloat())), r * 0.025f, pos)
+                drawCircle(Palette.ink.copy(alpha = 0.6f * sin(phase * PIF)), r * 0.025f, pos)
             }
         }
         ("clear" in s) && daytime -> {
@@ -391,7 +741,7 @@ private fun DrawScope.drawConfetti(from: Offset, r: Float, seconds: Float, p: Fl
     val alpha = if (p < 0.7f) 1f else (1f - p) / 0.3f
     for (i in 0 until 28) {
         // Fixed per-piece randomness, so each frame continues the same burst.
-        val a = -PI.toFloat() / 2 + ((i * 0.618f) % 1f - 0.5f) * 2.4f
+        val a = -PIF / 2 + ((i * 0.618f) % 1f - 0.5f) * 2.4f
         val speed = r * (1.6f + ((i * 0.377f) % 1f) * 1.4f)
         val x = from.x + cos(a) * speed * seconds
         val y = from.y + sin(a) * speed * seconds + 0.5f * r * 3.2f * seconds * seconds

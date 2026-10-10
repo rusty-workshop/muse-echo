@@ -21,13 +21,16 @@ enum class Link { NOT_PAIRED, NO_TOKEN, CONNECTING, CONNECTED, RECONNECTING }
 enum class Talk { IDLE, LISTENING, SENDING, WAITING, REPLIED, ERROR }
 
 /** The blob's face. Pixel can set one for a while (blob.mood); otherwise it follows what's going on. */
-enum class Mood { NEUTRAL, HAPPY, CURIOUS, WORRIED, SLEEPY, SURPRISED, SAD, WINK }
+enum class Mood { NEUTRAL, HAPPY, CURIOUS, WORRIED, SLEEPY, DROWSY, SURPRISED, SAD, WINK }
 
 /** One-off blob animations: from Pixel (blob.react), events, or its own idle antics. */
 enum class Reaction(val ms: Long) {
     HOP(900), NOD(900), SHAKE(900), WINK(1100), CELEBRATE(2800),
     YAWN(2600), STRETCH(2000), HICCUP(1300), PEEK(2600), WANDER(6000),
+    WAVE(2000), STARTLE(1400),
 }
+
+data class Bubble(val text: String, val untilMs: Long)
 
 data class MoodSet(val mood: Mood, val untilMs: Long)
 
@@ -219,6 +222,41 @@ object GadgetState {
     fun setAlertGlow(on: Boolean) {
         _alertGlow.value = on
     }
+
+    /** A silent speech bubble beside the blob (blob.say, or its morning check-in). */
+    private val _bubble = MutableStateFlow<Bubble?>(null)
+    val bubble: StateFlow<Bubble?> = _bubble.asStateFlow()
+
+    fun say(text: String, seconds: Int) {
+        _bubble.value = if (text.isBlank()) null else Bubble(text.trim(), System.currentTimeMillis() + seconds * 1000L)
+    }
+
+    private val _style = MutableStateFlow(BlobStyle())
+    val style: StateFlow<BlobStyle> = _style.asStateFlow()
+
+    fun setStyle(style: BlobStyle) {
+        _style.value = style
+    }
+
+    /** The living-room Roku is playing something (polled while it's on). */
+    private val _tvPlaying = MutableStateFlow(false)
+    val tvPlaying: StateFlow<Boolean> = _tvPlaying.asStateFlow()
+
+    fun setTvPlaying(on: Boolean) {
+        _tvPlaying.value = on
+    }
+
+    /** A laptop.* or tv.* command Pixel is running right now (the blob looks over). */
+    private val _workingOn = MutableStateFlow<String?>(null)
+    val workingOn: StateFlow<String?> = _workingOn.asStateFlow()
+
+    fun setWorkingOn(command: String?) {
+        _workingOn.value = command
+    }
+
+    /** Loudness of music from audio.play_url, 0..1, or -1 when unknown. */
+    @Volatile
+    var musicLevel: () -> Float = { -1f }
 
     /** Loudness of the Echo's own voice, 0..1, or -1 when unknown (system TTS). */
     @Volatile
