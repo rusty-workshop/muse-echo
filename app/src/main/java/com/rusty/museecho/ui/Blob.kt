@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -375,18 +376,28 @@ internal fun Blob(modifier: Modifier, actions: UiActions, lookAt: Offset?, lookA
             if (react == Reaction.CELEBRATE) drawConfetti(body, r, (nowMs - active!!.atMs) / 1000f, p)
         }
 
-        // Speech bubble, above the blob.
+        // Speech bubble, up and to the left, with a tail pointing down at the blob.
         bubbleShown?.let { text ->
-            Text(
-                text, color = Palette.night, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.TopCenter)
-                    .layout { m, cons ->
-                        val placeable = m.measure(cons.copy(minWidth = 0, maxWidth = 270.dp.roundToPx()))
-                        layout(placeable.width, placeable.height) { placeable.place(0, -placeable.height + 34.dp.roundToPx()) }
+            val bubbleInk = Palette.ink.copy(alpha = 0.94f)
+            androidx.compose.foundation.layout.Column(
+                Modifier.align(Alignment.TopStart).layout { m, cons ->
+                    val placeable = m.measure(cons.copy(minWidth = 0, maxWidth = 270.dp.roundToPx()))
+                    // Bottom of the column (the tail's tip) lands just above the blob's upper-left edge.
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(4.dp.roundToPx(), 76.dp.roundToPx() - placeable.height)
                     }
-                    .background(Palette.ink.copy(alpha = 0.94f), RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp))
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-            )
+                },
+            ) {
+                Text(
+                    text, color = Palette.night, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.background(bubbleInk, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+                Canvas(Modifier.padding(start = 30.dp).size(width = 30.dp, height = 20.dp)) {
+                    drawPath(Path().apply {
+                        moveTo(0f, 0f); lineTo(size.width * 0.6f, 0f); lineTo(size.width, size.height); close()
+                    }, bubbleInk)
+                }
+            }
         }
 
         // The sign it holds up when something on the server is wrong.
