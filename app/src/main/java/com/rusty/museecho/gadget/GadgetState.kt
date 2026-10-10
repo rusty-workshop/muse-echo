@@ -312,6 +312,14 @@ object GadgetState {
         _alerts.value = list
     }
 
+    /** Alerts whose banner was closed (the blob still frets about them while they last). */
+    private val _dismissedAlerts = MutableStateFlow<Set<String>>(emptySet())
+    val dismissedAlerts: StateFlow<Set<String>> = _dismissedAlerts.asStateFlow()
+
+    fun setDismissedAlerts(ids: Set<String>) {
+        _dismissedAlerts.value = ids
+    }
+
     /** Said goodnight: tucked in under a blanket until the next touch. */
     private val _tuckedIn = MutableStateFlow(false)
     val tuckedIn: StateFlow<Boolean> = _tuckedIn.asStateFlow()

@@ -118,6 +118,7 @@ class GadgetService : Service() {
         GadgetState.setMicOff(Prefs(this).micOff)
         GadgetState.setServerPill(Prefs(this).showServerPill)
         GadgetState.setBlobEnergy(Prefs(this).blobEnergy)
+        GadgetState.setDismissedAlerts(Prefs(this).dismissedAlerts)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
         specialDays = com.rusty.museecho.integrations.SpecialDays(java.io.File(filesDir, "countdowns.json"))
@@ -827,6 +828,12 @@ class GadgetService : Service() {
                 val now = System.currentTimeMillis()
                 val active = list.filter { it.endsMs == 0L || it.endsMs > now }
                 GadgetState.setAlerts(active)
+                // Forget closed banners once their alerts are over.
+                val stillClosed = GadgetState.dismissedAlerts.value.intersect(active.map { it.id }.toSet())
+                if (stillClosed != GadgetState.dismissedAlerts.value) {
+                    GadgetState.setDismissedAlerts(stillClosed)
+                    prefs.dismissedAlerts = stillClosed
+                }
                 val fresh = active.filter { it.id !in announced }
                 if (fresh.isNotEmpty()) {
                     announced += fresh.map { it.id }
@@ -1355,6 +1362,10 @@ class Prefs(context: Context) {
         set(v) = prefs.edit().putInt("night_off_min", v).apply()
 
     /** Show the server status pill by the connection chip. */
+    var dismissedAlerts: Set<String>
+        get() = prefs.getStringSet("dismissed_alerts", emptySet()) ?: emptySet()
+        set(v) = prefs.edit().putStringSet("dismissed_alerts", v.toSet()).apply()
+
     var announcedAlerts: Set<String>
         get() = prefs.getStringSet("announced_alerts", emptySet()) ?: emptySet()
         set(v) = prefs.edit().putStringSet("announced_alerts", v.toSet()).apply()

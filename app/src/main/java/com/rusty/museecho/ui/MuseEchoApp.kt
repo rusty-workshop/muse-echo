@@ -306,7 +306,16 @@ private fun IdleFace(actions: UiActions) {
 /** Active weather alerts (National Weather Service), one chip each; tap for the details. */
 @Composable
 private fun AlertBanner() {
-    val alerts by GadgetState.alerts.collectAsState()
+    val all by GadgetState.alerts.collectAsState()
+    val closed by GadgetState.dismissedAlerts.collectAsState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Closing a chip only hides the banner; the blob keeps worrying while the alert lasts.
+    val alerts = all.filter { it.id !in closed }
+    fun close(ids: Collection<String>) {
+        val next = closed + ids
+        GadgetState.setDismissedAlerts(next)
+        com.rusty.museecho.gadget.Prefs(ctx).dismissedAlerts = next
+    }
     androidx.compose.animation.AnimatedVisibility(
         visible = alerts.isNotEmpty(),
         enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
@@ -319,14 +328,19 @@ private fun AlertBanner() {
             warningsFirst.take(2).forEach { a ->
                 val severe = a.severity.equals("Severe", true) || a.severity.equals("Extreme", true)
                 val until = if (a.endsMs > 0) " until " + SimpleDateFormat("EEE h a", Locale.US).format(Date(a.endsMs)) else ""
-                Text("⚠ ${a.event}$until", color = Palette.night, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                        .background(if (severe) Palette.coral else Palette.amber, RoundedCornerShape(50))
-                        .clickable {
+                Row(
+                    Modifier.padding(bottom = 4.dp).background(if (severe) Palette.coral else Palette.amber, RoundedCornerShape(50)),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("⚠ ${a.event}$until", color = Palette.night, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable {
                             GadgetState.show(Screen.Text(a.event, listOf(a.headline, a.description, a.instruction)
                                 .filter { it.isNotBlank() }.joinToString("\n\n")))
-                        }
-                        .padding(horizontal = 14.dp, vertical = 5.dp))
+                        }.padding(start = 14.dp, top = 5.dp, bottom = 5.dp, end = 6.dp))
+                    // Close: hides this chip (a third alert, if any, moves up).
+                    Text("✕", color = Palette.night.copy(alpha = 0.7f), fontSize = 14.sp,
+                        modifier = Modifier.clickable { close(listOf(a.id)) }.padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp))
+                }
             }
         }
     }
