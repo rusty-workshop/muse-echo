@@ -97,13 +97,17 @@ class Glance(file: File) : JsonFileState<GlanceLine>(file, GlanceLine.serializer
 
 /** Today's weather from Open-Meteo (no key needed), the same source Sofa uses. */
 @Serializable
-data class WeatherNow(val tempF: Int, val highF: Int, val lowF: Int, val summary: String, val atMs: Long)
+data class WeatherNow(
+    val tempF: Int, val highF: Int, val lowF: Int, val summary: String, val atMs: Long,
+    /** Tomorrow's forecast ("" if it wasn't in the response). */
+    val tomorrowSummary: String = "", val tomorrowHighF: Int? = null,
+)
 
 class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()) {
     suspend fun fetch(lat: Double, lon: Double): WeatherNow? = withContext(Dispatchers.IO) {
         val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-            "&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min" +
-            "&temperature_unit=fahrenheit&timezone=auto&forecast_days=1"
+            "&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code" +
+            "&temperature_unit=fahrenheit&timezone=auto&forecast_days=2"
         runCatching {
             http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
@@ -111,12 +115,15 @@ class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeou
                 val current = root["current"] as JsonObject
                 val daily = root["daily"] as JsonObject
                 fun first(key: String) = ((daily[key] as JsonArray)[0] as JsonPrimitive).doubleOrNull ?: 0.0
+                fun second(key: String) = ((daily[key] as? JsonArray)?.getOrNull(1) as? JsonPrimitive)?.doubleOrNull
                 WeatherNow(
                     tempF = ((current["temperature_2m"] as JsonPrimitive).doubleOrNull ?: 0.0).let { Math.round(it).toInt() },
                     highF = Math.round(first("temperature_2m_max")).toInt(),
                     lowF = Math.round(first("temperature_2m_min")).toInt(),
                     summary = describe((current["weather_code"] as JsonPrimitive).intOrNull ?: -1),
                     atMs = System.currentTimeMillis(),
+                    tomorrowSummary = second("weather_code")?.let { describe(it.toInt()) }.orEmpty(),
+                    tomorrowHighF = second("temperature_2m_max")?.let { Math.round(it).toInt() },
                 )
             }
         }.getOrNull()

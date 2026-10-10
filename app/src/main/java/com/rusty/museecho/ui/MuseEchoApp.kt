@@ -233,19 +233,37 @@ private fun IdleFace(actions: UiActions) {
     var blobCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     var lookAt by remember { mutableStateOf<Offset?>(null) }
     var lookAtMs by remember { mutableStateOf(0L) }
+    var tapAt by remember { mutableStateOf<Offset?>(null) }
+    var tapAtMs by remember { mutableStateOf(0L) }
     Row(
         Modifier.fillMaxSize()
             .pointerInput(Unit) {
                 awaitPointerEventScope {
+                    var downAt: Offset? = null
+                    var downMs = 0L
                     while (true) {
-                        // Only watches taps (Initial pass, nothing consumed): buttons still get them.
+                        // Only watches (Initial pass, nothing consumed): buttons and swipes still get it.
                         val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                        val down = e.changes.firstOrNull { it.pressed && !it.previousPressed } ?: continue
+                        val change = e.changes.firstOrNull() ?: continue
                         val row = rowCoords
                         val blob = blobCoords
-                        if (row != null && blob != null && row.isAttached && blob.isAttached) {
-                            lookAt = blob.localPositionOf(row, down.position)
-                            lookAtMs = System.currentTimeMillis()
+                        if (row == null || blob == null || !row.isAttached || !blob.isAttached) continue
+                        if (change.pressed && !change.previousPressed) {
+                            // Eyes follow the finger as soon as it touches.
+                            downAt = change.position
+                            downMs = System.currentTimeMillis()
+                            lookAt = blob.localPositionOf(row, change.position)
+                            lookAtMs = downMs
+                        } else if (!change.pressed && change.previousPressed) {
+                            // A real tap (short, didn't move) is what counts as poking the blob.
+                            val start = downAt
+                            if (start != null && (change.position - start).getDistance() < 24f &&
+                                System.currentTimeMillis() - downMs < 500
+                            ) {
+                                tapAt = blob.localPositionOf(row, change.position)
+                                tapAtMs = System.currentTimeMillis()
+                            }
+                            downAt = null
                         }
                     }
                 }
@@ -255,7 +273,7 @@ private fun IdleFace(actions: UiActions) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(if (hasNote) 170.dp else 220.dp).onGloballyPositioned { blobCoords = it }, contentAlignment = Alignment.Center) {
-            Blob(Modifier.fillMaxSize(), actions, lookAt, lookAtMs)
+            Blob(Modifier.fillMaxSize(), actions, lookAt, lookAtMs, tapAt, tapAtMs)
         }
         Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
         Column(Modifier.weight(1f)) {
@@ -296,6 +314,28 @@ private fun IdlePages(actions: UiActions) {
         if (pager.currentPage != 0) {
             delay(120_000)
             pager.animateScrollToPage(0)
+        }
+    }
+    // Swiping back and forth quickly makes the blob dizzy: count direction changes in the last 3 seconds.
+    LaunchedEffect(pager) {
+        var last = 0f
+        var dir = 0
+        val turns = ArrayDeque<Long>()
+        androidx.compose.runtime.snapshotFlow { pager.currentPage + pager.currentPageOffsetFraction }.collect { pos ->
+            val step = pos - last
+            if (kotlin.math.abs(step) < 0.02f) return@collect
+            last = pos
+            val d = if (step > 0) 1 else -1
+            if (dir != 0 && d != dir) {
+                val now = System.currentTimeMillis()
+                turns.addLast(now)
+                while (turns.isNotEmpty() && now - turns.first() > 3_000) turns.removeFirst()
+                if (turns.size >= 4) {
+                    turns.clear()
+                    GadgetState.react(com.rusty.museecho.gadget.Reaction.DIZZY)
+                }
+            }
+            dir = d
         }
     }
     androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->

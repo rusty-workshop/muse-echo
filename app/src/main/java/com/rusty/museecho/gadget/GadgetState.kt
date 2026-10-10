@@ -27,8 +27,13 @@ enum class Mood { NEUTRAL, HAPPY, CURIOUS, WORRIED, SLEEPY, DROWSY, SURPRISED, S
 enum class Reaction(val ms: Long) {
     HOP(900), NOD(900), SHAKE(900), WINK(1100), CELEBRATE(2800),
     YAWN(2600), STRETCH(2000), HICCUP(1300), PEEK(2600), WANDER(6000),
-    WAVE(2000), STARTLE(1400),
+    WAVE(2000), STARTLE(1400), DIZZY(2600), NUDGE(3000),
 }
+
+/** Something the blob holds up (blob.hold, or its own forecast props). */
+enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES }
+
+data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
 data class Bubble(val text: String, val untilMs: Long)
 
@@ -254,6 +259,29 @@ object GadgetState {
         _workingOn.value = command
     }
 
+    private val _held = MutableStateFlow<Held?>(null)
+    val held: StateFlow<Held?> = _held.asStateFlow()
+
+    fun hold(item: HeldItem, text: String, minutes: Int) {
+        _held.value = if (item == HeldItem.NONE) null else Held(item, text.trim(), System.currentTimeMillis() + minutes * 60_000L)
+    }
+
+    /** Muse is busy on the Latitude right now (an SSH session or a gadget command), per the echo-hub. */
+    private val _museBusy = MutableStateFlow(false)
+    val museBusy: StateFlow<Boolean> = _museBusy.asStateFlow()
+
+    fun setMuseBusy(on: Boolean) {
+        _museBusy.value = on
+    }
+
+    /** The room's lights are off (the Echo's light sensor, with some hysteresis). Null: no sensor. */
+    private val _roomDark = MutableStateFlow<Boolean?>(null)
+    val roomDark: StateFlow<Boolean?> = _roomDark.asStateFlow()
+
+    fun setRoomDark(dark: Boolean) {
+        _roomDark.value = dark
+    }
+
     /** Loudness of music from audio.play_url, 0..1, or -1 when unknown. */
     @Volatile
     var musicLevel: () -> Float = { -1f }
@@ -281,7 +309,12 @@ object GadgetState {
 
     fun setTalk(talk: Talk) {
         _talk.value = talk
+        if (talk == Talk.LISTENING || talk == Talk.SENDING) lastChat = System.currentTimeMillis()
     }
+
+    /** When someone last talked to Pixel through the Echo (the blob gets bored after a while). */
+    @Volatile
+    var lastChat = System.currentTimeMillis()
 
     fun setHeard(text: String) {
         _heard.value = text

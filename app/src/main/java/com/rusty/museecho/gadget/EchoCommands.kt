@@ -110,6 +110,24 @@ class EchoCommands(
                     "(none = wear nothing, even when it would pick something). party_hat suits birthdays."),
                 "hours" to param("integer", "How long to keep it, 1 to 720. Default: until changed."),
             ))
+        spec("blob.hold",
+            "Have the Echo Show's blob hold up a little prop, optionally with a short label on a card " +
+                "(e.g. a package with \"Delivery today\", an umbrella with \"Rain at 3\", a gift for a birthday). " +
+                "none clears it.",
+            required = mapOf("item" to param("string", "One of: ${HeldItem.entries.joinToString { it.name.lowercase() }}.")),
+            optional = mapOf(
+                "text" to param("string", "Label shown on a card, up to 40 characters."),
+                "minutes" to param("integer", "How long to hold it, 1 to 1440. Default 60."),
+            ))
+        spec("blob.sequence",
+            "Play a little choreographed show on the Echo Show's blob: a list of steps run in order. Each step " +
+                "may set any of mood (+ mood_seconds), reaction, say (+ say_seconds), color / accessory (+ hours), " +
+                "hold (+ hold_text, hold_minutes), then waits wait_ms before the next (default: the reaction's " +
+                "length, else 1500, max 10000). Up to 20 steps and 60 seconds. Values are the same as blob.mood, " +
+                "blob.react, blob.say, blob.style and blob.hold. Example for good news: hop, then celebrate with " +
+                "say \"You did it!\", then accessory party_hat for 1 hour.",
+            required = mapOf("steps" to param("array", "The steps, each an object as described.")),
+            timeoutMs = 75_000)
         spec("blob.say",
             "Show a short silent speech bubble beside the Echo Show's blob, e.g. \"Don't forget the trash!\". " +
                 "Nothing is spoken, so it suits quiet hours. Empty text clears it.",
@@ -140,6 +158,8 @@ class EchoCommands(
                     commandOk(JsonObject(emptyMap()))
                 }
                 "blob.style" -> blobStyle(params.string("color"), params.string("accessory"), params.int("hours"))
+                "blob.hold" -> hold(params.string("item"), params.string("text"), params.int("minutes"))
+                "blob.sequence" -> sequence(params["steps"])
                 "blob.say" -> {
                     val text = params.string("text").orEmpty()
                     if (text.length > 120) return@withTimeout commandError("text must be 120 characters or fewer")
@@ -316,6 +336,57 @@ class EchoCommands(
                 commandError("couldn't play that URL: ${it.message}")
             },
         )
+    }
+
+    private fun hold(item: String?, text: String?, minutes: Int?): JsonObject {
+        val held = HeldItem.entries.firstOrNull { it.name.equals(item?.trim()?.replace(' ', '_'), ignoreCase = true) }
+            ?: return commandError("item must be one of: ${HeldItem.entries.joinToString { it.name.lowercase() }}")
+        val label = text.orEmpty().trim()
+        if (label.length > 40) return commandError("text must be 40 characters or fewer")
+        GadgetState.hold(held, label, (minutes ?: 60).coerceIn(1, 1440))
+        return commandOk(JsonObject(emptyMap()))
+    }
+
+    private suspend fun sequence(steps: kotlinx.serialization.json.JsonElement?): JsonObject {
+        val list = (steps as? kotlinx.serialization.json.JsonArray)?.mapNotNull { it as? JsonObject }
+            ?: return commandError("steps must be an array of objects")
+        if (list.isEmpty() || list.size > 20) return commandError("give 1 to 20 steps")
+        val deadline = System.currentTimeMillis() + 60_000
+        list.forEachIndexed { i, step ->
+            if (System.currentTimeMillis() > deadline) return commandError("stopped at step ${i + 1}: over 60 seconds")
+            val problem = runStep(step)
+            if (problem != null) return commandError("step ${i + 1}: $problem")
+            val reaction = step.string("reaction")?.let { r -> Reaction.entries.firstOrNull { it.name.equals(r.trim(), ignoreCase = true) } }
+            val wait = (step.int("wait_ms") ?: reaction?.ms?.toInt() ?: 1500).coerceIn(0, 10_000)
+            if (i < list.size - 1) kotlinx.coroutines.delay(wait.toLong())
+        }
+        return commandOk(buildJsonObject { put("steps", list.size) })
+    }
+
+    /** One step of blob.sequence; returns what was wrong with it, if anything. */
+    private fun runStep(step: JsonObject): String? {
+        fun err(r: JsonObject) = (r["error"] as? JsonPrimitive)?.contentOrNull ?: "failed"
+        fun ok(r: JsonObject) = (r["ok"] as? JsonPrimitive)?.content == "true"
+        step.string("mood")?.let { m ->
+            val mood = Mood.entries.firstOrNull { it.name.equals(m.trim(), ignoreCase = true) } ?: return "unknown mood $m"
+            GadgetState.setMood(mood, (step.int("mood_seconds") ?: 60).coerceIn(5, 3600))
+        }
+        step.string("reaction")?.let { r ->
+            GadgetState.react(Reaction.entries.firstOrNull { it.name.equals(r.trim(), ignoreCase = true) } ?: return "unknown reaction $r")
+        }
+        step.string("say")?.let { text ->
+            if (text.length > 120) return "say must be 120 characters or fewer"
+            GadgetState.say(text, (step.int("say_seconds") ?: 10).coerceIn(2, 86_400))
+        }
+        if (step.string("color") != null || step.string("accessory") != null) {
+            val r = blobStyle(step.string("color"), step.string("accessory"), step.int("hours"))
+            if (!ok(r)) return err(r)
+        }
+        step.string("hold")?.let { item ->
+            val r = hold(item, step.string("hold_text"), step.int("hold_minutes"))
+            if (!ok(r)) return err(r)
+        }
+        return null
     }
 
     private fun blobStyle(color: String?, accessory: String?, hours: Int?): JsonObject {

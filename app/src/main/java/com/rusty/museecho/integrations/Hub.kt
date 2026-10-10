@@ -22,6 +22,9 @@ data class MonitorState(val name: String, val status: String, val since: String 
 data class ServerStatus(val overall: String, val monitors: List<MonitorState> = emptyList(), val checked_at: String = "")
 
 @Serializable
+data class Activity(val busy: Boolean = false, val kinds: List<String> = emptyList())
+
+@Serializable
 data class Release(val versionCode: Int, val versionName: String, val sha256: String, val notes: String = "")
 
 /**
@@ -45,6 +48,10 @@ class Hub(private val context: Context) {
 
     suspend fun status(): ServerStatus? = withContext(Dispatchers.IO) {
         get("/status")?.let { runCatching { json.decodeFromString(ServerStatus.serializer(), it) }.getOrNull() }
+    }
+
+    suspend fun activity(): Activity? = withContext(Dispatchers.IO) {
+        get("/activity")?.let { runCatching { json.decodeFromString(Activity.serializer(), it) }.getOrNull() }
     }
 
     suspend fun latest(): Release? = withContext(Dispatchers.IO) {

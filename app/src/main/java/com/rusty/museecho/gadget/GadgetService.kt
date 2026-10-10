@@ -146,6 +146,8 @@ class GadgetService : Service() {
         scope.launch { watchdog() }
         scope.launch { refreshWeather() }
         scope.launch { watchServer() }
+        scope.launch { watchMuseElsewhere() }
+        watchLight()
         scope.launch {
             while (true) {
                 checkForUpdate()
@@ -186,6 +188,7 @@ class GadgetService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        lightListener?.let { getSystemService(android.hardware.SensorManager::class.java)?.unregisterListener(it) }
         stopPairing(null)
         stopChime()
         recorder.cancel()
@@ -581,6 +584,13 @@ class GadgetService : Service() {
         GadgetState.setReplySource(source)
         GadgetState.setReply(reply.text)
         GadgetState.setTalk(Talk.REPLIED)
+        // The blob takes its face from the reply's tone, unless Pixel already chose one.
+        if ((GadgetState.mood.value?.untilMs ?: 0L) < System.currentTimeMillis()) {
+            BlobBrain.tone(reply.text)?.let { tone ->
+                GadgetState.setMood(tone.mood, 30)
+                if (tone.hop) GadgetState.react(Reaction.HOP)
+            }
+        }
         // A new reply counts as activity: it wakes a sleeping screen for the usual idle time.
         GadgetState.lastTouch = System.currentTimeMillis()
         GadgetState.setAsleep(false)
@@ -750,6 +760,51 @@ class GadgetService : Service() {
         } finally {
             GadgetState.setWorkingOn(null)
         }
+    }
+
+    /** Asks the echo-hub whether Muse is busy on the Latitude, so the blob can show it. */
+    private suspend fun watchMuseElsewhere() {
+        while (true) {
+            val busy = !isQuietNow() && hub.activity()?.busy == true
+            GadgetState.setMuseBusy(busy)
+            delay(if (isQuietNow()) 120_000 else 20_000)
+        }
+    }
+
+    private var lightListener: android.hardware.SensorEventListener? = null
+
+    /**
+     * The light sensor, for "the room went dark" / "lights came on". The
+     * screen's own glow reaches it too, so dark means very little light, held
+     * for a minute; bright means clearly more than that.
+     */
+    private fun watchLight() {
+        val sensors = getSystemService(android.hardware.SensorManager::class.java) ?: return
+        val sensor = sensors.getDefaultSensor(android.hardware.Sensor.TYPE_LIGHT) ?: return
+        var darkSince = 0L
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                val lux = e.values.firstOrNull() ?: return
+                val now = System.currentTimeMillis()
+                val wasDark = GadgetState.roomDark.value
+                if (lux < DARK_LUX) {
+                    if (darkSince == 0L) darkSince = now
+                    if (wasDark != true && now - darkSince >= 60_000) {
+                        GadgetState.setRoomDark(true)
+                        GadgetState.log("room went dark (%.0f lux)".format(lux))
+                    }
+                } else {
+                    darkSince = 0L
+                    if (lux > LIGHT_LUX && wasDark != false) {
+                        GadgetState.setRoomDark(false)
+                        if (wasDark == true) GadgetState.log("lights came on (%.0f lux)".format(lux))
+                    }
+                }
+            }
+            override fun onAccuracyChanged(s: android.hardware.Sensor?, accuracy: Int) {}
+        }
+        sensors.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
+        lightListener = listener
     }
 
     /** Polls the Roku now and then, so the blob can watch along. Never searches the network for it. */
@@ -954,6 +1009,8 @@ class GadgetService : Service() {
     }
 
     companion object {
+        const val DARK_LUX = 5f
+        const val LIGHT_LUX = 15f
         const val ACTION_PAIR = "com.rusty.museecho.PAIR"
         const val ACTION_STOP_PAIR = "com.rusty.museecho.STOP_PAIR"
         const val ACTION_RECONNECT = "com.rusty.museecho.RECONNECT"
