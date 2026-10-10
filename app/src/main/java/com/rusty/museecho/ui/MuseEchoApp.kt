@@ -348,16 +348,34 @@ private fun AgendaPage(actions: UiActions) {
     val day by actions.agenda().collectAsState()
     val name by GadgetState.museName.collectAsState()
     val today = SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
-    Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = 64.dp, bottom = 24.dp)) {
+    val scroll = rememberScrollState()
+    // A little blob keeps you company here, reading along as you scroll through the day.
+    val frac = if (scroll.maxValue > 0) scroll.value.toFloat() / scroll.maxValue else 0f
+    val nowMin = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
+    val isToday = com.rusty.museecho.gadget.BlobBrain.isToday(day.date, java.time.LocalDate.now())
+    val soon = isToday &&
+        day.items.any { item -> com.rusty.museecho.gadget.BlobBrain.minutesOfDay(item.time)?.let { it - nowMin in 0..60 } == true }
+    Box(Modifier.fillMaxSize()) {
+        Blob(
+            Modifier.align(Alignment.TopEnd).padding(top = 70.dp, end = 30.dp).size(120.dp), actions,
+            mini = true,
+            gaze = Offset(-0.9f, -0.5f + frac),
+            moodOverride = when {
+                day.items.isEmpty() -> com.rusty.museecho.gadget.Mood.DROWSY
+                soon -> com.rusty.museecho.gadget.Mood.HAPPY
+                else -> null
+            },
+        )
+    Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 180.dp, top = 64.dp, bottom = 24.dp)) {
         Text(day.date.ifEmpty { today }, color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-        if (day.date.isNotEmpty() && day.date != today) {
+        if (!isToday) {
             Text("From an earlier day", color = Palette.coral, fontSize = 13.sp)
         }
         Spacer(Modifier.height(10.dp))
         if (day.items.isEmpty()) {
             Body("Nothing on the agenda. $name fills this in with the morning brief, or ask \"what's on today?\"", Palette.muted)
         }
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+        Column(Modifier.verticalScroll(scroll)) {
             day.items.forEach { item ->
                 Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
                     Text(item.time, color = Palette.teal, fontSize = 18.sp, modifier = Modifier.width(110.dp))
@@ -365,6 +383,7 @@ private fun AgendaPage(actions: UiActions) {
                 }
             }
         }
+    }
     }
 }
 

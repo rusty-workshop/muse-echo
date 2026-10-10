@@ -22,6 +22,30 @@ class BlobBrainTest {
     }
 
     @Test
+    fun agendaDates() {
+        val today = java.time.LocalDate.of(2026, 10, 10)
+        assertEquals(true, BlobBrain.isToday("", today))
+        assertEquals(true, BlobBrain.isToday("2026-10-10", today))
+        assertEquals(true, BlobBrain.isToday("Saturday, October 10", today))
+        assertEquals(true, BlobBrain.isToday("Oct 10th", today))
+        assertEquals(true, BlobBrain.isToday("10/10", today))
+        assertEquals(false, BlobBrain.isToday("2026-10-09", today))
+        assertEquals(false, BlobBrain.isToday("Friday, October 9", today))
+        assertEquals(false, BlobBrain.isToday("November 10", today))
+    }
+
+    @Test
+    fun yesNo() {
+        assertEquals(true, BlobBrain.yesNo("Yes, the oven is off."))
+        assertEquals(true, BlobBrain.yesNo("Yep!"))
+        assertEquals(false, BlobBrain.yesNo("No, it's not raining."))
+        assertEquals(false, BlobBrain.yesNo("Not yet. Maybe later."))
+        assertNull(BlobBrain.yesNo("No problem, done."))
+        assertNull(BlobBrain.yesNo("Nobody called."))
+        assertNull(BlobBrain.yesNo("It's 72 degrees."))
+    }
+
+    @Test
     fun replyTone() {
         assertEquals(BlobBrain.Tone(Mood.HAPPY, hop = true), BlobBrain.tone("Congrats on the new job! 🎉"))
         assertEquals(Mood.SAD, BlobBrain.tone("I'm sorry to hear that.")?.mood)

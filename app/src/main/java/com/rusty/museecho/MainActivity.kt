@@ -314,6 +314,7 @@ class MainActivity : ComponentActivity() {
         private val emptyActions = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.QuickActions.DEFAULTS)
         override fun quickActions() = GadgetService.instance?.quickActions?.value ?: emptyActions
         override fun runQuickAction(a: com.rusty.museecho.integrations.QuickAction) {
+            GadgetService.instance?.quickActionReaction(a.label)
             GadgetService.instance?.talk(a.prompt, null, label = a.label)
         }
 

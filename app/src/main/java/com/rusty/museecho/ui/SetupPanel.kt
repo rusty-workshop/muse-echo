@@ -287,6 +287,23 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 speedResult?.let { Body(it, Palette.muted) }
 
+                SectionTitle("Blob energy")
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                val energy by GadgetState.blobEnergy.collectAsState()
+                androidx.compose.material3.Slider(
+                    value = energy,
+                    onValueChange = { GadgetState.setBlobEnergy(it) },
+                    onValueChangeFinished = { com.rusty.museecho.gadget.Prefs(ctx).blobEnergy = GadgetState.blobEnergy.value },
+                    steps = 3,
+                )
+                Body(when {
+                    energy < 0.2f -> "Calm: slow breaths, antics about once an hour."
+                    energy < 0.45f -> "Mellow: an antic every half hour or so."
+                    energy < 0.7f -> "Normal: an antic every 20 minutes or so."
+                    energy < 0.9f -> "Lively: quicker breathing, antics every 10 minutes."
+                    else -> "Hyper: bouncy, and up to something every few minutes."
+                }, Palette.muted)
+
                 SectionTitle("Wake word sensitivity")
                 ChoiceRow(
                     options = com.rusty.museecho.gadget.WakeWord.Sensitivity.entries.map { it.name to it.label },

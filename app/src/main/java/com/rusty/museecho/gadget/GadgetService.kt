@@ -114,6 +114,7 @@ class GadgetService : Service() {
         glance = com.rusty.museecho.integrations.Glance(java.io.File(filesDir, "glance.json"))
         GadgetState.setMicOff(Prefs(this).micOff)
         GadgetState.setServerPill(Prefs(this).showServerPill)
+        GadgetState.setBlobEnergy(Prefs(this).blobEnergy)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
         frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
@@ -147,6 +148,9 @@ class GadgetService : Service() {
         scope.launch { refreshWeather() }
         scope.launch { watchServer() }
         scope.launch { watchMuseElsewhere() }
+        scope.launch { watchLaptop() }
+        scope.launch { watchFrame() }
+        watchVolume()
         watchLight()
         scope.launch {
             while (true) {
@@ -188,6 +192,7 @@ class GadgetService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        volumeReceiver?.let { runCatching { unregisterReceiver(it) } }
         lightListener?.let { getSystemService(android.hardware.SensorManager::class.java)?.unregisterListener(it) }
         stopPairing(null)
         stopChime()
@@ -229,6 +234,11 @@ class GadgetService : Service() {
      */
     private suspend fun watchdog() {
         while (true) {
+            // Launched early in onCreate: wait until the rest of the service is set up.
+            if (!::wakeWord.isInitialized || !::runner.isInitialized) {
+                delay(500)
+                continue
+            }
             val prefs = Prefs(this)
             val quiet = QuietHours.isQuiet(prefs)
             if (quiet != GadgetState.quiet.value) {
@@ -591,6 +601,8 @@ class GadgetService : Service() {
                 if (tone.hop) GadgetState.react(Reaction.HOP)
             }
         }
+        // A plain yes or no gets a nod or a head shake.
+        BlobBrain.yesNo(reply.text)?.let { yes -> GadgetState.react(if (yes) Reaction.NOD else Reaction.SHAKE) }
         // A new reply counts as activity: it wakes a sleeping screen for the usual idle time.
         GadgetState.lastTouch = System.currentTimeMillis()
         GadgetState.setAsleep(false)
@@ -762,6 +774,97 @@ class GadgetService : Service() {
         }
     }
 
+    /** The blob acts out the quick action you tapped. */
+    fun quickActionReaction(label: String) {
+        val l = label.lowercase()
+        when {
+            "night" in l || "bed" in l || "sleep" in l -> scope.launch {
+                GadgetState.react(Reaction.YAWN)
+                delay(Reaction.YAWN.ms)
+                GadgetState.react(Reaction.WAVE)
+            }
+            "movie" in l || "film" in l || "tv" in l -> {
+                // Popcorn for the length of a film (not saved: Pixel's own style comes back after).
+                val now = System.currentTimeMillis()
+                val current = GadgetState.style.value.takeIf { it.active(now) } ?: BlobStyle()
+                GadgetState.setStyle(current.copy(accessory = Accessory.POPCORN, untilMs = now + 3 * 3_600_000L))
+                GadgetState.react(Reaction.HOP)
+            }
+            "out" in l || "leav" in l || "bye" in l -> {
+                GadgetState.react(Reaction.WAVE)
+                GadgetState.hold(HeldItem.SUITCASE, "", 10)
+                GadgetState.say("Bye! 👋", 10)
+            }
+            "what" in l || "news" in l || "brief" in l -> GadgetState.setMood(Mood.CURIOUS, 20)
+            else -> GadgetState.react(Reaction.NOD)
+        }
+    }
+
+    private var volumeReceiver: android.content.BroadcastReceiver? = null
+
+    /** Volume changes: covers its ears when it's loud, leans in when it's quiet, shows a mute sign at zero. */
+    private fun watchVolume() {
+        val audio = getSystemService(android.media.AudioManager::class.java) ?: return
+        fun fraction() = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat() /
+            audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        GadgetState.setMuted(fraction() == 0f)
+        var settle: kotlinx.coroutines.Job? = null
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context, i: Intent) {
+                if (i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1) != android.media.AudioManager.STREAM_MUSIC) return
+                // Wait for the presses to stop, then react once to where it ended up.
+                settle?.cancel()
+                settle = scope.launch {
+                    delay(700)
+                    val f = fraction()
+                    GadgetState.setMuted(f == 0f)
+                    when {
+                        f >= 0.85f -> GadgetState.react(Reaction.COVER_EARS)
+                        f > 0f && f <= 0.2f -> GadgetState.react(Reaction.LEAN_IN)
+                    }
+                }
+            }
+        }
+        registerReceiver(receiver, android.content.IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
+        volumeReceiver = receiver
+    }
+
+    /** The laptop coming and going: the blob says hi when it shows up and waves bye when it leaves. */
+    private suspend fun watchLaptop() {
+        var was: Boolean? = null
+        while (true) {
+            if (laptop.configured && !isQuietNow()) {
+                val online = laptop.online()
+                if (was == false && online) {
+                    GadgetState.react(Reaction.HOP)
+                    GadgetState.say("Laptop's here! 💻", 30)
+                } else if (was == true && !online) {
+                    GadgetState.react(Reaction.WAVE)
+                    GadgetState.say("Bye, laptop!", 20)
+                }
+                was = online
+            } else {
+                was = null
+            }
+            delay(120_000)
+        }
+    }
+
+    /** New photos in the frame (frame.add or pushed from the laptop) get an excited look. */
+    private suspend fun watchFrame() {
+        var known = frame.photos().map { it.name }.toSet()
+        while (true) {
+            delay(60_000)
+            val now = frame.photos().map { it.name }.toSet()
+            if ((now - known).isNotEmpty()) {
+                GadgetState.react(Reaction.HOP)
+                GadgetState.hold(HeldItem.CAMERA, "", 2)
+                GadgetState.say(if ((now - known).size == 1) "Ooh, a new photo!" else "Ooh, ${(now - known).size} new photos!", 20)
+            }
+            known = now
+        }
+    }
+
     /** Asks the echo-hub whether Muse is busy on the Latitude, so the blob can show it. */
     private suspend fun watchMuseElsewhere() {
         while (true) {
@@ -818,6 +921,12 @@ class GadgetService : Service() {
     }
 
     private fun onWake() {
+        // Its own voice trailing off can sound like the phrase: ignore wakes right after speaking.
+        if (System.currentTimeMillis() - GadgetState.speechEndedAt < WAKE_GRACE_MS) {
+            GadgetState.log("wake word ignored (just finished speaking)")
+            wakeWord.resume()
+            return
+        }
         GadgetState.log("wake word heard")
         bringToFront(force = true)
         if (briefPending && Prefs(this).morningBrief && GadgetState.link.value == Link.CONNECTED) {
@@ -1009,6 +1118,7 @@ class GadgetService : Service() {
     }
 
     companion object {
+        const val WAKE_GRACE_MS = 2_500L
         const val DARK_LUX = 5f
         const val LIGHT_LUX = 15f
         const val ACTION_PAIR = "com.rusty.museecho.PAIR"
@@ -1114,6 +1224,10 @@ class Prefs(context: Context) {
         set(v) = prefs.edit().putInt("night_off_min", v).apply()
 
     /** Show the server status pill by the connection chip. */
+    var blobEnergy: Float
+        get() = prefs.getFloat("blob_energy", 0.5f)
+        set(v) = prefs.edit().putFloat("blob_energy", v).apply()
+
     var showServerPill: Boolean
         get() = prefs.getBoolean("show_server_pill", true)
         set(v) = prefs.edit().putBoolean("show_server_pill", v).apply()

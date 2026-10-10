@@ -46,6 +46,11 @@ class Laptop(context: Context) {
         }
     }
 
+    /** Whether the companion answers at all (the laptop is on and home). */
+    suspend fun online(): Boolean = withContext(Dispatchers.IO) {
+        call(Request.Builder().url("http://$host/shortcuts").get()) != null
+    }
+
     /** Returns (ok, message) from the companion. */
     suspend fun run(shortcutKey: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val payload = buildJsonObject {

@@ -36,6 +36,21 @@ object BlobBrain {
         }
     }
 
+    private val YES = Regex("""^\W*(yes|yep|yeah|yup|sure|absolutely|definitely|of course|correct)\b""")
+    private val NO = Regex("""^\W*(no|nope|nah|not really|not yet|unfortunately not|sadly,? no)\b""")
+    private val NOT_REALLY_NO = Regex("""^\W*no (problem|worries|prob)\b""")
+
+    /** Whether a reply opens with a plain yes (true) or no (false); null if it does neither. */
+    fun yesNo(reply: String): Boolean? {
+        val t = reply.trim().lowercase()
+        return when {
+            YES.containsMatchIn(t) -> true
+            NOT_REALLY_NO.containsMatchIn(t) -> null
+            NO.containsMatchIn(t) -> false
+            else -> null
+        }
+    }
+
     private val TIME = Regex("""^\s*(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?\s*m?\.?\s*$""", RegexOption.IGNORE_CASE)
 
     /** Minutes after midnight for an agenda time like "9:30", "9:30 AM", "9am", "14:00" or "noon"; null if it isn't one. */
@@ -56,6 +71,26 @@ object BlobBrain {
             if (half == "a" && hour == 12) hour = 0
         } else if (hour > 23) return null
         return hour * 60 + minute
+    }
+
+    private val MONTHS = listOf("january", "february", "march", "april", "may", "june", "july", "august",
+        "september", "october", "november", "december")
+
+    /**
+     * Whether an agenda's date (free text from Muse: "Saturday, October 10",
+     * "2026-10-10", "Oct 10", "10/10"...) means [today]. Blank counts as today.
+     */
+    fun isToday(date: String, today: java.time.LocalDate): Boolean {
+        val d = date.trim().lowercase()
+        if (d.isEmpty() || d == "today") return true
+        runCatching { return java.time.LocalDate.parse(d.take(10)) == today }
+        Regex("""^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$""").find(d)?.let { m ->
+            return m.groupValues[1].toInt() == today.monthValue && m.groupValues[2].toInt() == today.dayOfMonth
+        }
+        // "Saturday, October 10" / "Oct 10th": a month name (or its first 3 letters) and the day number.
+        val month = MONTHS.indexOfFirst { name -> Regex("""\b${name.take(3)}""").containsMatchIn(d) }
+        val day = Regex("""\b(\d{1,2})(st|nd|rd|th)?\b""").find(d)?.groupValues?.get(1)?.toInt()
+        return month + 1 == today.monthValue && day == today.dayOfMonth
     }
 
     val SLEEP_TALK = listOf(

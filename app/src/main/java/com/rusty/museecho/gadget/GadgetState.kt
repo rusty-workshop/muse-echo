@@ -27,11 +27,11 @@ enum class Mood { NEUTRAL, HAPPY, CURIOUS, WORRIED, SLEEPY, DROWSY, SURPRISED, S
 enum class Reaction(val ms: Long) {
     HOP(900), NOD(900), SHAKE(900), WINK(1100), CELEBRATE(2800),
     YAWN(2600), STRETCH(2000), HICCUP(1300), PEEK(2600), WANDER(6000),
-    WAVE(2000), STARTLE(1400), DIZZY(2600), NUDGE(3000),
+    WAVE(2000), STARTLE(1400), DIZZY(2600), NUDGE(3000), COVER_EARS(2200), LEAN_IN(2000),
 }
 
 /** Something the blob holds up (blob.hold, or its own forecast props). */
-enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES }
+enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA }
 
 data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
@@ -97,8 +97,13 @@ object GadgetState {
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     fun setSpeaking(on: Boolean) {
+        if (_speaking.value && !on) speechEndedAt = System.currentTimeMillis()
         _speaking.value = on
     }
+
+    /** When the Echo last stopped speaking (its own voice can echo into the wake word). */
+    @Volatile
+    var speechEndedAt = 0L
 
     /** Mic switched off on screen: no wake word, no voice notes. */
     private val _micOff = MutableStateFlow(false)
@@ -280,6 +285,22 @@ object GadgetState {
 
     fun setRoomDark(dark: Boolean) {
         _roomDark.value = dark
+    }
+
+    /** How lively the blob is, 0 (calm) to 1 (hyper); a setup slider. */
+    private val _blobEnergy = MutableStateFlow(0.5f)
+    val blobEnergy: StateFlow<Float> = _blobEnergy.asStateFlow()
+
+    fun setBlobEnergy(v: Float) {
+        _blobEnergy.value = v.coerceIn(0f, 1f)
+    }
+
+    /** The speaker is muted (media volume 0). */
+    private val _muted = MutableStateFlow(false)
+    val muted: StateFlow<Boolean> = _muted.asStateFlow()
+
+    fun setMuted(on: Boolean) {
+        _muted.value = on
     }
 
     /** Loudness of music from audio.play_url, 0..1, or -1 when unknown. */
