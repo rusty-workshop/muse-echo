@@ -17,8 +17,8 @@ DEVICE=${1:-${ECHO_ADB:-}}
 if [[ $DEVICE == *:* ]]; then adb connect "$DEVICE" >/dev/null; fi
 ADB=(adb ${DEVICE:+-s "$DEVICE"})
 
-./gradlew assembleDebug testDebugUnitTest --console=plain -q
-"${ADB[@]}" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null
+./gradlew assembleRelease testDebugUnitTest --console=plain -q
+"${ADB[@]}" install -r app/build/outputs/apk/release/app-release.apk >/dev/null
 "${ADB[@]}" logcat -c
 "${ADB[@]}" shell am force-stop $PKG
 "${ADB[@]}" shell am start -n $PKG/.MainActivity >/dev/null

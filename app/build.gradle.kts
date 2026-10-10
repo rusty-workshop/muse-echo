@@ -38,9 +38,13 @@ android {
 
     buildTypes {
         release {
-            optimization {
-                enable = false
-            }
+            // The Echo Show's CPU is slow: shrink and optimize with R8 (debug
+            // builds are several times slower for Compose).
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Same key as the debug builds so it installs over them in place and
+            // keeps the pairing.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

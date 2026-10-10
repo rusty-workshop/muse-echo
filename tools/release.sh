@@ -14,8 +14,8 @@ if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
     echo "Commit first: the version number comes from the commit count." >&2
     exit 1
 fi
-./gradlew assembleDebug testDebugUnitTest --console=plain -q
-APK=app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleRelease testDebugUnitTest --console=plain -q
+APK=app/build/outputs/apk/release/app-release.apk
 BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
 read -r CODE NAME < <("$BT/aapt" dump badging "$APK" | sed -nE "s/^package: .*versionCode='([0-9]+)' versionName='([^']+)'.*/\1 \2/p")
 SHA=$(sha256sum "$APK" | cut -d' ' -f1)
