@@ -28,10 +28,11 @@ enum class Reaction(val ms: Long) {
     HOP(900), NOD(900), SHAKE(900), WINK(1100), CELEBRATE(2800),
     YAWN(2600), STRETCH(2000), HICCUP(1300), PEEK(2600), WANDER(6000),
     WAVE(2000), STARTLE(1400), DIZZY(2600), NUDGE(3000), COVER_EARS(2200), LEAN_IN(2000),
+    TEAR_PAGE(1800), TUCK_IN(3000),
 }
 
 /** Something the blob holds up (blob.hold, or its own forecast props). */
-enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA }
+enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN }
 
 data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
@@ -301,6 +302,62 @@ object GadgetState {
 
     fun setMuted(on: Boolean) {
         _muted.value = on
+    }
+
+    /** The laptop companion answers (null: not set up, or not checked yet). */
+    private val _laptopOnline = MutableStateFlow<Boolean?>(null)
+    val laptopOnline: StateFlow<Boolean?> = _laptopOnline.asStateFlow()
+
+    fun setLaptopOnline(on: Boolean?) {
+        _laptopOnline.value = on
+    }
+
+    /** Active National Weather Service alerts here. */
+    private val _alerts = MutableStateFlow<List<com.rusty.museecho.integrations.WeatherAlert>>(emptyList())
+    val alerts: StateFlow<List<com.rusty.museecho.integrations.WeatherAlert>> = _alerts.asStateFlow()
+
+    fun setAlerts(list: List<com.rusty.museecho.integrations.WeatherAlert>) {
+        _alerts.value = list
+    }
+
+    /** Said goodnight: tucked in under a blanket until the next touch. */
+    private val _tuckedIn = MutableStateFlow(false)
+    val tuckedIn: StateFlow<Boolean> = _tuckedIn.asStateFlow()
+
+    fun setTuckedIn(on: Boolean) {
+        _tuckedIn.value = on
+    }
+
+    /** Screen brightness the goodnight fade has reached (null: not fading). */
+    private val _dim = MutableStateFlow<Float?>(null)
+    val dim: StateFlow<Float?> = _dim.asStateFlow()
+
+    fun setDim(level: Float?) {
+        _dim.value = level
+    }
+
+    /** What the blob is holding up while it presents the morning brief. */
+    private val _presenting = MutableStateFlow<HeldItem?>(null)
+    val presenting: StateFlow<HeldItem?> = _presenting.asStateFlow()
+
+    fun setPresenting(item: HeldItem?) {
+        _presenting.value = item
+    }
+
+    /** Big days Muse is counting down to (mirrored from the service's store). */
+    private val _specialDays = MutableStateFlow<List<com.rusty.museecho.integrations.SpecialDay>>(emptyList())
+    val specialDays: StateFlow<List<com.rusty.museecho.integrations.SpecialDay>> = _specialDays.asStateFlow()
+
+    fun setSpecialDays(list: List<com.rusty.museecho.integrations.SpecialDay>) {
+        _specialDays.value = list
+    }
+
+    /** Today's reminders from Muse (mirrored from the service's store). */
+    private val _reminders = MutableStateFlow(com.rusty.museecho.integrations.ReminderDay())
+    val reminders: StateFlow<com.rusty.museecho.integrations.ReminderDay> = _reminders.asStateFlow()
+
+    fun setReminders(day: com.rusty.museecho.integrations.ReminderDay) {
+        _reminders.value = day
     }
 
     /** Loudness of music from audio.play_url, 0..1, or -1 when unknown. */

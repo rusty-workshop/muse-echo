@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PlayArrow
@@ -143,6 +144,9 @@ interface UiActions {
     fun wakePhrase(): String
     fun wakeModelPresent(): Boolean
     fun setWakeWord(enabled: Boolean, phrase: String): String?
+    /** Wake-on-LAN for the laptop: whether a MAC address is set, and send the packet. */
+    fun canWakeLaptop(): Boolean
+    fun wakeLaptop()
 }
 
 internal object Palette {
@@ -181,6 +185,13 @@ fun MuseEchoApp(actions: UiActions) {
             }
             UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
+                // Wake the laptop: shown only while it's away and Wake-on-LAN is set up.
+                val laptopOnline by GadgetState.laptopOnline.collectAsState()
+                if (laptopOnline == false && actions.canWakeLaptop()) {
+                    IconButton(onClick = actions::wakeLaptop) {
+                        Icon(Icons.Filled.Laptop, "Wake laptop", tint = Palette.muted)
+                    }
+                }
                 IconButton(onClick = { actions.setMicOff(!micOff) }) {
                     Icon(if (micOff) Icons.Filled.MicOff else Icons.Filled.Mic, if (micOff) "Turn mic on" else "Turn mic off",
                         tint = if (micOff) Palette.coral else Palette.muted)
@@ -203,6 +214,7 @@ fun MuseEchoApp(actions: UiActions) {
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
 
             Column(Modifier.align(Alignment.TopCenter).padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                AlertBanner()
                 TimerChips(Modifier, actions)
                 NowPlayingChip(Modifier.padding(top = 6.dp), actions)
             }
@@ -302,6 +314,35 @@ private fun IdleFace(actions: UiActions) {
     }
 }
 
+/** Active weather alerts (National Weather Service), one chip each; tap for the details. */
+@Composable
+private fun AlertBanner() {
+    val alerts by GadgetState.alerts.collectAsState()
+    androidx.compose.animation.AnimatedVisibility(
+        visible = alerts.isNotEmpty(),
+        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
+        exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically(),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // Most serious first: only two fit.
+            val rank = mapOf("extreme" to 0, "severe" to 1, "moderate" to 2, "minor" to 3)
+            val warningsFirst = alerts.sortedWith(compareBy({ rank[it.severity.lowercase()] ?: 4 }, { if ("warning" in it.event.lowercase()) 0 else 1 }))
+            warningsFirst.take(2).forEach { a ->
+                val severe = a.severity.equals("Severe", true) || a.severity.equals("Extreme", true)
+                val until = if (a.endsMs > 0) " until " + SimpleDateFormat("EEE h a", Locale.US).format(Date(a.endsMs)) else ""
+                Text("⚠ ${a.event}$until", color = Palette.night, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                        .background(if (severe) Palette.coral else Palette.amber, RoundedCornerShape(50))
+                        .clickable {
+                            GadgetState.show(Screen.Text(a.event, listOf(a.headline, a.description, a.instruction)
+                                .filter { it.isNotBlank() }.joinToString("\n\n")))
+                        }
+                        .padding(horizontal = 14.dp, vertical = 5.dp))
+            }
+        }
+    }
+}
+
 /** The clock face, and the agenda one swipe to the left. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -382,8 +423,33 @@ private fun AgendaPage(actions: UiActions) {
                     Text(item.title, color = Palette.ink, fontSize = 20.sp, lineHeight = 26.sp)
                 }
             }
+            // The next few days, so an empty today still shows what's ahead.
+            if (day.upcoming.isNotEmpty()) {
+                Text("Coming up", color = Palette.amber, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+                day.upcoming.forEach { up ->
+                    Text(friendlyDate(up.date), color = Palette.muted, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
+                    up.items.forEach { item ->
+                        Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
+                            Text(item.time, color = Palette.teal.copy(alpha = 0.8f), fontSize = 16.sp, modifier = Modifier.width(110.dp))
+                            Text(item.title, color = Palette.ink.copy(alpha = 0.85f), fontSize = 17.sp, lineHeight = 22.sp)
+                        }
+                    }
+                }
+            }
         }
     }
+    }
+}
+
+/** "2026-10-11" as "Tomorrow" / "Monday, Oct 12"; other text as it is. */
+private fun friendlyDate(date: String): String {
+    val d = runCatching { java.time.LocalDate.parse(date.trim().take(10)) }.getOrNull() ?: return date
+    val today = java.time.LocalDate.now()
+    return when (d) {
+        today -> "Today"
+        today.plusDays(1) -> "Tomorrow"
+        else -> d.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.US))
     }
 }
 

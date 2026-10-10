@@ -73,6 +73,11 @@ class MainActivity : ComponentActivity() {
             GadgetState.setAlertGlow(false)
             // Back after a while: the blob waves hello.
             if (away > 30 * 60_000L && !GadgetState.quiet.value) GadgetState.react(com.rusty.museecho.gadget.Reaction.WAVE)
+            // Tucked in for the night: a touch gets it up again.
+            if (GadgetState.tuckedIn.value) {
+                GadgetState.setTuckedIn(false)
+                GadgetState.setDim(null)
+            }
             // The first tap on a sleeping screen only wakes it.
             if (GadgetState.asleep.value) {
                 GadgetState.setAsleep(false)
@@ -138,10 +143,14 @@ class MainActivity : ComponentActivity() {
                     !GadgetState.speaking.value && !GadgetState.frameShowing.value
                 val offAfter = com.rusty.museecho.gadget.Prefs(this@MainActivity).nightOffMin
                 val idleMs = System.currentTimeMillis() - GadgetState.lastTouch
-                val asleep = quiet && calm && offAfter > 0 && idleMs >= offAfter * 60_000L
+                val dim = GadgetState.dim.value
+                // Asleep overnight after a while, or after saying goodnight once the fade has finished.
+                val asleep = (quiet && calm && offAfter > 0 && idleMs >= offAfter * 60_000L) ||
+                    (GadgetState.tuckedIn.value && dim != null && dim <= com.rusty.museecho.gadget.GadgetService.GOODNIGHT_DIM)
                 if (asleep != GadgetState.asleep.value) GadgetState.setAsleep(asleep)
                 val brightness = when {
                     asleep -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF
+                    dim != null -> dim
                     quiet && calm -> 0.05f
                     else -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
                 }
@@ -150,7 +159,7 @@ class MainActivity : ComponentActivity() {
                 }
                 // Wake promptly when something happens; otherwise check every few seconds.
                 kotlinx.coroutines.withTimeoutOrNull(5_000) {
-                    combine(GadgetState.talk, GadgetState.ringing, GadgetState.screen, GadgetState.quiet) { a, b, c, d -> listOf(a, b, c, d) }
+                    combine(GadgetState.talk, GadgetState.ringing, GadgetState.screen, GadgetState.quiet, GadgetState.dim) { a, b, c, d, e -> listOf(a, b, c, d, e) }
                         .drop(1).first()
                 }
             }
@@ -284,6 +293,13 @@ class MainActivity : ComponentActivity() {
         override fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level) =
             GadgetService.instance?.neural?.installed(level) == true
         override suspend fun voiceSpeedTest() = GadgetService.instance?.voiceSpeedTest() ?: "Not running"
+        override fun canWakeLaptop() = GadgetService.instance?.laptop?.mac
+            ?.let { com.rusty.museecho.integrations.WakeOnLan.parseMac(it) } != null
+
+        override fun wakeLaptop() {
+            GadgetService.instance?.wakeLaptop()
+        }
+
         override fun pinToHomeScreen(): String {
             if (!androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported(this@MainActivity)) {
                 return "Your home-screen app doesn't support adding shortcuts; find Muse Echo in its app list instead."

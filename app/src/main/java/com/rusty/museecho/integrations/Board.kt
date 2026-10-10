@@ -155,15 +155,27 @@ class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeou
 @Serializable
 data class AgendaItem(val time: String = "", val title: String = "")
 
+/** A later day's events, for the agenda page's "Coming up". */
 @Serializable
-data class AgendaDay(val date: String = "", val items: List<AgendaItem> = emptyList(), val updatedMs: Long = 0)
+data class UpcomingDay(val date: String = "", val items: List<AgendaItem> = emptyList())
+
+@Serializable
+data class AgendaDay(
+    val date: String = "",
+    val items: List<AgendaItem> = emptyList(),
+    val updatedMs: Long = 0,
+    val upcoming: List<UpcomingDay> = emptyList(),
+)
 
 /** The day's agenda Muse fills in (agenda.set), shown on the page left of the clock. */
 class Agenda(file: File) : JsonFileState<AgendaDay>(file, AgendaDay.serializer(), AgendaDay()) {
-    fun set(date: String, items: List<AgendaItem>) = update {
-        AgendaDay(date.trim().take(40), items.map { AgendaItem(it.time.trim().take(20), it.title.trim().take(100)) }
-            .filter { it.title.isNotEmpty() }.take(20), System.currentTimeMillis())
+    fun set(date: String, items: List<AgendaItem>, upcoming: List<UpcomingDay> = emptyList()) = update {
+        AgendaDay(date.trim().take(40), clean(items), System.currentTimeMillis(),
+            upcoming.map { UpcomingDay(it.date.trim().take(40), clean(it.items).take(8)) }.filter { it.items.isNotEmpty() }.take(7))
     }
+
+    private fun clean(items: List<AgendaItem>) =
+        items.map { AgendaItem(it.time.trim().take(20), it.title.trim().take(100)) }.filter { it.title.isNotEmpty() }.take(20)
 
     fun clear() = update { AgendaDay() }
 }

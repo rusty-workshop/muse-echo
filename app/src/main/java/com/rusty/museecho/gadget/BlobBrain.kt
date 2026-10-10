@@ -73,6 +73,9 @@ object BlobBrain {
         return hour * 60 + minute
     }
 
+    private val ISO = Regex("""\d{4}-\d{2}-\d{2}""")
+    private val SLASHED = Regex("""^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$""")
+    private val DAY_NUM = Regex("""\b(\d{1,2})(st|nd|rd|th)?\b""")
     private val MONTHS = listOf("january", "february", "march", "april", "may", "june", "july", "august",
         "september", "october", "november", "december")
 
@@ -83,15 +86,17 @@ object BlobBrain {
     fun isToday(date: String, today: java.time.LocalDate): Boolean {
         val d = date.trim().lowercase()
         if (d.isEmpty() || d == "today") return true
-        runCatching { return java.time.LocalDate.parse(d.take(10)) == today }
-        Regex("""^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$""").find(d)?.let { m ->
+        if (ISO.matches(d.take(10))) runCatching { return java.time.LocalDate.parse(d.take(10)) == today }
+        SLASHED.find(d)?.let { m ->
             return m.groupValues[1].toInt() == today.monthValue && m.groupValues[2].toInt() == today.dayOfMonth
         }
         // "Saturday, October 10" / "Oct 10th": a month name (or its first 3 letters) and the day number.
-        val month = MONTHS.indexOfFirst { name -> Regex("""\b${name.take(3)}""").containsMatchIn(d) }
-        val day = Regex("""\b(\d{1,2})(st|nd|rd|th)?\b""").find(d)?.groupValues?.get(1)?.toInt()
+        val month = MONTH_RES.indexOfFirst { it.containsMatchIn(d) }
+        val day = DAY_NUM.find(d)?.groupValues?.get(1)?.toInt()
         return month + 1 == today.monthValue && day == today.dayOfMonth
     }
+
+    private val MONTH_RES by lazy { MONTHS.map { Regex("""\b${it.take(3)}""") } }
 
     val SLEEP_TALK = listOf(
         "…five more minutes…", "…mmm, pizza…", "…no, the other wire…", "…zzz… whee…",

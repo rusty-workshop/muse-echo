@@ -78,6 +78,9 @@ class GadgetService : Service() {
         private set
     lateinit var agenda: com.rusty.museecho.integrations.Agenda
         private set
+    private lateinit var specialDays: com.rusty.museecho.integrations.SpecialDays
+    private lateinit var reminders: com.rusty.museecho.integrations.Reminders
+    private val weatherAlerts = com.rusty.museecho.integrations.WeatherAlerts()
     lateinit var quickActions: com.rusty.museecho.integrations.QuickActions
         private set
     private val weather = com.rusty.museecho.integrations.Weather()
@@ -117,6 +120,8 @@ class GadgetService : Service() {
         GadgetState.setBlobEnergy(Prefs(this).blobEnergy)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
+        specialDays = com.rusty.museecho.integrations.SpecialDays(java.io.File(filesDir, "countdowns.json"))
+        reminders = com.rusty.museecho.integrations.Reminders(java.io.File(filesDir, "reminders.json"))
         frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
         quickActions = com.rusty.museecho.integrations.QuickActions(java.io.File(filesDir, "quick_actions.json"))
         val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance, frame, quickActions,
@@ -124,7 +129,7 @@ class GadgetService : Service() {
                 GadgetState.showFrame(true)
                 bringToFront(force = true)
             },
-            agenda = agenda)
+            agenda = agenda, specialDays = specialDays, reminders = reminders)
         commands = EchoCommands(this, speaker, ::bringToFront, home, ::isQuietNow, { healthExtras() })
         runner = GadgetRunner(
             store = store,
@@ -149,6 +154,10 @@ class GadgetService : Service() {
         scope.launch { watchServer() }
         scope.launch { watchMuseElsewhere() }
         scope.launch { watchLaptop() }
+        scope.launch { specialDays.value.collect { GadgetState.setSpecialDays(it.days) } }
+        scope.launch { reminders.value.collect { GadgetState.setReminders(it) } }
+        scope.launch { watchAlerts() }
+        scope.launch { watchReminders() }
         scope.launch { watchFrame() }
         watchVolume()
         watchLight()
@@ -488,6 +497,11 @@ class GadgetService : Service() {
             it.delete()
             GadgetState.log("imported laptop_token")
         }
+        java.io.File(drop, "laptop_mac").takeIf { it.isFile }?.let {
+            laptop.mac = it.readText().trim()
+            it.delete()
+            GadgetState.log("imported laptop_mac")
+        }
         java.io.File(drop, "laptop_host").takeIf { it.isFile }?.let {
             laptop.host = it.readText().trim()
             it.delete()
@@ -611,6 +625,7 @@ class GadgetService : Service() {
         if (!prefs.speakReplies || quiet || reply.text.isBlank()) return
         val spoken = Markdown.toSpeech(reply.text)
         if (spoken.isBlank()) return
+        if (source == "Morning brief") presentBrief(spoken)
         // Hold the mic for the follow-up rather than letting the wake word take it.
         if (speaker.speakAndWait(spoken) && prefs.followUp && GadgetState.talk.value == Talk.REPLIED &&
             !QuietHours.isQuiet(prefs) && GadgetState.link.value == Link.CONNECTED
@@ -774,6 +789,116 @@ class GadgetService : Service() {
         }
     }
 
+    /**
+     * While the morning brief is spoken, the blob holds up a prop for each part
+     * (weather, calendar, reminders, server). Speech progress isn't reported, so
+     * it estimates where the voice is from the time since it started.
+     */
+    private fun presentBrief(spoken: String) = scope.launch {
+        val t = spoken.lowercase()
+        val wet = listOf("rain", "storm", "shower", "drizzle", "flood").any { it in t }
+        val parts = listOf(
+            listOf("weather", "degrees", "°", "rain", "storm", "sunny", "cloud", "forecast") to (if (wet) HeldItem.UMBRELLA else HeldItem.SUN),
+            listOf("calendar", "today you", "on your schedule", "event", "appointment", "meeting") to HeldItem.CALENDAR,
+            listOf("remind", "don't forget", "reminder") to HeldItem.NOTE,
+            listOf("latitude", "server") to HeldItem.SERVER,
+        ).mapNotNull { (words, item) -> words.mapNotNull { w -> t.indexOf(w).takeIf { it >= 0 } }.minOrNull()?.let { it to item } }
+            .sortedBy { it.first }
+        if (parts.isEmpty()) return@launch
+        // Wait for the voice to start.
+        val waitUntil = System.currentTimeMillis() + 20_000
+        while (!GadgetState.speaking.value && System.currentTimeMillis() < waitUntil) delay(100)
+        if (!GadgetState.speaking.value) return@launch
+        val start = System.currentTimeMillis()
+        try {
+            while (GadgetState.speaking.value) {
+                val charsSpoken = (System.currentTimeMillis() - start) / 1000f * BRIEF_CHARS_PER_SECOND
+                GadgetState.setPresenting(parts.lastOrNull { it.first <= charsSpoken + 10 }?.second ?: parts.first().second)
+                delay(200)
+            }
+        } finally {
+            GadgetState.setPresenting(null)
+        }
+    }
+
+    /** National Weather Service alerts: shown while active, and new ones announced once (overnight only the dangerous ones). */
+    private suspend fun watchAlerts() {
+        val prefs0 = Prefs(this)
+        val announced = prefs0.announcedAlerts.toMutableSet()
+        while (true) {
+            val prefs = Prefs(this)
+            val list = weatherAlerts.fetch(prefs.weatherLat, prefs.weatherLon)
+            if (list != null) {
+                val now = System.currentTimeMillis()
+                val active = list.filter { it.endsMs == 0L || it.endsMs > now }
+                GadgetState.setAlerts(active)
+                val fresh = active.filter { it.id !in announced }
+                if (fresh.isNotEmpty()) {
+                    announced += fresh.map { it.id }
+                    // Keep the remembered set small: only alerts still active.
+                    announced.retainAll(active.map { it.id }.toSet())
+                    prefs.announcedAlerts = announced
+                    val quiet = QuietHours.isQuiet(prefs)
+                    val worth = fresh.filter { !quiet || it.severity.equals("Extreme", true) }
+                    if (worth.isNotEmpty()) {
+                        GadgetState.log("weather alert: ${worth.joinToString { it.event }}")
+                        GadgetState.react(Reaction.STARTLE)
+                        if (prefs.speakReplies && GadgetState.talk.value == Talk.IDLE && !GadgetState.speaking.value) {
+                            speaker.speak("Weather alert. " + worth.joinToString(". ") { alertSpoken(it) })
+                        }
+                    }
+                }
+            }
+            delay(if (GadgetState.alerts.value.isEmpty()) 15 * 60_000L else 5 * 60_000L)
+        }
+    }
+
+    private fun alertSpoken(a: com.rusty.museecho.integrations.WeatherAlert): String {
+        val until = if (a.endsMs > 0) " until " + java.text.SimpleDateFormat("h a", java.util.Locale.US).format(java.util.Date(a.endsMs))
+            .replace("AM", "a.m.").replace("PM", "p.m.") else ""
+        return "${a.event}$until"
+    }
+
+    /** Today's reminders: the blob taps its note and shows each one as its time comes. */
+    private suspend fun watchReminders() {
+        val shown = mutableSetOf<String>()
+        while (true) {
+            delay(30_000)
+            val day = reminders.value.value
+            val today = java.time.LocalDate.now().toString()
+            if (day.date != today) {
+                if (day.items.isNotEmpty() && day.date.isNotEmpty()) reminders.clear()
+                continue
+            }
+            val cal = java.util.Calendar.getInstance()
+            val nowMin = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+            day.items.forEach { r ->
+                val at = BlobBrain.minutesOfDay(r.time) ?: return@forEach
+                val key = "$today ${r.time} ${r.text}"
+                if (nowMin in at..at + 5 && shown.add(key)) {
+                    GadgetState.log("reminder due")
+                    GadgetState.react(Reaction.NUDGE)
+                    GadgetState.say("Reminder: ${r.text}", 300)
+                    if (!QuietHours.isQuiet(Prefs(this))) softChime()
+                    bringToFront(force = false)
+                }
+            }
+            // Countdowns: forget days that have passed.
+            specialDays.prune(java.time.LocalDate.now())
+        }
+    }
+
+    /** Wake-on-LAN from the screen button: sends the packet and tells you it did. */
+    fun wakeLaptop() {
+        val mac = laptop.mac?.let { com.rusty.museecho.integrations.WakeOnLan.parseMac(it) } ?: return
+        scope.launch {
+            val ok = com.rusty.museecho.integrations.WakeOnLan.send(mac)
+            GadgetState.log(if (ok) "sent wake-on-LAN to the laptop" else "wake-on-LAN failed")
+            GadgetState.react(if (ok) Reaction.NUDGE else Reaction.SHAKE)
+            GadgetState.say(if (ok) "Knock knock, laptop! 💻" else "Couldn't send the wake signal.", 15)
+        }
+    }
+
     /** The blob acts out the quick action you tapped. */
     fun quickActionReaction(label: String) {
         val l = label.lowercase()
@@ -782,6 +907,22 @@ class GadgetService : Service() {
                 GadgetState.react(Reaction.YAWN)
                 delay(Reaction.YAWN.ms)
                 GadgetState.react(Reaction.WAVE)
+                delay(Reaction.WAVE.ms)
+                // Tuck in, then fade the screen out over a minute and sleep until touched.
+                GadgetState.setTuckedIn(true)
+                GadgetState.react(Reaction.TUCK_IN)
+                delay(Reaction.TUCK_IN.ms + 4_000)
+                val steps = 60
+                for (i in 0..steps) {
+                    if (!GadgetState.tuckedIn.value) {
+                        GadgetState.setDim(null)
+                        return@launch
+                    }
+                    GadgetState.setDim(1f - 0.97f * i / steps)
+                    delay(1_000)
+                }
+                // Stays at the bottom of the fade (asleep) until a touch untucks it.
+                if (GadgetState.tuckedIn.value) GadgetState.setDim(GOODNIGHT_DIM) else GadgetState.setDim(null)
             }
             "movie" in l || "film" in l || "tv" in l -> {
                 // Popcorn for the length of a film (not saved: Pixel's own style comes back after).
@@ -835,6 +976,7 @@ class GadgetService : Service() {
         while (true) {
             if (laptop.configured && !isQuietNow()) {
                 val online = laptop.online()
+                GadgetState.setLaptopOnline(online)
                 if (was == false && online) {
                     GadgetState.react(Reaction.HOP)
                     GadgetState.say("Laptop's here! 💻", 30)
@@ -1119,6 +1261,9 @@ class GadgetService : Service() {
 
     companion object {
         const val WAKE_GRACE_MS = 2_500L
+        const val GOODNIGHT_DIM = 0.03f
+        /** Rough speaking rate of the voices, for pacing the brief's props. */
+        const val BRIEF_CHARS_PER_SECOND = 14f
         const val DARK_LUX = 5f
         const val LIGHT_LUX = 15f
         const val ACTION_PAIR = "com.rusty.museecho.PAIR"
@@ -1132,8 +1277,10 @@ class GadgetService : Service() {
         const val BRIEF_PROMPT = "Good morning! Give me my morning brief, under 80 words and written to be spoken aloud " +
             "(no lists or markdown): today's weather here, what's on my calendars today, anything I asked you to remind " +
             "me about, and whether anything is wrong on the Latitude server. Check ALL my Google calendars (school, " +
-            "church, family and the rest, not just the primary one, which is usually empty). Also call agenda.set on the " +
-            "Echo Show with today's events from all of them so its agenda page is current."
+            "church, family and the rest, not just the primary one, which is usually empty). Also, on the Echo Show: " +
+            "call agenda.set with today's events from all of them plus the next 3 days as upcoming, and reminders.set " +
+            "with anything I should be reminded of today (with times when they have one). If something big is coming " +
+            "up (a trip, a birthday, a holiday) and isn't on its countdowns yet, add it with countdown.add."
 
         @Volatile
         var instance: GadgetService? = null
@@ -1225,6 +1372,10 @@ class Prefs(context: Context) {
         set(v) = prefs.edit().putInt("night_off_min", v).apply()
 
     /** Show the server status pill by the connection chip. */
+    var announcedAlerts: Set<String>
+        get() = prefs.getStringSet("announced_alerts", emptySet()) ?: emptySet()
+        set(v) = prefs.edit().putStringSet("announced_alerts", v.toSet()).apply()
+
     var blobEnergy: Float
         get() = prefs.getFloat("blob_energy", 0.5f)
         set(v) = prefs.edit().putFloat("blob_energy", v).apply()

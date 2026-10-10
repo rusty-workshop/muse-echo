@@ -38,6 +38,8 @@ class HomeCommands(
     private val quick: com.rusty.museecho.integrations.QuickActions? = null,
     private val showFrame: () -> Unit = {},
     private val agenda: com.rusty.museecho.integrations.Agenda? = null,
+    private val specialDays: com.rusty.museecho.integrations.SpecialDays? = null,
+    private val reminders: com.rusty.museecho.integrations.Reminders? = null,
 ) {
     val specs: JsonObject = buildJsonObject {
         val keys = Roku.KEYS.keys.joinToString(", ")
@@ -88,7 +90,27 @@ class HomeCommands(
         spec("agenda.set", "Fill in the agenda page on the Echo Show (swipe left from the clock): today's events in order. " +
             "Replaces what's there; call it each morning (and when plans change).",
             required = mapOf("items" to param("array", "Events: [{\"time\": \"9:30 AM\" or \"All day\", \"title\": \"Dentist\"}], in order.")),
-            optional = mapOf("date" to param("string", "Heading, e.g. \"Friday, October 9\". Defaults to today.")))
+            optional = mapOf(
+                "date" to param("string", "Heading, e.g. \"Friday, October 9\". Defaults to today."),
+                "upcoming" to param("array", "The next few days for the \"Coming up\" section (up to 7 days, 8 events each): " +
+                    "[{\"date\": \"2026-10-11\", \"items\": [{\"time\", \"title\"}]}]. Days with no events can be left out."),
+            ))
+        spec("countdown.add",
+            "Count down to a big day on the Echo Show: the blob shows \"3 sleeps until <title>\" and tears a page off a " +
+                "little calendar each morning. For trips, birthdays, holidays, anything Rusty is looking forward to. " +
+                "Adding the same title again replaces it.",
+            required = mapOf(
+                "title" to param("string", "Short, e.g. \"Disney trip\"."),
+                "date" to param("string", "yyyy-MM-dd."),
+            ),
+            optional = mapOf("emoji" to param("string", "One emoji to show with it.")))
+        spec("countdown.remove", "Stop counting down to a day.", required = mapOf("title" to param("string", "Its title.")))
+        spec("countdown.list", "The days the Echo Show is counting down to.")
+        spec("reminders.set",
+            "Today's reminders on the Echo Show: the blob holds a sticky note, and when a reminder's time comes it taps " +
+                "the note and shows it. Replaces today's list; call it with the morning brief and when reminders change.",
+            required = mapOf("items" to param("array", "[{\"text\": \"Call time 10:30\", \"time\": \"10:00 AM\"}]; time is optional.")))
+        spec("reminders.clear", "Clear today's reminders on the Echo Show.")
         spec("agenda.clear", "Clear the agenda page on the Echo Show.")
         spec("frame.add", "Add a picture to the Echo Show's photo frame (the slideshow it shows when idle). Downloads and keeps it.",
             required = mapOf("url" to param("string", "http(s) URL of a JPEG, PNG or WebP image.")))
@@ -102,6 +124,7 @@ class HomeCommands(
         spec("media.control", "Control whatever is playing on the Echo Show (any app, or audio.play_url).",
             required = mapOf("action" to param("string", "One of: play_pause, play, pause, next, previous, stop.")))
         spec("laptop.shortcuts", "List the shortcuts Rusty has allowed on his laptop (same safelist as Sofa's Coding Mode).")
+        spec("laptop.wake", "Send a Wake-on-LAN packet to wake Rusty's laptop (only works if the laptop supports it).")
         spec("laptop.run", "Run one of the laptop's safelisted shortcuts (from laptop.shortcuts).",
             required = mapOf("shortcut" to param("string", "Its key or label.")),
             timeoutMs = 40_000)
@@ -245,9 +268,59 @@ class HomeCommands(
                 com.rusty.museecho.integrations.AgendaItem(o.str("time").orEmpty(), o.str("title") ?: return@mapNotNull null)
             } ?: return commandError("items must be a list of {time, title}")
             val date = params.str("date") ?: SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
-            val saved = a.set(date, items)
+            val upcoming = (params["upcoming"] as? JsonArray).orEmpty().mapNotNull { d ->
+                val o = d as? JsonObject ?: return@mapNotNull null
+                val dayItems = (o["items"] as? JsonArray).orEmpty().mapNotNull { e ->
+                    val io = e as? JsonObject ?: return@mapNotNull null
+                    com.rusty.museecho.integrations.AgendaItem(io.str("time").orEmpty(), io.str("title") ?: return@mapNotNull null)
+                }
+                com.rusty.museecho.integrations.UpcomingDay(o.str("date") ?: return@mapNotNull null, dayItems)
+            }
+            val saved = a.set(date, items, upcoming)
             commandOk(buildJsonObject { put("date", saved.date); put("count", saved.items.size) })
         } ?: commandError("not available")
+        "countdown.add" -> specialDays?.let { sd ->
+            val title = params.str("title")?.trim()?.take(30)?.takeIf { it.isNotEmpty() } ?: return commandError("title is required")
+            val date = params.str("date")?.trim() ?: return commandError("date is required (yyyy-MM-dd)")
+            val day = runCatching { java.time.LocalDate.parse(date) }.getOrNull() ?: return commandError("date must be yyyy-MM-dd")
+            if (day.isBefore(java.time.LocalDate.now())) return commandError("that date has passed")
+            sd.add(com.rusty.museecho.integrations.SpecialDay(title, day.toString(), params.str("emoji")?.take(8).orEmpty()))
+            commandOk(buildJsonObject {
+                put("title", title)
+                put("days_away", java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), day))
+            })
+        } ?: commandError("not available")
+        "countdown.remove" -> specialDays?.let { sd ->
+            val title = params.str("title") ?: return commandError("title is required")
+            val before = sd.value.value.days.size
+            sd.remove(title)
+            commandOk(buildJsonObject { put("removed", before != sd.value.value.days.size) })
+        } ?: commandError("not available")
+        "countdown.list" -> specialDays?.let { sd ->
+            commandOk(buildJsonObject {
+                put("days", buildJsonArray {
+                    sd.value.value.days.forEach { d -> add(buildJsonObject { put("title", d.title); put("date", d.date); put("emoji", d.emoji) }) }
+                })
+            })
+        } ?: commandError("not available")
+        "reminders.set" -> reminders?.let { rm ->
+            val items = (params["items"] as? JsonArray)?.mapNotNull { e ->
+                val o = e as? JsonObject ?: return@mapNotNull null
+                com.rusty.museecho.integrations.Reminder(o.str("text") ?: return@mapNotNull null, o.str("time").orEmpty())
+            } ?: return commandError("items must be a list of {text, time?}")
+            val saved = rm.set(java.time.LocalDate.now().toString(), items)
+            commandOk(buildJsonObject { put("count", saved.items.size) })
+        } ?: commandError("not available")
+        "reminders.clear" -> reminders?.let { rm ->
+            rm.clear()
+            commandOk(buildJsonObject { put("cleared", true) })
+        } ?: commandError("not available")
+        "laptop.wake" -> {
+            val mac = laptop.mac?.let { com.rusty.museecho.integrations.WakeOnLan.parseMac(it) }
+                ?: return commandError("the laptop's MAC address isn't set (drop a laptop_mac file like the token)")
+            if (com.rusty.museecho.integrations.WakeOnLan.send(mac)) commandOk(buildJsonObject { put("sent", true) })
+            else commandError("couldn't send the wake packet")
+        }
         "agenda.clear" -> agenda?.let { a ->
             a.clear()
             commandOk(buildJsonObject { put("cleared", true) })
