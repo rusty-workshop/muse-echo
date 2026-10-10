@@ -1130,9 +1130,10 @@ class GadgetService : Service() {
         const val RING_MAX_MS = 2 * 60_000L
         const val RECONNECT_KICK_MS = 5 * 60_000L
         const val BRIEF_PROMPT = "Good morning! Give me my morning brief, under 80 words and written to be spoken aloud " +
-            "(no lists or markdown): today's weather here, what's on my calendar today, anything I asked you to remind " +
-            "me about, and whether anything is wrong on the Latitude server. Also call agenda.set on the Echo Show with " +
-            "today's events so its agenda page is current."
+            "(no lists or markdown): today's weather here, what's on my calendars today, anything I asked you to remind " +
+            "me about, and whether anything is wrong on the Latitude server. Check ALL my Google calendars (school, " +
+            "church, family and the rest, not just the primary one, which is usually empty). Also call agenda.set on the " +
+            "Echo Show with today's events from all of them so its agenda page is current."
 
         @Volatile
         var instance: GadgetService? = null
