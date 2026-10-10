@@ -136,6 +136,11 @@ class EchoCommands(
     }
 
     suspend fun run(command: String, params: JsonObject, timeoutMs: Long?): JsonObject = try {
+        if (command.startsWith("blob.")) {
+            // Pixel wants to be seen: step out of the photo slideshow (and hold it off a while).
+            GadgetState.showFrame(false)
+            GadgetState.lastTouch = System.currentTimeMillis()
+        }
         withTimeout(timeoutMs ?: DEFAULT_TIMEOUT_MS) {
             when (command) {
                 "device.health" -> health()
