@@ -124,7 +124,6 @@ class HomeCommands(
         spec("media.control", "Control whatever is playing on the Echo Show (any app, or audio.play_url).",
             required = mapOf("action" to param("string", "One of: play_pause, play, pause, next, previous, stop.")))
         spec("laptop.shortcuts", "List the shortcuts Rusty has allowed on his laptop (same safelist as Sofa's Coding Mode).")
-        spec("laptop.wake", "Send a Wake-on-LAN packet to wake Rusty's laptop (only works if the laptop supports it).")
         spec("laptop.run", "Run one of the laptop's safelisted shortcuts (from laptop.shortcuts).",
             required = mapOf("shortcut" to param("string", "Its key or label.")),
             timeoutMs = 40_000)
@@ -315,12 +314,6 @@ class HomeCommands(
             rm.clear()
             commandOk(buildJsonObject { put("cleared", true) })
         } ?: commandError("not available")
-        "laptop.wake" -> {
-            val mac = laptop.mac?.let { com.rusty.museecho.integrations.WakeOnLan.parseMac(it) }
-                ?: return commandError("the laptop's MAC address isn't set (drop a laptop_mac file like the token)")
-            if (com.rusty.museecho.integrations.WakeOnLan.send(mac)) commandOk(buildJsonObject { put("sent", true) })
-            else commandError("couldn't send the wake packet")
-        }
         "agenda.clear" -> agenda?.let { a ->
             a.clear()
             commandOk(buildJsonObject { put("cleared", true) })

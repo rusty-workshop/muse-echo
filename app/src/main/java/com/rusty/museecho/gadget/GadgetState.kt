@@ -304,14 +304,6 @@ object GadgetState {
         _muted.value = on
     }
 
-    /** The laptop companion answers (null: not set up, or not checked yet). */
-    private val _laptopOnline = MutableStateFlow<Boolean?>(null)
-    val laptopOnline: StateFlow<Boolean?> = _laptopOnline.asStateFlow()
-
-    fun setLaptopOnline(on: Boolean?) {
-        _laptopOnline.value = on
-    }
-
     /** Active National Weather Service alerts here. */
     private val _alerts = MutableStateFlow<List<com.rusty.museecho.integrations.WeatherAlert>>(emptyList())
     val alerts: StateFlow<List<com.rusty.museecho.integrations.WeatherAlert>> = _alerts.asStateFlow()

@@ -37,11 +37,6 @@ class Laptop(context: Context) {
 
     val configured: Boolean get() = !token.isNullOrBlank()
 
-    /** For Wake-on-LAN (dropped in as `laptop_mac`, like the token). */
-    var mac: String?
-        get() = prefs.getString("laptop_mac", null)
-        set(v) = prefs.edit().putString("laptop_mac", v?.trim()).apply()
-
     suspend fun shortcuts(): List<Shortcut> = withContext(Dispatchers.IO) {
         val body = call(Request.Builder().url("http://$host/shortcuts").get()) ?: return@withContext emptyList()
         (Json.parseToJsonElement(body) as? JsonArray).orEmpty().mapNotNull { e ->

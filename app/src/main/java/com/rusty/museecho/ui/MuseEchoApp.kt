@@ -35,7 +35,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PlayArrow
@@ -144,9 +143,6 @@ interface UiActions {
     fun wakePhrase(): String
     fun wakeModelPresent(): Boolean
     fun setWakeWord(enabled: Boolean, phrase: String): String?
-    /** Wake-on-LAN for the laptop: whether a MAC address is set, and send the packet. */
-    fun canWakeLaptop(): Boolean
-    fun wakeLaptop()
 }
 
 internal object Palette {
@@ -185,13 +181,6 @@ fun MuseEchoApp(actions: UiActions) {
             }
             UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
-                // Wake the laptop: shown only while it's away and Wake-on-LAN is set up.
-                val laptopOnline by GadgetState.laptopOnline.collectAsState()
-                if (laptopOnline == false && actions.canWakeLaptop()) {
-                    IconButton(onClick = actions::wakeLaptop) {
-                        Icon(Icons.Filled.Laptop, "Wake laptop", tint = Palette.muted)
-                    }
-                }
                 IconButton(onClick = { actions.setMicOff(!micOff) }) {
                     Icon(if (micOff) Icons.Filled.MicOff else Icons.Filled.Mic, if (micOff) "Turn mic on" else "Turn mic off",
                         tint = if (micOff) Palette.coral else Palette.muted)

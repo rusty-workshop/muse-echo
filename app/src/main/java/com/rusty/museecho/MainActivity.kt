@@ -293,13 +293,6 @@ class MainActivity : ComponentActivity() {
         override fun voiceInstalled(level: com.rusty.museecho.gadget.NeuralVoice.Level) =
             GadgetService.instance?.neural?.installed(level) == true
         override suspend fun voiceSpeedTest() = GadgetService.instance?.voiceSpeedTest() ?: "Not running"
-        override fun canWakeLaptop() = GadgetService.instance?.laptop?.mac
-            ?.let { com.rusty.museecho.integrations.WakeOnLan.parseMac(it) } != null
-
-        override fun wakeLaptop() {
-            GadgetService.instance?.wakeLaptop()
-        }
-
         override fun pinToHomeScreen(): String {
             if (!androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported(this@MainActivity)) {
                 return "Your home-screen app doesn't support adding shortcuts; find Muse Echo in its app list instead."

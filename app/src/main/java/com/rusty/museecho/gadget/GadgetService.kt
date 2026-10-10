@@ -497,11 +497,6 @@ class GadgetService : Service() {
             it.delete()
             GadgetState.log("imported laptop_token")
         }
-        java.io.File(drop, "laptop_mac").takeIf { it.isFile }?.let {
-            laptop.mac = it.readText().trim()
-            it.delete()
-            GadgetState.log("imported laptop_mac")
-        }
         java.io.File(drop, "laptop_host").takeIf { it.isFile }?.let {
             laptop.host = it.readText().trim()
             it.delete()
@@ -888,17 +883,6 @@ class GadgetService : Service() {
         }
     }
 
-    /** Wake-on-LAN from the screen button: sends the packet and tells you it did. */
-    fun wakeLaptop() {
-        val mac = laptop.mac?.let { com.rusty.museecho.integrations.WakeOnLan.parseMac(it) } ?: return
-        scope.launch {
-            val ok = com.rusty.museecho.integrations.WakeOnLan.send(mac)
-            GadgetState.log(if (ok) "sent wake-on-LAN to the laptop" else "wake-on-LAN failed")
-            GadgetState.react(if (ok) Reaction.NUDGE else Reaction.SHAKE)
-            GadgetState.say(if (ok) "Knock knock, laptop! 💻" else "Couldn't send the wake signal.", 15)
-        }
-    }
-
     /** The blob acts out the quick action you tapped. */
     fun quickActionReaction(label: String) {
         val l = label.lowercase()
@@ -976,7 +960,6 @@ class GadgetService : Service() {
         while (true) {
             if (laptop.configured && !isQuietNow()) {
                 val online = laptop.online()
-                GadgetState.setLaptopOnline(online)
                 if (was == false && online) {
                     GadgetState.react(Reaction.HOP)
                     GadgetState.say("Laptop's here! 💻", 30)

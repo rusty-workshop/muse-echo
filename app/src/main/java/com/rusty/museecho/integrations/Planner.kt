@@ -1,9 +1,6 @@
 package com.rusty.museecho.integrations
 
 import java.io.File
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -90,27 +87,5 @@ class WeatherAlerts(private val http: OkHttpClient = OkHttpClient.Builder().call
                 }.filter { it.event.isNotEmpty() }
             }
         }.getOrNull()
-    }
-}
-
-/** Wake-on-LAN: the magic packet (6 x FF, then the MAC 16 times) as a UDP broadcast. */
-object WakeOnLan {
-    fun parseMac(mac: String): ByteArray? {
-        val parts = mac.trim().split(':', '-')
-        if (parts.size != 6) return null
-        return runCatching { parts.map { it.toInt(16).toByte() }.toByteArray() }.getOrNull()
-    }
-
-    suspend fun send(mac: ByteArray, broadcast: String = "255.255.255.255"): Boolean = withContext(Dispatchers.IO) {
-        val packet = ByteArray(6) { 0xFF.toByte() } + (1..16).flatMap { mac.toList() }
-        runCatching {
-            DatagramSocket().use { socket ->
-                socket.broadcast = true
-                for (port in listOf(9, 7)) {
-                    socket.send(DatagramPacket(packet, packet.size, InetAddress.getByName(broadcast), port))
-                }
-            }
-            true
-        }.getOrDefault(false)
     }
 }
