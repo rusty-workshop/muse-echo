@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         if (ev.action == android.view.MotionEvent.ACTION_DOWN) {
             GadgetState.lastTouch = System.currentTimeMillis()
+            GadgetState.setAlertGlow(false)
             // The first tap on a sleeping screen only wakes it.
             if (GadgetState.asleep.value) {
                 GadgetState.setAsleep(false)

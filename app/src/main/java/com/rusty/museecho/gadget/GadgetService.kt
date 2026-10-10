@@ -103,6 +103,7 @@ class GadgetService : Service() {
         api = MuseApi(ua, log = GadgetState::log)
         neural = NeuralVoice(java.io.File(filesDir, "tts")) { GadgetState.log(it) }
         speaker = Speaker(this, neural)
+        GadgetState.outputLevel = { neural.outputLevel() }
         timers = com.rusty.museecho.integrations.Timers(java.io.File(filesDir, "timers.json"))
         laptop = com.rusty.museecho.integrations.Laptop(this)
         roku = com.rusty.museecho.integrations.Roku(this)
@@ -456,6 +457,8 @@ class GadgetService : Service() {
     }
 
     fun dismissRinging() {
+        // Up and at 'em: a little party for getting up to an alarm.
+        if (timers.ringing.value.any { it.isAlarm }) GadgetState.react(Reaction.CELEBRATE)
         timers.dismiss()
         stopChime()
         speaker.stop()
@@ -623,6 +626,10 @@ class GadgetService : Service() {
         GadgetState.setHeard("")
         history.add(com.rusty.museecho.integrations.Exchange(System.currentTimeMillis(), reply.prompt.orEmpty(), reply.text, source))
         if (!QuietHours.isQuiet(prefs)) softChime()
+        if (reply.origin != ChatFeed.Origin.THIS_DEVICE) {
+            GadgetState.react(Reaction.HOP)
+            GadgetState.setAlertGlow(true)
+        }
         deliver(reply, source, wakeScreen = true)
     }
 

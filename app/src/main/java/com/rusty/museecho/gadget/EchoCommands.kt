@@ -88,6 +88,16 @@ class EchoCommands(
             "Tell the Echo Show your name, so its screen says it instead of \"Muse\" " +
                 "(e.g. \"Tap the mic to talk to <name>\"). Call this once with your own name.",
             required = mapOf("name" to param("string", "Your name, as you'd like it shown.")))
+        spec("blob.mood",
+            "Set the expression on the Echo Show's animated blob (your on-screen face) for a while, to match " +
+                "the mood of what you're saying. Otherwise it follows what's going on by itself (sleepy at night, " +
+                "curious while listening, worried if the server is down). neutral clears it.",
+            required = mapOf("mood" to param("string", "One of: ${Mood.entries.joinToString { it.name.lowercase() }}.")),
+            optional = mapOf("seconds" to param("integer", "How long to hold it, 5 to 3600. Default 60.")))
+        spec("blob.react",
+            "Play a one-off animation on the Echo Show's blob: celebrate (confetti, for good news or a win), " +
+                "hop, nod, shake (head shake, 'no'), wink (for a joke), yawn, stretch, hiccup, peek, wander.",
+            required = mapOf("reaction" to param("string", "One of: ${Reaction.entries.joinToString { it.name.lowercase() }}.")))
     }
 
     suspend fun run(command: String, params: JsonObject, timeoutMs: Long?): JsonObject = try {
@@ -106,6 +116,18 @@ class EchoCommands(
                 "audio.play_url" -> playUrl(params.string("url"), params.string("title"))
                 "audio.stop" -> stopAudio()
                 "display.set_profile" -> setProfile(params.string("name"))
+                "blob.mood" -> {
+                    val mood = Mood.entries.firstOrNull { it.name.equals(params.string("mood")?.trim(), ignoreCase = true) }
+                        ?: return@withTimeout commandError("mood must be one of: ${Mood.entries.joinToString { it.name.lowercase() }}")
+                    GadgetState.setMood(mood, (params.int("seconds") ?: 60).coerceIn(5, 3600))
+                    commandOk(JsonObject(emptyMap()))
+                }
+                "blob.react" -> {
+                    val r = Reaction.entries.firstOrNull { it.name.equals(params.string("reaction")?.trim(), ignoreCase = true) }
+                        ?: return@withTimeout commandError("reaction must be one of: ${Reaction.entries.joinToString { it.name.lowercase() }}")
+                    GadgetState.react(r)
+                    commandOk(JsonObject(emptyMap()))
+                }
                 else -> home?.run(command, params) ?: commandError("unknown command: $command")
             }
         }

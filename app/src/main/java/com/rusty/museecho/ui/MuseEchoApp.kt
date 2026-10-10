@@ -62,6 +62,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -218,25 +220,6 @@ fun MuseEchoApp(actions: UiActions) {
 
 @Composable
 private fun IdleFace(actions: UiActions) {
-    // The orb moves slowly, so 12 frames a second looks the same as 60 and
-    // costs a fraction of the CPU; during quiet hours it holds still.
-    val quiet by GadgetState.quiet.collectAsState()
-    val speaking by GadgetState.speaking.collectAsState()
-    var t by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(quiet, speaking) {
-        if (quiet && !speaking) return@LaunchedEffect
-        val start = System.currentTimeMillis() - (t * 1000).toLong()
-        while (true) {
-            t = (System.currentTimeMillis() - start) / 1000f
-            // Faster frames while speaking, so the pulse keeps up with the voice.
-            delay(if (speaking) 40 else 83)
-        }
-    }
-    // While speaking, a syllable-rate flutter on top of the slow breath.
-    val voice = if (speaking) 0.06f * (0.5f + 0.5f * kotlin.math.sin(t * 17f)) * (0.6f + 0.4f * kotlin.math.sin(t * 5.3f)) else 0f
-    val breathe = 0.99f + 0.07f * kotlin.math.sin(t * 2 * Math.PI.toFloat() / 7.2f) + voice
-    val drift = (t / 14f) % 1f
-    val talk by GadgetState.talk.collectAsState()
     val link by GadgetState.link.collectAsState()
     val name by GadgetState.museName.collectAsState()
     val now = rememberNow()
@@ -245,24 +228,34 @@ private fun IdleFace(actions: UiActions) {
     val glanceLine by actions.glance().collectAsState()
     val weather by GadgetState.weather.collectAsState()
     val hasNote = note.items.isNotEmpty() || note.title.isNotEmpty()
-    Row(Modifier.fillMaxSize().padding(horizontal = if (hasNote) 24.dp else 40.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(if (hasNote) 170.dp else 220.dp), contentAlignment = Alignment.Center) {
-            val angle = drift * 2 * Math.PI
-            val tint = when {
-                speaking -> Palette.teal
-                talk == Talk.LISTENING -> Palette.coral
-                talk == Talk.SENDING || talk == Talk.WAITING -> Palette.amber
-                link == Link.CONNECTED -> Palette.violet
-                else -> Palette.muted
+    // Where the screen was last tapped, in the blob's own coordinates, so its eyes can look there.
+    var rowCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var blobCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    var lookAt by remember { mutableStateOf<Offset?>(null) }
+    var lookAtMs by remember { mutableStateOf(0L) }
+    Row(
+        Modifier.fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        // Only watches taps (Initial pass, nothing consumed): buttons still get them.
+                        val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        val down = e.changes.firstOrNull { it.pressed && !it.previousPressed } ?: continue
+                        val row = rowCoords
+                        val blob = blobCoords
+                        if (row != null && blob != null && row.isAttached && blob.isAttached) {
+                            lookAt = blob.localPositionOf(row, down.position)
+                            lookAtMs = System.currentTimeMillis()
+                        }
+                    }
+                }
             }
-            Canvas(Modifier.fillMaxSize().scale(breathe)) {
-                val c = center
-                val r = size.minDimension / 2
-                val shift = Offset((kotlin.math.cos(angle) * r * 0.18).toFloat(), (kotlin.math.sin(angle) * r * 0.18).toFloat())
-                drawCircle(Brush.radialGradient(listOf(tint.copy(alpha = 0.35f), Color.Transparent), c, r), r, c)
-                drawCircle(Brush.radialGradient(listOf(Palette.teal.copy(alpha = 0.55f), Color.Transparent), c + shift, r * 0.7f), r * 0.62f, c + shift)
-                drawCircle(Brush.radialGradient(listOf(tint, tint.copy(alpha = 0.15f)), c - shift * 0.6f, r * 0.55f), r * 0.48f, c - shift * 0.6f)
-            }
+            .onGloballyPositioned { rowCoords = it }
+            .padding(horizontal = if (hasNote) 24.dp else 40.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(if (hasNote) 170.dp else 220.dp).onGloballyPositioned { blobCoords = it }, contentAlignment = Alignment.Center) {
+            Blob(Modifier.fillMaxSize(), actions, lookAt, lookAtMs)
         }
         Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
         Column(Modifier.weight(1f)) {

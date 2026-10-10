@@ -20,6 +20,19 @@ enum class Link { NOT_PAIRED, NO_TOKEN, CONNECTING, CONNECTED, RECONNECTING }
 
 enum class Talk { IDLE, LISTENING, SENDING, WAITING, REPLIED, ERROR }
 
+/** The blob's face. Pixel can set one for a while (blob.mood); otherwise it follows what's going on. */
+enum class Mood { NEUTRAL, HAPPY, CURIOUS, WORRIED, SLEEPY, SURPRISED, SAD, WINK }
+
+/** One-off blob animations: from Pixel (blob.react), events, or its own idle antics. */
+enum class Reaction(val ms: Long) {
+    HOP(900), NOD(900), SHAKE(900), WINK(1100), CELEBRATE(2800),
+    YAWN(2600), STRETCH(2000), HICCUP(1300), PEEK(2600), WANDER(6000),
+}
+
+data class MoodSet(val mood: Mood, val untilMs: Long)
+
+data class ReactionEvent(val reaction: Reaction, val atMs: Long)
+
 enum class BlePairing { OFF, ADVERTISING, CONNECTED, CONFIRMED, DONE, UNSUPPORTED, FAILED }
 
 /**
@@ -183,6 +196,33 @@ object GadgetState {
     fun setMuseName(name: String) {
         _museName.value = name.ifBlank { "Muse" }
     }
+
+    private val _mood = MutableStateFlow<MoodSet?>(null)
+    val mood: StateFlow<MoodSet?> = _mood.asStateFlow()
+
+    /** Show [mood] for [seconds]; NEUTRAL clears it. */
+    fun setMood(mood: Mood, seconds: Int) {
+        _mood.value = if (mood == Mood.NEUTRAL) null else MoodSet(mood, System.currentTimeMillis() + seconds * 1000L)
+    }
+
+    private val _reaction = MutableStateFlow<ReactionEvent?>(null)
+    val reaction: StateFlow<ReactionEvent?> = _reaction.asStateFlow()
+
+    fun react(reaction: Reaction) {
+        _reaction.value = ReactionEvent(reaction, System.currentTimeMillis())
+    }
+
+    /** Something arrived while nobody was looking; the blob glows until the screen is touched. */
+    private val _alertGlow = MutableStateFlow(false)
+    val alertGlow: StateFlow<Boolean> = _alertGlow.asStateFlow()
+
+    fun setAlertGlow(on: Boolean) {
+        _alertGlow.value = on
+    }
+
+    /** Loudness of the Echo's own voice, 0..1, or -1 when unknown (system TTS). */
+    @Volatile
+    var outputLevel: () -> Float = { -1f }
 
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log.asStateFlow()

@@ -164,13 +164,27 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
             .setBufferSizeInBytes(maxOf(AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT), rate))
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+        val window = maxOf(1, rate / ENVELOPE_PER_SECOND)
+        synchronized(envelope) { envelope.clear() }
+        envelopeWindow = window
         val player = Thread({
             var started = false
             var written = 0L
+            playing = track
             try {
                 while (!cancel) {
                     val chunk = queue.poll(200, TimeUnit.MILLISECONDS) ?: continue
                     if (chunk === end) break
+                    synchronized(envelope) {
+                        var i = 0
+                        while (i < chunk.size) {
+                            val end = minOf(chunk.size, i + window)
+                            var sum = 0.0
+                            for (j in i until end) sum += chunk[j] * chunk[j]
+                            envelope.add(kotlin.math.sqrt(sum / (end - i)).toFloat())
+                            i = end
+                        }
+                    }
                     if (!started) {
                         track.play()
                         started = true
@@ -185,6 +199,7 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
                     while (!cancel && track.playbackHeadPosition < written && System.currentTimeMillis() < until) Thread.sleep(20)
                 }
             } finally {
+                playing = null
                 runCatching { track.stop() }
                 track.release()
             }
@@ -208,6 +223,20 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
 
         fun stop() {
         cancel = true
+    }
+
+    // Loudness of what's being spoken, one value per 1/25 s of audio, so the
+    // screen can follow the voice in step with what's actually playing.
+    private val envelope = ArrayList<Float>()
+    @Volatile private var envelopeWindow = 1
+    @Volatile private var playing: AudioTrack? = null
+
+    /** How loud the voice is right now, 0..1, or -1 when nothing is playing. */
+    fun outputLevel(): Float {
+        val track = playing ?: return -1f
+        val pos = runCatching { track.playbackHeadPosition }.getOrNull() ?: return -1f
+        val rms = synchronized(envelope) { envelope.getOrNull(pos / envelopeWindow) } ?: return 0f
+        return (rms * 6f).coerceIn(0f, 1f)
     }
 
     /**
@@ -242,6 +271,8 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
     }
 
     companion object {
+        private const val ENVELOPE_PER_SECOND = 25
+
         /** The text with its first sentence cut at the first comma (if long), so speech starts sooner. */
         fun firstChunks(text: String): List<String> {
             val t = text.trim()
