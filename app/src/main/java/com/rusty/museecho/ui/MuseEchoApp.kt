@@ -948,7 +948,10 @@ private fun QuickActionRow(modifier: Modifier, actions: UiActions) {
     val heard by GadgetState.heard.collectAsState()
     val reply by GadgetState.reply.collectAsState()
     val link by GadgetState.link.collectAsState()
-    val show = !(list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED)
+    val screen by GadgetState.screen.collectAsState()
+    // Only over the plain home screen: never on top of a picture, a text card or a reply.
+    val show = !(list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED ||
+        screen !is Screen.Idle)
     AnimatedVisibility(show, modifier, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         list.forEach { a ->
@@ -968,7 +971,9 @@ private fun quickActionsShowing(actions: UiActions): Boolean {
     val heard by GadgetState.heard.collectAsState()
     val reply by GadgetState.reply.collectAsState()
     val link by GadgetState.link.collectAsState()
-    return !(list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED)
+    val screen by GadgetState.screen.collectAsState()
+    return !(list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED ||
+        screen !is Screen.Idle)
 }
 
 /**
