@@ -28,5 +28,8 @@ class BlobBrainTest {
         assertEquals(Mood.WORRIED, BlobBrain.tone("Heads up: judgment-bot is down.")?.mood)
         assertEquals(Mood.WINK, BlobBrain.tone("Why did the blob cross the road? Haha.")?.mood)
         assertNull(BlobBrain.tone("It's 72 degrees."))
+        assertNull(BlobBrain.tone("Storms around 6, take an umbrella. Nothing else urgent."))
+        assertNull(BlobBrain.tone("No outage today, and it isn't urgent."))
+        assertEquals(Mood.WORRIED, BlobBrain.tone("Not great: the backup failed.")?.mood)
     }
 }

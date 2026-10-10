@@ -9,12 +9,23 @@ object BlobBrain {
     private val SYMPATHY = listOf("sorry to hear", "sorry about", "that's rough", "that sucks", "condolence", "that's tough", "hang in there", "😢", "😞")
     private val JOKE = listOf("haha", "lol", "😄", "😂", "😉", "😜", "pun intended", "just kidding", "(joke)")
     private val WORRY = listOf("warning", "careful", "be careful", "urgent", "is down", "went down", "failed", "outage", "⚠")
+    private val NEGATION = listOf("no ", "not ", "nothing ", "n't ", "without ", "never ")
     private val SURPRISE = listOf("wow", "whoa", "no way", "!?", "😮", "😲")
 
     /** A rough guess from words in the reply; null when nothing stands out. */
     fun tone(reply: String): Tone? {
         val t = reply.lowercase()
-        fun any(words: List<String>) = words.any { it in t }
+        // A word counts unless it's negated just before ("nothing urgent", "not a warning", "no outage").
+        fun said(word: String): Boolean {
+            var i = t.indexOf(word)
+            while (i >= 0) {
+                val before = t.substring(maxOf(0, i - 16), i)
+                if (NEGATION.none { before.contains(it) }) return true
+                i = t.indexOf(word, i + word.length)
+            }
+            return false
+        }
+        fun any(words: List<String>) = words.any(::said)
         return when {
             any(CELEBRATE) -> Tone(Mood.HAPPY, hop = true)
             any(SYMPATHY) -> Tone(Mood.SAD)
