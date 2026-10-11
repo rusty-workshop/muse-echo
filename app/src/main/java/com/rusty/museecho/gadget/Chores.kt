@@ -398,6 +398,12 @@ class Chores(
             put("quick_actions", buildJsonArray {
                 quickActionsNow().forEach { a -> add(buildJsonObject { put("label", a.label); put("prompt", a.prompt) }) }
             })
+            put("quick_sets", buildJsonObject {
+                val sets = quickSetsNow()
+                for ((name, list) in listOf("morning" to sets.morning, "afternoon" to sets.afternoon, "evening" to sets.evening)) {
+                    put(name, buildJsonArray { list.forEach { a -> add(buildJsonObject { put("label", a.label); put("prompt", a.prompt) }) } })
+                }
+            })
             put("choices", buildJsonObject {
                 put("clock_face", buildJsonArray { com.rusty.museecho.ui.ClockFace.entries.forEach { add(JsonPrimitive(it.name)) } })
                 put("frame_clock", buildJsonArray { com.rusty.museecho.ui.FrameClock.entries.forEach { add(JsonPrimitive(it.name)) } })
@@ -421,6 +427,7 @@ class Chores(
     }
 
     var quickActionsNow: () -> List<com.rusty.museecho.integrations.QuickAction> = { emptyList() }
+    var quickSetsNow: () -> com.rusty.museecho.integrations.QuickActionSets = { com.rusty.museecho.integrations.QuickActionSets() }
 
     private suspend fun streamScreen() {
         while (System.currentTimeMillis() < GadgetState.screenWantedUntil) {

@@ -35,6 +35,41 @@ class QuickActions(file: File) : JsonFileState<List<QuickAction>>(file, ListSeri
 }
 
 /**
+ * Optional quick-action sets for parts of the day; an empty set falls back to the
+ * all-day buttons. Morning is 5 a.m. to noon, afternoon noon to 5 p.m., evening the rest.
+ */
+@Serializable
+data class QuickActionSets(
+    val morning: List<QuickAction> = emptyList(),
+    val afternoon: List<QuickAction> = emptyList(),
+    val evening: List<QuickAction> = emptyList(),
+) {
+    fun forHour(hour: Int): List<QuickAction> = when (hour) {
+        in 5..11 -> morning
+        in 12..16 -> afternoon
+        else -> evening
+    }
+
+    companion object {
+        fun periodOf(hour: Int) = when (hour) { in 5..11 -> "morning"; in 12..16 -> "afternoon"; else -> "evening" }
+    }
+}
+
+class QuickActionTimes(file: File) : JsonFileState<QuickActionSets>(file, QuickActionSets.serializer(), QuickActionSets()) {
+    private fun clean(list: List<QuickAction>) = list.map { QuickAction(it.label.trim().take(18), it.prompt.trim().take(500)) }
+        .filter { it.label.isNotEmpty() && it.prompt.isNotEmpty() }.take(QuickActions.MAX)
+
+    fun set(period: String, list: List<QuickAction>) = update { s ->
+        when (period) {
+            "morning" -> s.copy(morning = clean(list))
+            "afternoon" -> s.copy(afternoon = clean(list))
+            "evening" -> s.copy(evening = clean(list))
+            else -> s
+        }
+    }
+}
+
+/**
  * Photos for the idle slideshow: files pushed to the app's `frame/` folder
  * (adb or the laptop) plus pictures Muse adds by URL, cached locally.
  */

@@ -364,6 +364,15 @@ class MainActivity : ComponentActivity() {
             GadgetService.instance?.laptopMedia(command, intArg)
         }
 
+        override suspend fun forecast() = GadgetService.instance?.fetchForecast()
+
+        override fun canSendToLaptop() = GadgetService.instance?.laptop?.configured == true
+
+        override fun sendToLaptop(text: String, onResult: (Boolean) -> Unit) {
+            val svc = GadgetService.instance ?: return onResult(false)
+            lifecycleScope.launch { onResult(svc.sendToLaptop(text)) }
+        }
+
         override fun addTimer(ms: Long): String? = GadgetService.instance?.addTimerByTouch(ms) ?: "the service isn't running"
 
         override fun addAlarm(time: String, days: List<String>): String? =
@@ -401,7 +410,9 @@ class MainActivity : ComponentActivity() {
         }
 
         private val emptyActions = kotlinx.coroutines.flow.MutableStateFlow(com.rusty.museecho.integrations.QuickActions.DEFAULTS)
-        override fun quickActions() = GadgetService.instance?.quickActions?.value ?: emptyActions
+        override fun quickActions() = GadgetState.quickNow
+
+        override fun allDayQuickActions() = GadgetService.instance?.quickActions?.value?.value.orEmpty()
         override fun runQuickAction(a: com.rusty.museecho.integrations.QuickAction) {
             GadgetService.instance?.quickActionReaction(a.label)
             GadgetService.instance?.talk(a.prompt, null, label = a.label)

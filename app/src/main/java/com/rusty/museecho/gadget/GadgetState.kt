@@ -14,6 +14,8 @@ sealed class Screen {
     data object Idle : Screen()
     data class Image(val bitmap: Bitmap, val caption: String) : Screen()
     data class Text(val title: String, val body: String) : Screen()
+    /** A long reply opened full screen ("Read more"): Markdown, scrolled by touch, closed with its button. */
+    data class Reader(val title: String, val markdown: String) : Screen()
 }
 
 enum class Link { NOT_PAIRED, NO_TOKEN, CONNECTING, CONNECTED, RECONNECTING }
@@ -431,6 +433,21 @@ object GadgetState {
 
     fun preview(kind: String, value: String, ms: Long) {
         _preview.value = BlobPreview(kind, value, System.currentTimeMillis() + ms)
+    }
+
+    /** The quick-action buttons showing now: the set for this part of the day, or the all-day ones. */
+    private val _quickNow = MutableStateFlow<List<com.rusty.museecho.integrations.QuickAction>>(emptyList())
+    val quickNow: StateFlow<List<com.rusty.museecho.integrations.QuickAction>> = _quickNow.asStateFlow()
+
+    fun setQuickNow(list: List<com.rusty.museecho.integrations.QuickAction>) {
+        _quickNow.value = list
+    }
+
+    private val _forecast = MutableStateFlow<com.rusty.museecho.integrations.Forecast?>(null)
+    val forecast: StateFlow<com.rusty.museecho.integrations.Forecast?> = _forecast.asStateFlow()
+
+    fun setForecast(f: com.rusty.museecho.integrations.Forecast?) {
+        _forecast.value = f
     }
 
     /** The touch timer / alarm pad is open (tap the clock). */

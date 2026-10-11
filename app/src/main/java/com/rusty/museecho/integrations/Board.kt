@@ -103,6 +103,14 @@ data class WeatherNow(
     val tomorrowSummary: String = "", val tomorrowHighF: Int? = null,
 )
 
+/** One hour of the forecast. [hour] is 0..23 local; [startMs] when it begins. */
+data class HourPoint(val startMs: Long, val hour: Int, val tempF: Int, val rainPct: Int, val code: Int)
+
+/** One day of the forecast; [date] is yyyy-MM-dd. */
+data class DayPoint(val date: String, val highF: Int, val lowF: Int, val rainPct: Int, val code: Int)
+
+data class Forecast(val hours: List<HourPoint>, val days: List<DayPoint>, val atMs: Long)
+
 class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()) {
     suspend fun fetch(lat: Double, lon: Double): WeatherNow? = withContext(Dispatchers.IO) {
         val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
@@ -129,7 +137,60 @@ class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeou
         }.getOrNull()
     }
 
+    /** The next 24 hours and 7 days (Open-Meteo, same as the current weather). */
+    suspend fun forecast(lat: Double, lon: Double): Forecast? = withContext(Dispatchers.IO) {
+        val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+            "&hourly=temperature_2m,precipitation_probability,weather_code" +
+            "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code" +
+            "&temperature_unit=fahrenheit&timezone=auto&forecast_days=7"
+        runCatching {
+            http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val root = Json.parseToJsonElement(resp.body!!.string()) as JsonObject
+                val zone = java.time.ZoneId.systemDefault()
+                fun arr(o: JsonObject, k: String) = (o[k] as? JsonArray).orEmpty()
+                fun num(e: kotlinx.serialization.json.JsonElement?) = (e as? JsonPrimitive)?.doubleOrNull
+                val hourly = root["hourly"] as JsonObject
+                val times = arr(hourly, "time").map { (it as JsonPrimitive).content }
+                val temps = arr(hourly, "temperature_2m")
+                val rain = arr(hourly, "precipitation_probability")
+                val codes = arr(hourly, "weather_code")
+                val now = System.currentTimeMillis()
+                val hours = times.indices.mapNotNull { i ->
+                    val start = java.time.LocalDateTime.parse(times[i]).atZone(zone)
+                    val ms = start.toInstant().toEpochMilli()
+                    if (ms < now - 3_600_000L) return@mapNotNull null
+                    HourPoint(ms, start.hour, Math.round(num(temps.getOrNull(i)) ?: return@mapNotNull null).toInt(),
+                        (num(rain.getOrNull(i)) ?: 0.0).toInt(), (num(codes.getOrNull(i)) ?: -1.0).toInt())
+                }.take(25)
+                val daily = root["daily"] as JsonObject
+                val days = arr(daily, "time").mapIndexed { i, d ->
+                    DayPoint((d as JsonPrimitive).content,
+                        Math.round(num(arr(daily, "temperature_2m_max").getOrNull(i)) ?: 0.0).toInt(),
+                        Math.round(num(arr(daily, "temperature_2m_min").getOrNull(i)) ?: 0.0).toInt(),
+                        (num(arr(daily, "precipitation_probability_max").getOrNull(i)) ?: 0.0).toInt(),
+                        (num(arr(daily, "weather_code").getOrNull(i)) ?: -1.0).toInt())
+                }
+                Forecast(hours, days, now)
+            }
+        }.getOrNull()
+    }
+
     companion object {
+        /** A picture for a WMO weather code. */
+        fun emoji(code: Int, night: Boolean = false): String = when (code) {
+            0 -> if (night) "🌙" else "☀️"
+            1 -> if (night) "🌙" else "🌤️"
+            2 -> "⛅"
+            3 -> "☁️"
+            45, 48 -> "🌫️"
+            51, 53, 55, 56, 57, 80, 81, 82 -> "🌦️"
+            61, 63, 65, 66, 67 -> "🌧️"
+            71, 73, 75, 77, 85, 86 -> "🌨️"
+            95, 96, 99 -> "⛈️"
+            else -> "·"
+        }
+
         /** WMO weather codes, as Open-Meteo reports them. */
         fun describe(code: Int): String = when (code) {
             0 -> "Clear"

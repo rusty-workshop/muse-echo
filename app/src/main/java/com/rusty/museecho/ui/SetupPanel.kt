@@ -86,7 +86,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
     var updateMessage by remember { mutableStateOf<String?>(null) }
     val pendingUpdate by GadgetState.update.collectAsState()
     val photoCount = remember { actions.framePhotos().size }
-    val savedActions = remember { actions.quickActions().value }
+    val savedActions = remember { actions.allDayQuickActions() }
     val qaLabels = remember { androidx.compose.runtime.mutableStateListOf(*Array(4) { savedActions.getOrNull(it)?.label.orEmpty() }) }
     val qaPrompts = remember { androidx.compose.runtime.mutableStateListOf(*Array(4) { savedActions.getOrNull(it)?.prompt.orEmpty() }) }
     var qaMessage by remember { mutableStateOf<String?>(null) }

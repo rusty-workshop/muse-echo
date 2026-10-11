@@ -139,7 +139,10 @@ interface UiActions {
     suspend fun checkForUpdate(): String
     fun hubHost(): String
     fun setHubHost(host: String)
+    /** The buttons showing now (this part of the day's set, else the all-day ones). */
     fun quickActions(): kotlinx.coroutines.flow.StateFlow<List<com.rusty.museecho.integrations.QuickAction>>
+    /** The all-day buttons, as edited in Setup. */
+    fun allDayQuickActions(): List<com.rusty.museecho.integrations.QuickAction>
     fun runQuickAction(a: com.rusty.museecho.integrations.QuickAction)
     fun saveQuickActions(list: List<com.rusty.museecho.integrations.QuickAction>)
     fun framePhotos(): List<java.io.File>
@@ -161,6 +164,11 @@ interface UiActions {
     suspend fun syncPhotosNow(): Int
     /** Guest mode for [hours]; 0 turns it off. */
     fun setGuestMode(hours: Int)
+    suspend fun forecast(): com.rusty.museecho.integrations.Forecast?
+    /** Whether the laptop link is set up (for "Send to laptop"). */
+    fun canSendToLaptop(): Boolean
+    /** Puts [text] on the laptop's clipboard and shows a notification there. */
+    fun sendToLaptop(text: String, onResult: (Boolean) -> Unit)
     /** The touch pad: start a timer / set an alarm ("7:30 am", days MONDAY.. or none). Null, or what went wrong. */
     fun addTimer(ms: Long): String?
     fun addAlarm(time: String, days: List<String>): String?
@@ -241,6 +249,7 @@ fun MuseEchoApp(actions: UiActions) {
                     Screen.Idle -> IdlePages(actions)
                     is Screen.Image -> ImageScreen(s, actions::dismissScreen)
                     is Screen.Text -> TextScreen(s, actions::dismissScreen)
+                    is Screen.Reader -> ReaderScreen(s, actions)
                 }
             }
             // The status chips stop short of the icons on the right (their width varies), and the laptop
@@ -493,7 +502,8 @@ private fun AlertBanner() {
 private fun IdlePages(actions: UiActions) {
     // Guest mode leaves out the agenda page.
     val guest = rememberGuest()
-    val pages = if (guest) listOf(0, 2) else listOf(0, 1, 2)
+    // Page ids: 0 clock, 1 agenda, 3 forecast, 2 homelab.
+    val pages = if (guest) listOf(0, 3, 2) else listOf(0, 1, 3, 2)
     val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { pages.size })
     LaunchedEffect(pager.currentPage, guest) { GadgetState.setIdlePage(pages.getOrElse(pager.currentPage) { 0 }) }
     val talk by GadgetState.talk.collectAsState()
@@ -531,6 +541,7 @@ private fun IdlePages(actions: UiActions) {
         when (pages.getOrElse(page) { 0 }) {
             0 -> IdleFace(actions)
             1 -> AgendaPage(actions)
+            3 -> ForecastPage(actions)
             else -> HomelabPage(actions)
         }
     }
@@ -985,6 +996,58 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
                             contentScale = ContentScale.Crop)
                     }
                 }
+                // Once the reply is complete: open it full screen, or send it to the laptop.
+                val done = talk == Talk.REPLIED || talk == Talk.IDLE
+                if (done && reply.isNotBlank() && !compact) {
+                    var sent by remember(reply) { mutableStateOf<String?>(null) }
+                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (reply.length > READ_MORE_CHARS) {
+                            CaptionButton("📖 Read more") { GadgetState.show(Screen.Reader(source ?: name, reply)) }
+                        }
+                        if (actions.canSendToLaptop()) {
+                            CaptionButton(sent ?: "💻 Send to laptop") {
+                                sent = "Sending…"
+                                actions.sendToLaptop(com.rusty.museecho.gadget.Markdown.toAnnotated(reply).text) { ok ->
+                                    sent = if (ok) "✓ On the laptop's clipboard" else "✗ Laptop didn't answer"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val READ_MORE_CHARS = 220
+
+@Composable
+private fun CaptionButton(label: String, onClick: () -> Unit) {
+    Text(label, color = Palette.ink, fontSize = 14.sp,
+        modifier = Modifier.background(Palette.night.copy(alpha = 0.6f), RoundedCornerShape(50)).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp))
+}
+
+/** A long reply, full screen and bigger: scroll by touch; ✕ closes; can go to the laptop too. */
+@Composable
+private fun ReaderScreen(s: Screen.Reader, actions: UiActions) {
+    var sent by remember { mutableStateOf<String?>(null) }
+    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Palette.dusk, Palette.night)))) {
+        Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 110.dp, top = 56.dp).verticalScroll(rememberScrollState())) {
+            Text(s.title, color = Palette.amber, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+            Text(com.rusty.museecho.gadget.Markdown.toAnnotated(s.markdown), color = Palette.ink, fontSize = 25.sp, lineHeight = 36.sp)
+            Spacer(Modifier.height(48.dp))
+        }
+        Column(Modifier.align(Alignment.TopEnd).padding(top = 64.dp, end = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(56.dp).background(Palette.card, CircleShape).clickable(onClick = actions::dismissScreen),
+                contentAlignment = Alignment.Center) { Text("✕", color = Palette.ink, fontSize = 22.sp) }
+            if (actions.canSendToLaptop()) {
+                Box(Modifier.size(56.dp).background(Palette.card, CircleShape).clickable {
+                    sent = "…"
+                    actions.sendToLaptop(com.rusty.museecho.gadget.Markdown.toAnnotated(s.markdown).text) { ok -> sent = if (ok) "✓" else "✗" }
+                }, contentAlignment = Alignment.Center) { Text(sent ?: "💻", color = Palette.ink, fontSize = 22.sp) }
             }
         }
     }

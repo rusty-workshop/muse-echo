@@ -32,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -84,6 +85,8 @@ class GadgetService : Service() {
     private val weatherAlerts = com.rusty.museecho.integrations.WeatherAlerts()
     lateinit var quickActions: com.rusty.museecho.integrations.QuickActions
         private set
+    lateinit var quickSets: com.rusty.museecho.integrations.QuickActionTimes
+        private set
     private val weather = com.rusty.museecho.integrations.Weather()
     lateinit var hub: com.rusty.museecho.integrations.Hub
         private set
@@ -130,6 +133,7 @@ class GadgetService : Service() {
         assignments = com.rusty.museecho.integrations.Assignments(java.io.File(filesDir, "assignments.json"))
         frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
         quickActions = com.rusty.museecho.integrations.QuickActions(java.io.File(filesDir, "quick_actions.json"))
+        quickSets = com.rusty.museecho.integrations.QuickActionTimes(java.io.File(filesDir, "quick_action_sets.json"))
         val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance, frame, quickActions,
             showFrame = {
                 GadgetState.showFrame(true)
@@ -160,6 +164,7 @@ class GadgetService : Service() {
         scope.launch { watchServer() }
         scope.launch { watchMuseElsewhere() }
         scope.launch { watchLaptop() }
+        scope.launch { pickQuickActions() }
         chores = Chores(this, scope, hub, timers, frame, agenda, laptop, ::applySettings,
             say = { text -> if (Prefs(this).speakReplies) speaker.speak(text) },
             chime = ::softChime,
@@ -167,6 +172,7 @@ class GadgetService : Service() {
             isQuiet = ::isQuietNow,
         ).also {
             it.quickActionsNow = { quickActions.value.value }
+            it.quickSetsNow = { quickSets.value.value }
             it.start()
         }
         // The blob's little sounds: its reactions, and taps from the screen.
@@ -982,8 +988,48 @@ class GadgetService : Service() {
             }.take(4)
             if (list.isNotEmpty()) { quickActions.set(list); done += "quick_actions" }
         }
+        // Morning / afternoon / evening sets (an empty list hands that part of the day back to the all-day buttons).
+        (changes["quick_sets"] as? kotlinx.serialization.json.JsonObject)?.forEach { (period, v) ->
+            val arr = v as? kotlinx.serialization.json.JsonArray ?: return@forEach
+            val list = arr.mapNotNull { e ->
+                val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                fun s(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim().orEmpty()
+                if (s("label").isEmpty() || s("prompt").isEmpty()) null else com.rusty.museecho.integrations.QuickAction(s("label").take(18), s("prompt").take(500))
+            }
+            quickSets.set(period, list)
+            done += "quick_sets.$period"
+        }
         if (done.isNotEmpty()) GadgetState.log("settings from the laptop: ${done.joinToString()}")
         return done
+    }
+
+    /** Keeps the quick-action row on this part of the day's set (checked every minute and on edits). */
+    private suspend fun pickQuickActions() {
+        kotlinx.coroutines.flow.combine(quickActions.value, quickSets.value, kotlinx.coroutines.flow.flow {
+            while (true) {
+                emit(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+                delay(60_000)
+            }
+        }.distinctUntilChanged()) { all, sets, hour -> sets.forHour(hour).ifEmpty { all } }
+            .collect { GadgetState.setQuickNow(it) }
+    }
+
+    /** The forecast page's data (fetched while that page is on screen). */
+    suspend fun fetchForecast(): com.rusty.museecho.integrations.Forecast? {
+        val p = Prefs(this)
+        return weather.forecast(p.weatherLat, p.weatherLon)
+    }
+
+    /** A reply to the laptop: onto its clipboard, with a desktop notification saying so. */
+    suspend fun sendToLaptop(text: String): Boolean {
+        val ok = laptop.command("SET_CLIPBOARD", stringArg = text)
+        if (ok) {
+            val preview = text.replace(Regex("\\s+"), " ").take(120)
+            laptop.command("DISPLAY_MESSAGE", stringArg = "From ${GadgetState.museName.value} (copied to the clipboard): $preview" +
+                if (text.length > 120) "…" else "")
+            GadgetState.log("sent a reply to the laptop")
+        }
+        return ok
     }
 
     /** The touch pad: a timer for [ms]. Returns null, or what was wrong. */
