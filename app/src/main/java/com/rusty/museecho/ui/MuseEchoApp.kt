@@ -161,6 +161,9 @@ interface UiActions {
     suspend fun syncPhotosNow(): Int
     /** Guest mode for [hours]; 0 turns it off. */
     fun setGuestMode(hours: Int)
+    /** The touch pad: start a timer / set an alarm ("7:30 am", days MONDAY.. or none). Null, or what went wrong. */
+    fun addTimer(ms: Long): String?
+    fun addAlarm(time: String, days: List<String>): String?
     /** Music on the laptop: PLAY / PAUSE / NEXT / PREVIOUS / SET_VOLUME / MUTE / UNMUTE. */
     fun laptopMedia(command: String, intArg: Int = 0)
 }
@@ -295,8 +298,9 @@ fun MuseEchoApp(actions: UiActions) {
             Slideshow(actions)
             RingScreen(actions)
             val asleep by GadgetState.asleep.collectAsState()
+            val nightScene by GadgetState.nightScene.collectAsState()
             AnimatedVisibility(asleep, enter = fadeIn(tween(1200)), exit = fadeOut(tween(400))) {
-                Box(Modifier.fillMaxSize().background(Color.Black))
+                NightScreen(NightScene.of(nightScene), actions)
             }
             val panelIn = fadeIn(tween(250)) + androidx.compose.animation.slideInVertically(tween(300)) { it / 12 }
             val panelOut = fadeOut(tween(200)) + androidx.compose.animation.slideOutVertically(tween(250)) { it / 12 }
@@ -306,6 +310,8 @@ fun MuseEchoApp(actions: UiActions) {
             }
             AnimatedVisibility(showSetup, enter = panelIn, exit = panelOut) { SetupPanel(actions, onClose = { showSetup = false }) }
             QuickPanel(showQuick) { showQuick = false }
+            val padOpen by GadgetState.timePad.collectAsState()
+            TimePad(padOpen, actions) { GadgetState.setTimePad(false) }
             CleaningOverlay()
         }
     }
@@ -403,8 +409,13 @@ private fun IdleFace(actions: UiActions) {
             ClockFaceView(ClockFace.of(faceName), now, compact = hasNote, modifier = Modifier.pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
-                    val letGo = withTimeoutOrNull(CLEAN_HOLD_MS) { waitForUpOrCancellation(); true }
-                    if (letGo == null) GadgetState.startCleaning(CLEAN_SECONDS)
+                    // A quick tap opens the timer / alarm pad; holding 3 s starts cleaning mode.
+                    val letGo = withTimeoutOrNull(CLEAN_HOLD_MS) { if (waitForUpOrCancellation() != null) 1 else 0 }
+                    when (letGo) {
+                        null -> GadgetState.startCleaning(CLEAN_SECONDS)
+                        1 -> GadgetState.setTimePad(true)
+                        else -> {}
+                    }
                 }
             })
             if (faceName != ClockFace.CLASSIC.name) Spacer(Modifier.height(8.dp))

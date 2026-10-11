@@ -39,3 +39,21 @@ class FrameOrderTest {
         }
     }
 }
+
+class TimePadTest {
+    @Test
+    fun timerDigits() {
+        assertEquals(330_000L, timerDigitsToMs("530"))
+        assertEquals(3_600_000L, timerDigitsToMs("10000"))
+        assertEquals(0L, timerDigitsToMs(""))
+    }
+
+    @Test
+    fun alarmDigits() {
+        assertEquals(7 to 30, alarmDigitsToTime("730"))
+        assertEquals(12 to 15, alarmDigitsToTime("1215"))
+        org.junit.Assert.assertNull(alarmDigitsToTime("75"))
+        org.junit.Assert.assertNull(alarmDigitsToTime("1375"))
+        org.junit.Assert.assertNull(alarmDigitsToTime("1300"))
+    }
+}

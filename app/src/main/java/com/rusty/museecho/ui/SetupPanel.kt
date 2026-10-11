@@ -508,6 +508,14 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 backupMsg?.let { Body(it, Palette.muted) }
 
+                SectionTitle("Night screen")
+                val nightScene by GadgetState.nightScene.collectAsState()
+                ChoiceRow(options = NightScene.entries.map { it.name to it.label }, selected = nightScene) {
+                    GadgetState.setNightScene(it)
+                    prefs.nightScene = it
+                }
+                Body(NightScene.of(nightScene).blurb + " when the screen sleeps overnight. A tap wakes it.", Palette.muted)
+
                 SectionTitle("Quiet hours")
                 Body("No wake word, no speaking, a dim screen, soft timer beeps. Alarms still ring.", Palette.muted)
                 Row(verticalAlignment = Alignment.CenterVertically) {

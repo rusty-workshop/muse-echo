@@ -105,6 +105,14 @@ class Hub(private val context: Context) {
     /** Timers etc., for the watch. */
     suspend fun postState(state: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/state", state.toString()).first == 200 }
 
+    /** A picture of the screen for the settings page (null: the app isn't on screen). */
+    suspend fun postScreen(jpeg: ByteArray?): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = (jpeg ?: ByteArray(0)).toRequestBody("image/jpeg".toMediaType())
+            http.newCall(Request.Builder().url("http://$host/echo/screen").post(body).build()).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
     /** The Echo's settings, for echo-hub's /settings page on the laptop. */
     suspend fun postSettings(settings: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/settings_state", settings.toString()).first == 200 }
 

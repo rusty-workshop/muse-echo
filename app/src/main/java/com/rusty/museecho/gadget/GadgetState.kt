@@ -433,6 +433,26 @@ object GadgetState {
         _preview.value = BlobPreview(kind, value, System.currentTimeMillis() + ms)
     }
 
+    /** The touch timer / alarm pad is open (tap the clock). */
+    private val _timePad = MutableStateFlow(false)
+    val timePad: StateFlow<Boolean> = _timePad.asStateFlow()
+
+    fun setTimePad(open: Boolean) {
+        _timePad.value = open
+    }
+
+    /** What the screen shows when it sleeps overnight (a NightScene name). */
+    private val _nightScene = MutableStateFlow("BLACK")
+    val nightScene: StateFlow<String> = _nightScene.asStateFlow()
+
+    fun setNightScene(name: String) {
+        _nightScene.value = name
+    }
+
+    /** The laptop settings page wants live pictures of the screen until this time. */
+    @Volatile
+    var screenWantedUntil = 0L
+
     /** Screen-cleaning mode: touches are ignored until this time. */
     private val _cleaningUntil = MutableStateFlow(0L)
     val cleaningUntil: StateFlow<Long> = _cleaningUntil.asStateFlow()

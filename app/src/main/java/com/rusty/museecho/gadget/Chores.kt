@@ -120,6 +120,12 @@ class Chores(
                         GadgetState.say("⏱ ${made.label}, from your watch", 8)
                         postState()
                     }
+                    "screen" -> {
+                        // The laptop settings page is watching: send a picture every 2 s for a little while.
+                        val wasIdle = GadgetState.screenWantedUntil < System.currentTimeMillis()
+                        GadgetState.screenWantedUntil = System.currentTimeMillis() + 10_000
+                        if (wasIdle) scope.launch { streamScreen() }
+                    }
                     "blob" -> {
                         val kind = (item["kind"] as? JsonPrimitive)?.contentOrNull ?: continue
                         val value = (item["value"] as? JsonPrimitive)?.contentOrNull ?: continue
@@ -376,6 +382,7 @@ class Chores(
         hub.postSettings(buildJsonObject {
             put("clock_face", p.clockFace)
             put("frame_clock", p.frameClock)
+            put("night_scene", p.nightScene)
             put("frame_delay_min", p.frameDelayMin)
             put("blob_energy", p.blobEnergy)
             put("blob_sounds", p.blobSounds)
@@ -395,6 +402,7 @@ class Chores(
                 put("clock_face", buildJsonArray { com.rusty.museecho.ui.ClockFace.entries.forEach { add(JsonPrimitive(it.name)) } })
                 put("frame_clock", buildJsonArray { com.rusty.museecho.ui.FrameClock.entries.forEach { add(JsonPrimitive(it.name)) } })
                 put("wake_sensitivity", buildJsonArray { WakeWord.Sensitivity.entries.forEach { add(JsonPrimitive(it.name)) } })
+                put("night_scene", buildJsonArray { com.rusty.museecho.ui.NightScene.entries.forEach { add(JsonPrimitive(it.name)) } })
             })
             // Everything the blob playground can show.
             put("blob", buildJsonObject {
@@ -413,6 +421,14 @@ class Chores(
     }
 
     var quickActionsNow: () -> List<com.rusty.museecho.integrations.QuickAction> = { emptyList() }
+
+    private suspend fun streamScreen() {
+        while (System.currentTimeMillis() < GadgetState.screenWantedUntil) {
+            val jpeg = MainActivity.capture()
+            hub.postScreen(jpeg)
+            delay(2_000)
+        }
+    }
 
     /** The blob playground on the settings page: anything the blob can do, for about five seconds. */
     private fun playground(kind: String, value: String) {

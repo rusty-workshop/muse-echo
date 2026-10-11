@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        current = java.lang.ref.WeakReference(this)
         // Remembered across a crash: if the process dies while this is on screen, the service reopens it.
         getSharedPreferences("museecho", MODE_PRIVATE).edit().putBoolean("ui_in_front", true).commit()
     }
@@ -160,7 +161,8 @@ class MainActivity : ComponentActivity() {
                 if (asleep != GadgetState.asleep.value) GadgetState.setAsleep(asleep)
                 // Overrides win; otherwise the auto-brightness ticker below follows the room.
                 brightnessOverride = when {
-                    asleep -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF
+                    // Asleep: backlight off, or the faintest glow for the night screensaver.
+                    asleep -> if (GadgetState.nightScene.value == "BLACK") WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF else 0.02f
                     dim != null -> dim
                     quiet && calm -> 0.05f
                     else -> null
@@ -362,6 +364,11 @@ class MainActivity : ComponentActivity() {
             GadgetService.instance?.laptopMedia(command, intArg)
         }
 
+        override fun addTimer(ms: Long): String? = GadgetService.instance?.addTimerByTouch(ms) ?: "the service isn't running"
+
+        override fun addAlarm(time: String, days: List<String>): String? =
+            GadgetService.instance?.addAlarmByTouch(time, days) ?: "the service isn't running"
+
         override fun setGuestMode(hours: Int) {
             GadgetService.instance?.setGuestMode(hours)
         }
@@ -442,5 +449,29 @@ class MainActivity : ComponentActivity() {
 
         @Volatile
         var visible = false
+
+        @Volatile
+        private var current: java.lang.ref.WeakReference<MainActivity>? = null
+
+        /** A JPEG of what's on screen right now (for the laptop's live view), or null if the app isn't showing. */
+        suspend fun capture(): ByteArray? {
+            val activity = current?.get()?.takeIf { visible } ?: return null
+            return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                activity.runOnUiThread {
+                    val view = activity.window.decorView
+                    if (view.width <= 0 || view.height <= 0) { cont.resume(null) {}; return@runOnUiThread }
+                    val bmp = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+                    android.view.PixelCopy.request(activity.window, bmp, { result ->
+                        val jpeg = if (result == android.view.PixelCopy.SUCCESS) {
+                            java.io.ByteArrayOutputStream().also { out ->
+                                android.graphics.Bitmap.createScaledBitmap(bmp, view.width * 2 / 3, view.height * 2 / 3, true)
+                                    .compress(android.graphics.Bitmap.CompressFormat.JPEG, 72, out)
+                            }.toByteArray()
+                        } else null
+                        cont.resume(jpeg) {}
+                    }, android.os.Handler(android.os.Looper.getMainLooper()))
+                }
+            }
+        }
     }
 }

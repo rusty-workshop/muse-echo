@@ -121,6 +121,7 @@ class GadgetService : Service() {
         GadgetState.setBlobEnergy(Prefs(this).blobEnergy)
         GadgetState.setClockFace(Prefs(this).clockFace)
         GadgetState.setFrameClock(Prefs(this).frameClock)
+        GadgetState.setNightScene(Prefs(this).nightScene)
         GadgetState.setDismissedAlerts(Prefs(this).dismissedAlerts)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
@@ -958,6 +959,7 @@ class GadgetService : Service() {
         fun num(k: String) = (changes[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()
         str("clock_face")?.let { v -> p.clockFace = v; GadgetState.setClockFace(v); done += "clock_face" }
         str("frame_clock")?.let { v -> p.frameClock = v; GadgetState.setFrameClock(v); done += "frame_clock" }
+        str("night_scene")?.let { v -> p.nightScene = v; GadgetState.setNightScene(v); done += "night_scene" }
         num("frame_delay_min")?.let { v -> p.frameDelayMin = v.toInt().coerceIn(0, 120); done += "frame_delay_min" }
         num("blob_energy")?.let { v -> p.blobEnergy = v.toFloat().coerceIn(0f, 1f); GadgetState.setBlobEnergy(p.blobEnergy); done += "blob_energy" }
         bool("blob_sounds")?.let { v -> p.blobSounds = v; done += "blob_sounds" }
@@ -983,6 +985,22 @@ class GadgetService : Service() {
         if (done.isNotEmpty()) GadgetState.log("settings from the laptop: ${done.joinToString()}")
         return done
     }
+
+    /** The touch pad: a timer for [ms]. Returns null, or what was wrong. */
+    fun addTimerByTouch(ms: Long): String? = runCatching {
+        val t = timers.addTimer(ms, "")
+        GadgetState.react(Reaction.HOP)
+        GadgetState.say("⏱ ${t.label} started", 4)
+        null
+    }.getOrElse { it.message ?: "couldn't set that timer" }
+
+    /** The touch pad: an alarm at [time] ("7:30 am") on [days] (none = once). */
+    fun addAlarmByTouch(time: String, days: List<String>): String? = runCatching {
+        val a = timers.addAlarm(time, "Alarm", days)
+        GadgetState.react(Reaction.HOP)
+        GadgetState.say("⏰ Alarm set for ${com.rusty.museecho.integrations.Timers.clock(a.dueAtMs)}", 5)
+        null
+    }.getOrElse { it.message ?: "couldn't set that alarm" }
 
     /** Music on the laptop from its chip: a command, then a fresh status for the chip. */
     fun laptopMedia(command: String, intArg: Int = 0) {
@@ -1531,6 +1549,10 @@ class Prefs(context: Context) {
     var blobSounds: Boolean
         get() = prefs.getBoolean("blob_sounds", true)
         set(v) = prefs.edit().putBoolean("blob_sounds", v).apply()
+
+    var nightScene: String
+        get() = prefs.getString("night_scene", "BLACK") ?: "BLACK"
+        set(v) = prefs.edit().putString("night_scene", v).apply()
 
     var frameClock: String
         get() = prefs.getString("frame_clock", "CORNER") ?: "CORNER"
