@@ -366,6 +366,16 @@ class MainActivity : ComponentActivity() {
 
         override suspend fun forecast() = GadgetService.instance?.fetchForecast()
 
+        override fun tvAvailable() = GadgetService.instance?.tvAvailable() == true
+        override suspend fun tvKey(key: String) = GadgetService.instance?.tvKey(key) ?: false
+        override suspend fun tvApps() = GadgetService.instance?.tvApps().orEmpty()
+        override suspend fun tvLaunch(id: String) = GadgetService.instance?.tvLaunch(id) ?: false
+        override fun laptopAvailable() = GadgetService.instance?.laptop?.configured == true
+        override suspend fun laptopShortcuts() = GadgetService.instance?.laptopShortcuts().orEmpty()
+        override suspend fun laptopShortcut(key: String) = GadgetService.instance?.laptopShortcut(key) ?: "✗ not running"
+        override suspend fun restartContainer(name: String) =
+            GadgetService.instance?.hub?.restartContainer(name) ?: (false to "the service isn't running")
+
         override fun canSendToLaptop() = GadgetService.instance?.laptop?.configured == true
 
         override fun sendToLaptop(text: String, onResult: (Boolean) -> Unit) {

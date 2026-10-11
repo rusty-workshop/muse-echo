@@ -450,6 +450,20 @@ object GadgetState {
         _forecast.value = f
     }
 
+    /** Whole-app colour theme and background (AppTheme / AppBackground names). */
+    private val _theme = MutableStateFlow("MIDNIGHT")
+    val theme: StateFlow<String> = _theme.asStateFlow()
+    private val _background = MutableStateFlow("PLAIN")
+    val background: StateFlow<String> = _background.asStateFlow()
+
+    fun setTheme(name: String) {
+        _theme.value = name
+    }
+
+    fun setBackground(name: String) {
+        _background.value = name
+    }
+
     /** The touch timer / alarm pad is open (tap the clock). */
     private val _timePad = MutableStateFlow(false)
     val timePad: StateFlow<Boolean> = _timePad.asStateFlow()

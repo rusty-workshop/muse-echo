@@ -87,6 +87,8 @@ class GadgetService : Service() {
         private set
     lateinit var quickSets: com.rusty.museecho.integrations.QuickActionTimes
         private set
+    lateinit var routines: com.rusty.museecho.integrations.Routines
+        private set
     private val weather = com.rusty.museecho.integrations.Weather()
     lateinit var hub: com.rusty.museecho.integrations.Hub
         private set
@@ -125,6 +127,8 @@ class GadgetService : Service() {
         GadgetState.setClockFace(Prefs(this).clockFace)
         GadgetState.setFrameClock(Prefs(this).frameClock)
         GadgetState.setNightScene(Prefs(this).nightScene)
+        GadgetState.setTheme(Prefs(this).theme)
+        GadgetState.setBackground(Prefs(this).background)
         GadgetState.setDismissedAlerts(Prefs(this).dismissedAlerts)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
@@ -134,6 +138,7 @@ class GadgetService : Service() {
         frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
         quickActions = com.rusty.museecho.integrations.QuickActions(java.io.File(filesDir, "quick_actions.json"))
         quickSets = com.rusty.museecho.integrations.QuickActionTimes(java.io.File(filesDir, "quick_action_sets.json"))
+        routines = com.rusty.museecho.integrations.Routines(java.io.File(filesDir, "routines.json"))
         val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance, frame, quickActions,
             showFrame = {
                 GadgetState.showFrame(true)
@@ -165,6 +170,8 @@ class GadgetService : Service() {
         scope.launch { watchMuseElsewhere() }
         scope.launch { watchLaptop() }
         scope.launch { pickQuickActions() }
+        scope.launch { runRoutines() }
+        scope.launch { wellnessNudges() }
         chores = Chores(this, scope, hub, timers, frame, agenda, laptop, ::applySettings,
             say = { text -> if (Prefs(this).speakReplies) speaker.speak(text) },
             chime = ::softChime,
@@ -173,6 +180,7 @@ class GadgetService : Service() {
         ).also {
             it.quickActionsNow = { quickActions.value.value }
             it.quickSetsNow = { quickSets.value.value }
+            it.routinesNow = { routines.value.value.items }
             it.start()
         }
         // The blob's little sounds: its reactions, and taps from the screen.
@@ -966,6 +974,27 @@ class GadgetService : Service() {
         str("clock_face")?.let { v -> p.clockFace = v; GadgetState.setClockFace(v); done += "clock_face" }
         str("frame_clock")?.let { v -> p.frameClock = v; GadgetState.setFrameClock(v); done += "frame_clock" }
         str("night_scene")?.let { v -> p.nightScene = v; GadgetState.setNightScene(v); done += "night_scene" }
+        str("theme")?.let { v -> p.theme = v; GadgetState.setTheme(v); done += "theme" }
+        str("background")?.let { v -> p.background = v; GadgetState.setBackground(v); done += "background" }
+        bool("wellness_water")?.let { v -> p.wellnessWater = v; done += "wellness_water" }
+        bool("wellness_stretch")?.let { v -> p.wellnessStretch = v; done += "wellness_stretch" }
+        bool("wellness_eyes")?.let { v -> p.wellnessEyes = v; done += "wellness_eyes" }
+        num("wellness_start")?.let { v -> p.wellnessStart = v.toInt().coerceIn(0, 23); done += "wellness_start" }
+        num("wellness_end")?.let { v -> p.wellnessEnd = v.toInt().coerceIn(1, 24); done += "wellness_end" }
+        (changes["routines"] as? kotlinx.serialization.json.JsonArray)?.let { arr ->
+            val list = arr.mapNotNull { e ->
+                val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                fun s(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim().orEmpty()
+                com.rusty.museecho.integrations.Routine(
+                    id = s("id").ifBlank { java.util.UUID.randomUUID().toString().take(8) },
+                    time = s("time"), label = s("label"), prompt = s("prompt"),
+                    days = (o["days"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.orEmpty(),
+                    enabled = (o["enabled"] as? kotlinx.serialization.json.JsonPrimitive)?.content != "false",
+                )
+            }
+            routines.set(list)
+            done += "routines"
+        }
         num("frame_delay_min")?.let { v -> p.frameDelayMin = v.toInt().coerceIn(0, 120); done += "frame_delay_min" }
         num("blob_energy")?.let { v -> p.blobEnergy = v.toFloat().coerceIn(0f, 1f); GadgetState.setBlobEnergy(p.blobEnergy); done += "blob_energy" }
         bool("blob_sounds")?.let { v -> p.blobSounds = v; done += "blob_sounds" }
@@ -1030,6 +1059,84 @@ class GadgetService : Service() {
             GadgetState.log("sent a reply to the laptop")
         }
         return ok
+    }
+
+    /** Routines: each one asks Muse its request at its time (once per day per routine). */
+    private suspend fun runRoutines() {
+        val ran = HashSet<String>()
+        while (true) {
+            val now = java.time.LocalDateTime.now()
+            val hhmm = "%02d:%02d".format(now.hour, now.minute)
+            for (r in routines.value.value.items) {
+                if (!r.enabled || r.time != hhmm) continue
+                if (r.days.isNotEmpty() && now.dayOfWeek.name !in r.days) continue
+                if (!ran.add("${now.toLocalDate()} ${r.id} $hhmm")) continue
+                GadgetState.log("routine: ${r.label}")
+                bringToFront(force = false)
+                talk(r.prompt, null, label = "⏰ ${r.label}")
+            }
+            delay(20_000)
+        }
+    }
+
+    /**
+     * Wellness nudges in the chosen hours: water hourly, a stretch every 50 minutes, eyes
+     * every 20 (look 20 feet away for 20 seconds). A bubble and a little move; never spoken,
+     * and skipped while something else is going on.
+     */
+    private suspend fun wellnessNudges() {
+        var lastWater = System.currentTimeMillis()
+        var lastStretch = System.currentTimeMillis()
+        var lastEyes = System.currentTimeMillis()
+        while (true) {
+            delay(60_000)
+            val p = Prefs(this)
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val now = System.currentTimeMillis()
+            val inHours = hour >= p.wellnessStart && hour < p.wellnessEnd
+            val busy = GadgetState.talk.value != Talk.IDLE || GadgetState.speaking.value || GadgetState.ringing.value ||
+                GadgetState.screen.value !is Screen.Idle || isQuietNow()
+            if (!inHours || busy) {
+                // Restart the clocks so the first nudge comes a full interval into the window.
+                if (!inHours) { lastWater = now; lastStretch = now; lastEyes = now }
+                continue
+            }
+            when {
+                p.wellnessWater && now - lastWater >= 60 * 60_000L -> {
+                    lastWater = now
+                    GadgetState.react(Reaction.NUDGE)
+                    GadgetState.hold(HeldItem.COFFEE, "", 1)
+                    GadgetState.say("💧 Time for some water!", 30)
+                }
+                p.wellnessStretch && now - lastStretch >= 50 * 60_000L -> {
+                    lastStretch = now
+                    GadgetState.react(Reaction.STRETCH)
+                    GadgetState.say("🙆 Stand up and stretch for a minute!", 30)
+                }
+                p.wellnessEyes && now - lastEyes >= 20 * 60_000L -> {
+                    lastEyes = now
+                    GadgetState.react(Reaction.PEEK)
+                    GadgetState.say("👀 Rest your eyes: look at something far away for 20 seconds.", 25)
+                }
+            }
+        }
+    }
+
+    // -- Remote pages ---------------------------------------------------------------------
+
+    fun tvAvailable() = roku.savedIp != null
+
+    suspend fun tvKey(key: String): Boolean = roku.ip()?.let { roku.keypress(it, key) } ?: false
+
+    suspend fun tvApps(): List<Pair<String, String>> = roku.ip()?.let { ip -> roku.apps(ip).map { it.id to it.name } }.orEmpty()
+
+    suspend fun tvLaunch(id: String): Boolean = roku.ip()?.let { roku.launch(it, id) } ?: false
+
+    suspend fun laptopShortcuts(): List<Pair<String, String>> = laptop.shortcuts().map { it.key to it.label }
+
+    suspend fun laptopShortcut(key: String): String {
+        val (ok, msg) = laptop.run(key)
+        return if (ok) "✓ ${msg.ifBlank { "done" }}".take(80) else "✗ ${msg.take(80)}"
     }
 
     /** The touch pad: a timer for [ms]. Returns null, or what was wrong. */
@@ -1595,6 +1702,34 @@ class Prefs(context: Context) {
     var blobSounds: Boolean
         get() = prefs.getBoolean("blob_sounds", true)
         set(v) = prefs.edit().putBoolean("blob_sounds", v).apply()
+
+    var theme: String
+        get() = prefs.getString("theme", "MIDNIGHT") ?: "MIDNIGHT"
+        set(v) = prefs.edit().putString("theme", v).apply()
+
+    var background: String
+        get() = prefs.getString("background", "PLAIN") ?: "PLAIN"
+        set(v) = prefs.edit().putString("background", v).apply()
+
+    var wellnessWater: Boolean
+        get() = prefs.getBoolean("wellness_water", false)
+        set(v) = prefs.edit().putBoolean("wellness_water", v).apply()
+
+    var wellnessStretch: Boolean
+        get() = prefs.getBoolean("wellness_stretch", false)
+        set(v) = prefs.edit().putBoolean("wellness_stretch", v).apply()
+
+    var wellnessEyes: Boolean
+        get() = prefs.getBoolean("wellness_eyes", false)
+        set(v) = prefs.edit().putBoolean("wellness_eyes", v).apply()
+
+    var wellnessStart: Int
+        get() = prefs.getInt("wellness_start", 9)
+        set(v) = prefs.edit().putInt("wellness_start", v).apply()
+
+    var wellnessEnd: Int
+        get() = prefs.getInt("wellness_end", 21)
+        set(v) = prefs.edit().putInt("wellness_end", v).apply()
 
     var nightScene: String
         get() = prefs.getString("night_scene", "BLACK") ?: "BLACK"

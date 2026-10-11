@@ -55,8 +55,13 @@ data class Homelab(
     val battery: HomelabBattery? = null,
     val containers: List<HomelabContainer> = emptyList(),
     val backup: HomelabBackup = HomelabBackup(),
+    val speed: List<SpeedTest> = emptyList(),
     val uptime_s: Long? = null,
 )
+
+/** One of the Latitude's internet speed tests (it runs them a few times a day). */
+@Serializable
+data class SpeedTest(val t: Long, val down: Double? = null, val up: Double? = null, val ping: Double? = null)
 
 /** A photo in the Latitude's Syncthing "Echo Photos" folder. */
 @Serializable
@@ -111,6 +116,14 @@ class Hub(private val context: Context) {
             val body = (jpeg ?: ByteArray(0)).toRequestBody("image/jpeg".toMediaType())
             http.newCall(Request.Builder().url("http://$host/echo/screen").post(body).build()).execute().use { it.isSuccessful }
         }.getOrDefault(false)
+    }
+
+    /** Restart a container on the Latitude (press-and-hold on the homelab page). Returns (ok, message). */
+    suspend fun restartContainer(name: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val (code, body) = post("/homelab/restart", """{"name":${kotlinx.serialization.json.JsonPrimitive(name)}}""",
+            mapOf("X-Requested-With" to "echo-settings"))
+        val msg = body?.let { runCatching { ((json.parseToJsonElement(it) as JsonObject)["message"] as? kotlinx.serialization.json.JsonPrimitive)?.content }.getOrNull() }
+        (code == 200) to (msg ?: if (code == 0) "couldn't reach the Latitude" else "HTTP $code")
     }
 
     /** The Echo's settings, for echo-hub's /settings page on the laptop. */

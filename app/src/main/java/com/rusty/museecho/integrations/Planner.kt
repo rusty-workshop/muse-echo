@@ -52,6 +52,23 @@ class Reminders(file: File) : JsonFileState<ReminderDay>(file, ReminderDay.seria
     fun clear() = update { ReminderDay() }
 }
 
+/** A scheduled request: at [time] (HH:mm, 24 h) on [days] (MONDAY..; empty = every day), ask Muse [prompt]. */
+@Serializable
+data class Routine(val id: String, val time: String, val days: List<String> = emptyList(), val label: String,
+                   val prompt: String, val enabled: Boolean = true)
+
+@Serializable
+data class RoutineList(val items: List<Routine> = emptyList())
+
+class Routines(file: File) : JsonFileState<RoutineList>(file, RoutineList.serializer(), RoutineList()) {
+    fun set(items: List<Routine>) = update {
+        RoutineList(items.filter { r ->
+            r.prompt.isNotBlank() && runCatching { java.time.LocalTime.parse(r.time) }.isSuccess
+        }.map { it.copy(label = it.label.trim().take(30).ifBlank { "Routine" }, prompt = it.prompt.trim().take(500),
+            days = it.days.filter { d -> runCatching { java.time.DayOfWeek.valueOf(d) }.isSuccess }) }.take(20))
+    }
+}
+
 /** Schoolwork with a due date (from Muse, off the school calendar). [due] is yyyy-MM-dd. */
 @Serializable
 data class Assignment(val title: String, val due: String, val time: String = "", val course: String = "")

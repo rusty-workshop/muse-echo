@@ -16,6 +16,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -165,6 +168,14 @@ interface UiActions {
     /** Guest mode for [hours]; 0 turns it off. */
     fun setGuestMode(hours: Int)
     suspend fun forecast(): com.rusty.museecho.integrations.Forecast?
+    fun tvAvailable(): Boolean
+    suspend fun tvKey(key: String): Boolean
+    suspend fun tvApps(): List<Pair<String, String>>
+    suspend fun tvLaunch(id: String): Boolean
+    fun laptopAvailable(): Boolean
+    suspend fun laptopShortcuts(): List<Pair<String, String>>
+    suspend fun laptopShortcut(key: String): String
+    suspend fun restartContainer(name: String): Pair<Boolean, String>
     /** Whether the laptop link is set up (for "Send to laptop"). */
     fun canSendToLaptop(): Boolean
     /** Puts [text] on the laptop's clipboard and shows a notification there. */
@@ -191,20 +202,12 @@ internal fun rememberGuest(): Boolean {
     return on
 }
 
-internal object Palette {
-    val night = Color(0xFF0E0B14)
-    val dusk = Color(0xFF1B1526)
-    val ink = Color(0xFFF3EEF8)
-    val muted = Color(0xFF9C93AB)
-    val violet = Color(0xFF8B6CFF)
-    val coral = Color(0xFFFF7A8A)
-    val teal = Color(0xFF45D3C7)
-    val amber = Color(0xFFFFC266)
-    val card = Color(0xFF231C30)
-}
 
 @Composable
 fun MuseEchoApp(actions: UiActions) {
+    // The chosen colour theme, applied before anything draws.
+    val themeName by GadgetState.theme.collectAsState()
+    androidx.compose.runtime.SideEffect { Palette.theme = AppTheme.of(themeName).colors }
     MaterialTheme(colorScheme = darkColorScheme(primary = Palette.violet, background = Palette.night, surface = Palette.card)) {
         val screen by GadgetState.screen.collectAsState()
         var showSetup by remember { mutableStateOf(false) }
@@ -236,6 +239,10 @@ fun MuseEchoApp(actions: UiActions) {
                 }
             },
         ) {
+            val bgName by GadgetState.background.collectAsState()
+            androidx.compose.animation.Crossfade(targetState = AppBackground.of(bgName), animationSpec = tween(800), label = "bg") { bg ->
+                AppBackgroundView(bg, actions)
+            }
             // Pictures and cards fade and grow in; the clock eases back afterwards.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen,
@@ -502,8 +509,16 @@ private fun AlertBanner() {
 private fun IdlePages(actions: UiActions) {
     // Guest mode leaves out the agenda page.
     val guest = rememberGuest()
-    // Page ids: 0 clock, 1 agenda, 3 forecast, 2 homelab.
-    val pages = if (guest) listOf(0, 3, 2) else listOf(0, 1, 3, 2)
+    // Page ids: 0 clock, 1 agenda, 3 forecast, 4 TV remote, 5 laptop, 2 homelab (TV / laptop only when set up;
+    // guest mode leaves out the agenda and the laptop).
+    val pages = buildList {
+        add(0)
+        if (!guest) add(1)
+        add(3)
+        if (actions.tvAvailable()) add(4)
+        if (!guest && actions.laptopAvailable()) add(5)
+        add(2)
+    }
     val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { pages.size })
     LaunchedEffect(pager.currentPage, guest) { GadgetState.setIdlePage(pages.getOrElse(pager.currentPage) { 0 }) }
     val talk by GadgetState.talk.collectAsState()
@@ -542,6 +557,8 @@ private fun IdlePages(actions: UiActions) {
             0 -> IdleFace(actions)
             1 -> AgendaPage(actions)
             3 -> ForecastPage(actions)
+            4 -> TvRemotePage(actions)
+            5 -> LaptopPage(actions)
             else -> HomelabPage(actions)
         }
     }
@@ -639,6 +656,26 @@ internal fun dueColor(days: Int?): Color = when {
     else -> Palette.teal
 }
 
+/** Download (and upload) speed from the Latitude's tests over the last two weeks. */
+@Composable
+private fun SpeedChart(tests: List<com.rusty.museecho.integrations.SpeedTest>) {
+    val last = tests.last()
+    Text("Internet  ↓ ${last.down?.toInt() ?: "?"} / ↑ ${last.up?.toInt() ?: "?"} Mbps", color = Palette.ink, fontSize = 14.sp,
+        modifier = Modifier.padding(top = 8.dp))
+    Canvas(Modifier.fillMaxWidth().height(46.dp).padding(top = 4.dp)) {
+        val max = (tests.maxOf { it.down ?: 0.0 } * 1.1).coerceAtLeast(1.0)
+        fun line(pick: (com.rusty.museecho.integrations.SpeedTest) -> Double?, color: Color) {
+            val pts = tests.mapIndexedNotNull { i, t -> pick(t)?.let { v -> Offset(size.width * i / (tests.size - 1), size.height * (1f - (v / max).toFloat())) } }
+            if (pts.size < 2) return
+            val path = androidx.compose.ui.graphics.Path().apply { moveTo(pts[0].x, pts[0].y); pts.drop(1).forEach { lineTo(it.x, it.y) } }
+            drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        }
+        drawLine(Palette.card, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+        line({ it.up }, Palette.violet.copy(alpha = 0.7f))
+        line({ it.down }, Palette.teal)
+    }
+}
+
 /** "2026-10-11" as "Tomorrow" / "Monday, Oct 12"; other text as it is. */
 private fun friendlyDate(date: String): String {
     val d = runCatching { java.time.LocalDate.parse(date.trim().take(10)) }.getOrNull() ?: return date
@@ -659,6 +696,29 @@ private const val CAPTION_ASIDE_MS = 8_000L
 @Composable
 private fun HomelabPage(actions: UiActions) {
     val lab by GadgetState.homelab.collectAsState()
+    var confirmRestart by remember { mutableStateOf<String?>(null) }
+    var restartNote by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    // "Restart <container>?" — only after a press and hold, and only once confirmed.
+    confirmRestart?.let { name ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmRestart = null },
+            title = { Text("Restart $name?") },
+            text = { Text("Restarts the container on the Latitude (it's back in a few seconds).") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmRestart = null
+                    restartNote = "Restarting $name…"
+                    scope.launch {
+                        val (ok, msg) = actions.restartContainer(name)
+                        restartNote = if (ok) "✓ $name restarted" else "✗ $msg"
+                        actions.homelab()?.let { GadgetState.setHomelab(it) }
+                    }
+                }) { Text("Restart") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmRestart = null }) { Text("Cancel") } },
+        )
+    }
     var failed by remember { mutableStateOf(false) }
     // Fresh while the page is on screen.
     LaunchedEffect(Unit) {
@@ -727,6 +787,7 @@ private fun HomelabPage(actions: UiActions) {
                 val load = h.load.firstOrNull() ?: 0.0
                 meter("Load", 100.0 * load / h.cpus.coerceAtLeast(1), "%.2f".format(load))
                 h.battery?.let { b -> meter("Battery", b.percent.toDouble().let { 100 - it }, "${b.percent}%${if (b.on_ac) " ⚡" else " (battery!)"}") }
+                if (h.speed.size >= 2) SpeedChart(h.speed)
                 val backupLine = h.backup.at?.let { at ->
                     val then = runCatching { java.time.OffsetDateTime.parse(at).toInstant().toEpochMilli() }.getOrNull()
                     val ago = then?.let { ((System.currentTimeMillis() - it) / 3_600_000).toInt() }
@@ -735,12 +796,15 @@ private fun HomelabPage(actions: UiActions) {
                 Text("Backup  $backupLine${if (h.backup.running) " (running)" else ""}",
                     color = if (h.backup.ok) Palette.ink else Palette.coral, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp))
                 h.uptime_s?.let { Text("Up ${it / 86_400}d ${(it % 86_400) / 3600}h", color = Palette.muted, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp)) }
-                Text("Containers", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+
+                Text("Containers  (press and hold to restart)", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                restartNote?.let { Text(it, color = Palette.teal, fontSize = 13.sp) }
                 androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     h.containers.forEach { c ->
                         val bad = c.state != "running" || c.health == "unhealthy"
                         Text(c.name, color = Palette.night, fontSize = 12.sp,
                             modifier = Modifier.background(if (bad) Palette.coral else Palette.teal.copy(alpha = 0.85f), RoundedCornerShape(50))
+                                .pointerInput(c.name) { detectTapGestures(onLongPress = { confirmRestart = c.name }) }
                                 .padding(horizontal = 9.dp, vertical = 3.dp))
                     }
                 }

@@ -383,6 +383,21 @@ class Chores(
             put("clock_face", p.clockFace)
             put("frame_clock", p.frameClock)
             put("night_scene", p.nightScene)
+            put("theme", p.theme)
+            put("background", p.background)
+            put("wellness_water", p.wellnessWater)
+            put("wellness_stretch", p.wellnessStretch)
+            put("wellness_eyes", p.wellnessEyes)
+            put("wellness_start", p.wellnessStart)
+            put("wellness_end", p.wellnessEnd)
+            put("routines", buildJsonArray {
+                routinesNow().forEach { r ->
+                    add(buildJsonObject {
+                        put("id", r.id); put("time", r.time); put("label", r.label); put("prompt", r.prompt); put("enabled", r.enabled)
+                        put("days", buildJsonArray { r.days.forEach { add(JsonPrimitive(it)) } })
+                    })
+                }
+            })
             put("frame_delay_min", p.frameDelayMin)
             put("blob_energy", p.blobEnergy)
             put("blob_sounds", p.blobSounds)
@@ -409,6 +424,8 @@ class Chores(
                 put("frame_clock", buildJsonArray { com.rusty.museecho.ui.FrameClock.entries.forEach { add(JsonPrimitive(it.name)) } })
                 put("wake_sensitivity", buildJsonArray { WakeWord.Sensitivity.entries.forEach { add(JsonPrimitive(it.name)) } })
                 put("night_scene", buildJsonArray { com.rusty.museecho.ui.NightScene.entries.forEach { add(JsonPrimitive(it.name)) } })
+                put("theme", buildJsonArray { com.rusty.museecho.ui.AppTheme.entries.forEach { add(JsonPrimitive(it.name)) } })
+                put("background", buildJsonArray { com.rusty.museecho.ui.AppBackground.entries.forEach { add(JsonPrimitive(it.name)) } })
             })
             // Everything the blob playground can show.
             put("blob", buildJsonObject {
@@ -427,6 +444,7 @@ class Chores(
     }
 
     var quickActionsNow: () -> List<com.rusty.museecho.integrations.QuickAction> = { emptyList() }
+    var routinesNow: () -> List<com.rusty.museecho.integrations.Routine> = { emptyList() }
     var quickSetsNow: () -> com.rusty.museecho.integrations.QuickActionSets = { com.rusty.museecho.integrations.QuickActionSets() }
 
     private suspend fun streamScreen() {

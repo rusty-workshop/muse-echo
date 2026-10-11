@@ -508,6 +508,37 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 backupMsg?.let { Body(it, Palette.muted) }
 
+                SectionTitle("Theme")
+                val themeName by GadgetState.theme.collectAsState()
+                ChoiceRow(options = AppTheme.entries.map { it.name to it.label }, selected = themeName) {
+                    GadgetState.setTheme(it)
+                    prefs.theme = it
+                }
+                SectionTitle("Background")
+                val bgName by GadgetState.background.collectAsState()
+                ChoiceRow(options = AppBackground.entries.map { it.name to it.label }, selected = bgName) {
+                    GadgetState.setBackground(it)
+                    prefs.background = it
+                }
+                Body(AppBackground.of(bgName).blurb, Palette.muted)
+
+                SectionTitle("Wellness nudges")
+                var water by remember { mutableStateOf(prefs.wellnessWater) }
+                var stretch by remember { mutableStateOf(prefs.wellnessStretch) }
+                var eyes by remember { mutableStateOf(prefs.wellnessEyes) }
+                ToggleRow("💧 Drink water", "Every hour", water) { water = it; prefs.wellnessWater = it }
+                ToggleRow("🙆 Stand up and stretch", "Every 50 minutes", stretch) { stretch = it; prefs.wellnessStretch = it }
+                ToggleRow("👀 Rest your eyes", "Every 20 minutes (look far away for 20 seconds)", eyes) { eyes = it; prefs.wellnessEyes = it }
+                var wStart by remember { mutableStateOf(prefs.wellnessStart) }
+                var wEnd by remember { mutableStateOf(prefs.wellnessEnd) }
+                Body("Between ${wStart}:00 and ${wEnd}:00. A bubble from the blob, never spoken.", Palette.muted)
+                ChoiceRow(options = listOf(8, 9, 10, 12).map { it.toString() to "from $it:00" }, selected = wStart.toString()) {
+                    wStart = it.toInt(); prefs.wellnessStart = wStart
+                }
+                ChoiceRow(options = listOf(17, 19, 21, 23).map { it.toString() to "until $it:00" }, selected = wEnd.toString()) {
+                    wEnd = it.toInt(); prefs.wellnessEnd = wEnd
+                }
+
                 SectionTitle("Night screen")
                 val nightScene by GadgetState.nightScene.collectAsState()
                 ChoiceRow(options = NightScene.entries.map { it.name to it.label }, selected = nightScene) {

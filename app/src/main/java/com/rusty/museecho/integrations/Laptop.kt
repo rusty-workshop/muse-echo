@@ -25,6 +25,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 data class LaptopStatus(
     val batteryPercent: Int?, val charging: Boolean, val track: String, val artist: String, val playing: Boolean,
     val volume: Int = 0, val muted: Boolean = false,
+    val keepAwake: Boolean = false, val nightlight: Boolean = false, val brightness: Int? = null,
 )
 
 /** A desktop notification mirrored from the laptop. */
@@ -74,6 +75,9 @@ class Laptop(context: Context) {
                 playing = str(m, "isPlaying") == "true",
                 volume = (o["volumePercent"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
                 muted = (o["muted"] as? JsonPrimitive)?.contentOrNull == "true",
+                keepAwake = (o["keepAwake"] as? JsonPrimitive)?.contentOrNull == "true",
+                nightlight = (o["nightlight"] as? JsonPrimitive)?.contentOrNull == "true",
+                brightness = (o["brightness"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull(),
             )
         }.getOrNull()
     }
