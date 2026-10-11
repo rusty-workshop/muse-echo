@@ -40,6 +40,7 @@ class HomeCommands(
     private val agenda: com.rusty.museecho.integrations.Agenda? = null,
     private val specialDays: com.rusty.museecho.integrations.SpecialDays? = null,
     private val reminders: com.rusty.museecho.integrations.Reminders? = null,
+    private val assignments: com.rusty.museecho.integrations.Assignments? = null,
 ) {
     val specs: JsonObject = buildJsonObject {
         val keys = Roku.KEYS.keys.joinToString(", ")
@@ -113,6 +114,13 @@ class HomeCommands(
                 "the note and shows it. Replaces today's list; call it with the morning brief and when reminders change.",
             required = mapOf("items" to param("array", "[{\"text\": \"Call time 10:30\", \"time\": \"10:00 AM\"}]; time is optional.")))
         spec("reminders.clear", "Clear today's reminders on the Echo Show.")
+        spec("assignments.set",
+            "Schoolwork due soon, from Rusty's school calendar: the Echo Show counts each down on a card (amber the day " +
+                "before, red on the day) and lists them on its agenda page. Replaces the whole list; send what's due in " +
+                "the next two weeks.",
+            required = mapOf("items" to param("array", "[{\"title\": \"ASL assignment\", \"due\": \"2026-10-13\", " +
+                "\"time\": \"11:59 PM\" (optional), \"course\": \"ASL\" (optional)}]")))
+        spec("assignments.clear", "Clear the schoolwork list on the Echo Show.")
         spec("agenda.clear", "Clear the agenda page on the Echo Show.")
         spec("frame.add", "Add a picture to the Echo Show's photo frame (the slideshow it shows when idle). Downloads and keeps it.",
             required = mapOf("url" to param("string", "http(s) URL of a JPEG, PNG or WebP image.")))
@@ -311,6 +319,19 @@ class HomeCommands(
             } ?: return commandError("items must be a list of {text, time?}")
             val saved = rm.set(java.time.LocalDate.now().toString(), items)
             commandOk(buildJsonObject { put("count", saved.items.size) })
+        } ?: commandError("not available")
+        "assignments.set" -> assignments?.let { store ->
+            val items = (params["items"] as? JsonArray)?.mapNotNull { e ->
+                val o = e as? JsonObject ?: return@mapNotNull null
+                com.rusty.museecho.integrations.Assignment(o.str("title") ?: return@mapNotNull null, o.str("due") ?: return@mapNotNull null,
+                    o.str("time").orEmpty(), o.str("course").orEmpty())
+            } ?: return commandError("items must be a list of {title, due, time?, course?}")
+            val saved = store.set(items)
+            commandOk(buildJsonObject { put("count", saved.items.size) })
+        } ?: commandError("not available")
+        "assignments.clear" -> assignments?.let { store ->
+            store.set(emptyList())
+            commandOk(buildJsonObject { put("cleared", true) })
         } ?: commandError("not available")
         "reminders.clear" -> reminders?.let { rm ->
             rm.clear()

@@ -42,6 +42,8 @@ class Chores(
     private val timers: Timers,
     private val frame: PhotoFrame,
     private val agenda: Agenda,
+    private val laptop: com.rusty.museecho.integrations.Laptop,
+    private val applySettings: (kotlinx.serialization.json.JsonObject) -> List<String>,
     private val say: (String) -> Unit,
     private val chime: () -> Unit,
     private val toFront: () -> Unit,
@@ -60,6 +62,9 @@ class Chores(
         scope.launch { internet() }
         scope.launch { stayInFront() }
         scope.launch { leaveBy() }
+        scope.launch { laptopStatus() }
+        scope.launch { laptopNotifications() }
+        scope.launch { settingsSnapshot() }
         whatsNew()
     }
 
@@ -113,6 +118,11 @@ class Chores(
                         GadgetState.react(Reaction.HOP)
                         GadgetState.say("⏱ ${made.label}, from your watch", 8)
                         postState()
+                    }
+                    "settings" -> {
+                        val changes = item["changes"] as? kotlinx.serialization.json.JsonObject ?: continue
+                        applySettings(changes)
+                        postSettings()
                     }
                     "announce" -> {
                         val text = (item["text"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
@@ -302,6 +312,89 @@ class Chores(
         }
         return out
     }
+
+    // -- Laptop ------------------------------------------------------------------------------
+
+    /** Battery and what's playing, every minute while the laptop answers (cleared when it's away). */
+    private suspend fun laptopStatus() {
+        while (true) {
+            GadgetState.setLaptopStatus(if (laptop.configured && !isQuiet()) laptop.status() else null)
+            delay(60_000)
+        }
+    }
+
+    /** The laptop's desktop notifications as quiet chips (apps can be muted in Setup). */
+    private suspend fun laptopNotifications() {
+        var after = -1
+        var fails = 0
+        while (true) {
+            val p = Prefs(context)
+            if (!laptop.configured || !p.laptopNotifications) {
+                after = -1
+                delay(30_000)
+                continue
+            }
+            val r = laptop.notifications(after, if (after < 0) 0 else 50)
+            if (r == null) {
+                fails++
+                delay(minOf(15_000L * fails, 120_000L))
+                continue
+            }
+            fails = 0
+            val (latest, items) = r
+            if (after >= 0) {
+                for (n in items) {
+                    val app = n.app.ifBlank { "Laptop" }
+                    if (app !in p.laptopKnownApps) p.laptopKnownApps = p.laptopKnownApps + app
+                    if (app in p.laptopMutedApps || isQuiet() || GadgetState.guestMode()) continue
+                    GadgetState.addLaptopNote(n)
+                }
+            }
+            after = latest
+        }
+    }
+
+    // -- Settings from the laptop (echo-hub's /settings page) -------------------------------
+
+    private suspend fun settingsSnapshot() {
+        delay(10_000)
+        while (true) {
+            postSettings()
+            delay(5 * 60_000L)
+        }
+    }
+
+    /** What the settings page shows: current values plus the choices for each. */
+    suspend fun postSettings() {
+        val p = Prefs(context)
+        hub.postSettings(buildJsonObject {
+            put("clock_face", p.clockFace)
+            put("frame_clock", p.frameClock)
+            put("frame_delay_min", p.frameDelayMin)
+            put("blob_energy", p.blobEnergy)
+            put("blob_sounds", p.blobSounds)
+            put("speak_replies", p.speakReplies)
+            put("follow_up", p.followUp)
+            put("come_to_front", p.comeToFront)
+            put("return_to_front", p.returnToFront)
+            put("show_server_pill", p.showServerPill)
+            put("auto_brightness", p.autoBrightness)
+            put("laptop_notifications", p.laptopNotifications)
+            put("wake_sensitivity", p.wakeSensitivity.name)
+            put("guest_until_ms", GadgetState.guestUntil.value)
+            put("quick_actions", buildJsonArray {
+                quickActionsNow().forEach { a -> add(buildJsonObject { put("label", a.label); put("prompt", a.prompt) }) }
+            })
+            put("choices", buildJsonObject {
+                put("clock_face", buildJsonArray { com.rusty.museecho.ui.ClockFace.entries.forEach { add(JsonPrimitive(it.name)) } })
+                put("frame_clock", buildJsonArray { com.rusty.museecho.ui.FrameClock.entries.forEach { add(JsonPrimitive(it.name)) } })
+                put("wake_sensitivity", buildJsonArray { WakeWord.Sensitivity.entries.forEach { add(JsonPrimitive(it.name)) } })
+            })
+            put("version", BuildConfig.VERSION_NAME)
+        })
+    }
+
+    var quickActionsNow: () -> List<com.rusty.museecho.integrations.QuickAction> = { emptyList() }
 
     // -- What's new -------------------------------------------------------------------------
 

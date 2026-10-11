@@ -385,6 +385,32 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     front = it
                     prefs.comeToFront = it
                 }
+                var autoBright by remember { mutableStateOf(prefs.autoBrightness) }
+                ToggleRow("Auto brightness", "Follows the room's light: dim in the dark, bright in daylight", autoBright) {
+                    autoBright = it
+                    prefs.autoBrightness = it
+                }
+                val guestOn = rememberGuest()
+                ToggleRow("Guest mode", "Hides the agenda, notes, history and reminders for 4 hours (the eye button up top does the same)", guestOn) {
+                    actions.setGuestMode(if (it) 4 else 0)
+                }
+                var laptopNotes by remember { mutableStateOf(prefs.laptopNotifications) }
+                ToggleRow("Laptop notifications", "Show the laptop's notifications as quiet chips (not in quiet hours or guest mode)", laptopNotes) {
+                    laptopNotes = it
+                    prefs.laptopNotifications = it
+                }
+                if (laptopNotes) {
+                    var muted by remember { mutableStateOf(prefs.laptopMutedApps) }
+                    val known = prefs.laptopKnownApps.sorted()
+                    if (known.isEmpty()) Body("Apps appear here as the laptop sends notifications; switch off any you don't want.", Palette.muted)
+                    known.forEach { app ->
+                        ToggleRow("   $app", "", app !in muted) { on ->
+                            muted = if (on) muted - app else muted + app
+                            prefs.laptopMutedApps = muted
+                        }
+                    }
+                }
+                Body("Change all of this from the laptop too: open http://${actions.hubHost()}/settings", Palette.muted)
                 var stayFront by remember { mutableStateOf(prefs.returnToFront) }
                 ToggleRow("Stay in front", "If another app (or a stray tap) takes over the screen, come back after a minute", stayFront) {
                     stayFront = it

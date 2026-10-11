@@ -80,6 +80,7 @@ class GadgetService : Service() {
         private set
     private lateinit var specialDays: com.rusty.museecho.integrations.SpecialDays
     private lateinit var reminders: com.rusty.museecho.integrations.Reminders
+    private lateinit var assignments: com.rusty.museecho.integrations.Assignments
     private val weatherAlerts = com.rusty.museecho.integrations.WeatherAlerts()
     lateinit var quickActions: com.rusty.museecho.integrations.QuickActions
         private set
@@ -125,6 +126,7 @@ class GadgetService : Service() {
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
         specialDays = com.rusty.museecho.integrations.SpecialDays(java.io.File(filesDir, "countdowns.json"))
         reminders = com.rusty.museecho.integrations.Reminders(java.io.File(filesDir, "reminders.json"))
+        assignments = com.rusty.museecho.integrations.Assignments(java.io.File(filesDir, "assignments.json"))
         frame = com.rusty.museecho.integrations.PhotoFrame(java.io.File(getExternalFilesDir(null), "frame"))
         quickActions = com.rusty.museecho.integrations.QuickActions(java.io.File(filesDir, "quick_actions.json"))
         val home = HomeCommands(this, roku, timers, laptop, ::bringToFront, notes, glance, frame, quickActions,
@@ -132,7 +134,7 @@ class GadgetService : Service() {
                 GadgetState.showFrame(true)
                 bringToFront(force = true)
             },
-            agenda = agenda, specialDays = specialDays, reminders = reminders)
+            agenda = agenda, specialDays = specialDays, reminders = reminders, assignments = assignments)
         commands = EchoCommands(this, speaker, ::bringToFront, home, ::isQuietNow, { healthExtras() })
         runner = GadgetRunner(
             store = store,
@@ -157,17 +159,23 @@ class GadgetService : Service() {
         scope.launch { watchServer() }
         scope.launch { watchMuseElsewhere() }
         scope.launch { watchLaptop() }
-        chores = Chores(this, scope, hub, timers, frame, agenda,
+        chores = Chores(this, scope, hub, timers, frame, agenda, laptop, ::applySettings,
             say = { text -> if (Prefs(this).speakReplies) speaker.speak(text) },
             chime = ::softChime,
             toFront = { bringToFront(force = true) },
             isQuiet = ::isQuietNow,
-        ).also { it.start() }
+        ).also {
+            it.quickActionsNow = { quickActions.value.value }
+            it.start()
+        }
         // The blob's little sounds: its reactions, and taps from the screen.
         scope.launch { GadgetState.reaction.collect { r -> r?.let { BlobSounds.forReaction(it.reaction)?.let(::playBlobSound) } } }
         scope.launch { GadgetState.sounds.collect(::playBlobSound) }
         scope.launch { specialDays.value.collect { GadgetState.setSpecialDays(it.days) } }
         scope.launch { reminders.value.collect { GadgetState.setReminders(it) } }
+        scope.launch { assignments.value.collect { GadgetState.setAssignments(it.items) } }
+        GadgetState.setGuestUntil(Prefs(this).guestUntil)
+        GadgetState.setFrameMarks(Prefs(this).frameFavs, Prefs(this).frameHidden)
         scope.launch { watchAlerts() }
         scope.launch { watchReminders() }
         scope.launch { watchFrame() }
@@ -668,7 +676,11 @@ class GadgetService : Service() {
             // Replies to an Echo turn are handled by talk(); anything else tagged for the Echo shows here.
             ChatFeed.Origin.THIS_DEVICE -> if (turnJob?.isActive == true) return else GadgetState.museName.value
             ChatFeed.Origin.OTHER_GADGET -> if (!prefs.showGadgetAlerts) return else alertLabel(reply.prompt)
-            ChatFeed.Origin.MUSE_INITIATED -> if (!prefs.showMuseInitiated) return else GadgetState.museName.value
+            // Guest mode: Muse's own messages (often personal reminders) wait in the history instead.
+            ChatFeed.Origin.MUSE_INITIATED -> if (!prefs.showMuseInitiated) return else if (GadgetState.guestMode()) {
+                history.add(com.rusty.museecho.integrations.Exchange(System.currentTimeMillis(), reply.prompt.orEmpty(), reply.text, GadgetState.museName.value))
+                return
+            } else GadgetState.museName.value
             ChatFeed.Origin.OTHER -> return
         }
         // Don't talk over someone mid-sentence or mid-turn.
@@ -900,8 +912,9 @@ class GadgetService : Service() {
                     bringToFront(force = false)
                 }
             }
-            // Countdowns: forget days that have passed.
+            // Countdowns and schoolwork: forget what has passed.
             specialDays.prune(java.time.LocalDate.now())
+            assignments.prune(java.time.LocalDate.now())
         }
     }
 
@@ -931,6 +944,52 @@ class GadgetService : Service() {
             ErrorLog.scheduleRelaunch(this@GadgetService)
             android.os.Process.killProcess(android.os.Process.myPid())
         }
+    }
+
+    /**
+     * Settings changed from the laptop (echo-hub's /settings page). Only known keys; each is
+     * saved and applied the same way as from Setup. Returns what was applied.
+     */
+    fun applySettings(changes: kotlinx.serialization.json.JsonObject): List<String> {
+        val p = Prefs(this)
+        val done = mutableListOf<String>()
+        fun str(k: String) = (changes[k] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+        fun bool(k: String) = (changes[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
+        fun num(k: String) = (changes[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()
+        str("clock_face")?.let { v -> p.clockFace = v; GadgetState.setClockFace(v); done += "clock_face" }
+        str("frame_clock")?.let { v -> p.frameClock = v; GadgetState.setFrameClock(v); done += "frame_clock" }
+        num("frame_delay_min")?.let { v -> p.frameDelayMin = v.toInt().coerceIn(0, 120); done += "frame_delay_min" }
+        num("blob_energy")?.let { v -> p.blobEnergy = v.toFloat().coerceIn(0f, 1f); GadgetState.setBlobEnergy(p.blobEnergy); done += "blob_energy" }
+        bool("blob_sounds")?.let { v -> p.blobSounds = v; done += "blob_sounds" }
+        bool("speak_replies")?.let { v -> p.speakReplies = v; done += "speak_replies" }
+        bool("follow_up")?.let { v -> p.followUp = v; done += "follow_up" }
+        bool("come_to_front")?.let { v -> p.comeToFront = v; done += "come_to_front" }
+        bool("return_to_front")?.let { v -> p.returnToFront = v; done += "return_to_front" }
+        bool("show_server_pill")?.let { v -> p.showServerPill = v; GadgetState.setServerPill(v); done += "show_server_pill" }
+        bool("auto_brightness")?.let { v -> p.autoBrightness = v; done += "auto_brightness" }
+        bool("laptop_notifications")?.let { v -> p.laptopNotifications = v; done += "laptop_notifications" }
+        str("wake_sensitivity")?.let { v ->
+            WakeWord.Sensitivity.entries.firstOrNull { it.name == v }?.let { setWakeSensitivity(it); done += "wake_sensitivity" }
+        }
+        num("guest_hours")?.let { v -> setGuestMode(v.toInt()); done += "guest_hours" }
+        (changes["quick_actions"] as? kotlinx.serialization.json.JsonArray)?.let { arr ->
+            val list = arr.mapNotNull { e ->
+                val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                fun s(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim().orEmpty()
+                if (s("label").isEmpty() || s("prompt").isEmpty()) null else com.rusty.museecho.integrations.QuickAction(s("label").take(20), s("prompt").take(300))
+            }.take(4)
+            if (list.isNotEmpty()) { quickActions.set(list); done += "quick_actions" }
+        }
+        if (done.isNotEmpty()) GadgetState.log("settings from the laptop: ${done.joinToString()}")
+        return done
+    }
+
+    /** Guest mode for [hours] (0 turns it off). */
+    fun setGuestMode(hours: Int) {
+        val until = if (hours <= 0) 0L else System.currentTimeMillis() + hours.coerceAtMost(24) * 3_600_000L
+        Prefs(this).guestUntil = until
+        GadgetState.setGuestUntil(until)
+        GadgetState.log(if (until == 0L) "guest mode off" else "guest mode on for $hours h")
     }
 
     /** The blob acts out the quick action you tapped. */
@@ -1063,6 +1122,7 @@ class GadgetService : Service() {
         val listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(e: android.hardware.SensorEvent) {
                 val lux = e.values.firstOrNull() ?: return
+                GadgetState.lux = lux
                 val now = System.currentTimeMillis()
                 val wasDark = GadgetState.roomDark.value
                 if (lux < DARK_LUX) {
@@ -1318,7 +1378,8 @@ class GadgetService : Service() {
             "up (a trip, a birthday, a holiday) and isn't on its countdowns yet, add it with countdown.add. Give events " +
             "a location (street address) when they have one, so the Echo can say when to leave. Finally, pick today's " +
             "look for the blob with blob.style (hours 14): a colour and/or accessory that suits the weather or what's " +
-            "on today (e.g. umbrella weather, a church day, a birthday)."
+            "on today (e.g. umbrella weather, a church day, a birthday). And send schoolwork due in the next two weeks from " +
+            "my school calendar with assignments.set."
 
         @Volatile
         var instance: GadgetService? = null
@@ -1419,6 +1480,36 @@ class Prefs(context: Context) {
         set(v) = prefs.edit().putStringSet("announced_alerts", v.toSet()).apply()
 
     /** Come back to the front after a minute behind another app. */
+    var autoBrightness: Boolean
+        get() = prefs.getBoolean("auto_brightness", true)
+        set(v) = prefs.edit().putBoolean("auto_brightness", v).apply()
+
+    var guestUntil: Long
+        get() = prefs.getLong("guest_until", 0L)
+        set(v) = prefs.edit().putLong("guest_until", v).apply()
+
+    var frameFavs: Set<String>
+        get() = prefs.getStringSet("frame_favs", emptySet()) ?: emptySet()
+        set(v) = prefs.edit().putStringSet("frame_favs", v.toSet()).apply()
+
+    var frameHidden: Set<String>
+        get() = prefs.getStringSet("frame_hidden", emptySet()) ?: emptySet()
+        set(v) = prefs.edit().putStringSet("frame_hidden", v.toSet()).apply()
+
+    var laptopNotifications: Boolean
+        get() = prefs.getBoolean("laptop_notifications", true)
+        set(v) = prefs.edit().putBoolean("laptop_notifications", v).apply()
+
+    /** Laptop apps whose notifications stay off the Echo. */
+    var laptopMutedApps: Set<String>
+        get() = prefs.getStringSet("laptop_muted_apps", emptySet()) ?: emptySet()
+        set(v) = prefs.edit().putStringSet("laptop_muted_apps", v.toSet()).apply()
+
+    /** Laptop apps seen so far, for the setup list. */
+    var laptopKnownApps: Set<String>
+        get() = prefs.getStringSet("laptop_known_apps", emptySet()) ?: emptySet()
+        set(v) = prefs.edit().putStringSet("laptop_known_apps", v.toSet()).apply()
+
     var returnToFront: Boolean
         get() = prefs.getBoolean("return_to_front", true)
         set(v) = prefs.edit().putBoolean("return_to_front", v).apply()

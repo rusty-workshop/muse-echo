@@ -105,6 +105,9 @@ class Hub(private val context: Context) {
     /** Timers etc., for the watch. */
     suspend fun postState(state: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/state", state.toString()).first == 200 }
 
+    /** The Echo's settings, for echo-hub's /settings page on the laptop. */
+    suspend fun postSettings(settings: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/settings_state", settings.toString()).first == 200 }
+
     /** Commands queued for the Echo (from the watch); each is handed over once. */
     suspend fun inbox(): List<JsonObject> = withContext(Dispatchers.IO) {
         get("/echo/inbox")?.let { runCatching { (json.parseToJsonElement(it) as JsonArray).mapNotNull { e -> e as? JsonObject } }.getOrNull() }.orEmpty()

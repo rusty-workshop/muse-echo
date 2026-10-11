@@ -37,6 +37,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PlayArrow
@@ -153,6 +155,23 @@ interface UiActions {
     fun restoreBackup(onResult: (String) -> Unit)
     fun lastBackupMs(): Long
     suspend fun syncPhotosNow(): Int
+    /** Guest mode for [hours]; 0 turns it off. */
+    fun setGuestMode(hours: Int)
+}
+
+/** Whether guest mode is on right now (turns itself off on time, even with nothing else changing). */
+@Composable
+internal fun rememberGuest(): Boolean {
+    val until by GadgetState.guestUntil.collectAsState()
+    var on by remember(until) { mutableStateOf(until > System.currentTimeMillis()) }
+    LaunchedEffect(until) {
+        val left = until - System.currentTimeMillis()
+        if (left > 0) {
+            delay(left)
+            on = false
+        }
+    }
+    return on
 }
 
 internal object Palette {
@@ -196,6 +215,7 @@ fun MuseEchoApp(actions: UiActions) {
                 StatusChip(Modifier)
                 val showPill by GadgetState.serverPill.collectAsState()
                 if (showPill) ServerLight(Modifier)
+                LaptopChip()
             }
             UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
@@ -206,8 +226,16 @@ fun MuseEchoApp(actions: UiActions) {
                 IconButton(onClick = actions::morningBrief) {
                     Icon(Icons.Filled.WbSunny, "Morning brief", tint = Palette.muted)
                 }
-                IconButton(onClick = { showHistory = true }) {
-                    Icon(Icons.Filled.History, "History", tint = Palette.muted)
+                val guest = rememberGuest()
+                // Guest mode: hides personal things (agenda, notes, history, reminders) for 4 hours.
+                IconButton(onClick = { actions.setGuestMode(if (guest) 0 else 4) }) {
+                    Icon(if (guest) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        if (guest) "Guest mode on (tap to end)" else "Guest mode", tint = if (guest) Palette.coral else Palette.muted)
+                }
+                if (!guest) {
+                    IconButton(onClick = { showHistory = true }) {
+                        Icon(Icons.Filled.History, "History", tint = Palette.muted)
+                    }
                 }
                 IconButton(onClick = { showKeyboard = true }) {
                     Icon(Icons.Filled.Keyboard, "Type to Muse", tint = Palette.muted)
@@ -226,6 +254,7 @@ fun MuseEchoApp(actions: UiActions) {
                 AlertBanner()
                 TimerChips(Modifier, actions)
                 NowPlayingChip(Modifier.padding(top = 6.dp), actions)
+                LaptopNotes()
             }
             IdleFrameWatcher(actions)
             Slideshow(actions)
@@ -254,7 +283,7 @@ private fun IdleFace(actions: UiActions) {
     val note by actions.notes().collectAsState()
     val glanceLine by actions.glance().collectAsState()
     val weather by GadgetState.weather.collectAsState()
-    val hasNote = note.items.isNotEmpty() || note.title.isNotEmpty()
+    val hasNote = (note.items.isNotEmpty() || note.title.isNotEmpty()) && !rememberGuest()
     // Where the screen was last tapped, in the blob's own coordinates, so its eyes can look there.
     var rowCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     var blobCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
@@ -406,8 +435,11 @@ private fun AlertBanner() {
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun IdlePages(actions: UiActions) {
-    val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 3 })
-    LaunchedEffect(pager.currentPage) { GadgetState.setIdlePage(pager.currentPage) }
+    // Guest mode leaves out the agenda page.
+    val guest = rememberGuest()
+    val pages = if (guest) listOf(0, 2) else listOf(0, 1, 2)
+    val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { pages.size })
+    LaunchedEffect(pager.currentPage, guest) { GadgetState.setIdlePage(pages.getOrElse(pager.currentPage) { 0 }) }
     val talk by GadgetState.talk.collectAsState()
     // Anything happening brings the clock back.
     LaunchedEffect(talk) { if (talk != Talk.IDLE) pager.animateScrollToPage(0) }
@@ -440,7 +472,7 @@ private fun IdlePages(actions: UiActions) {
         }
     }
     androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        when (page) {
+        when (pages.getOrElse(page) { 0 }) {
             0 -> IdleFace(actions)
             1 -> AgendaPage(actions)
             else -> HomelabPage(actions)
@@ -487,6 +519,20 @@ private fun AgendaPage(actions: UiActions) {
                     Text(item.title, color = Palette.ink, fontSize = 20.sp, lineHeight = 26.sp)
                 }
             }
+            // Schoolwork due soon.
+            val work by GadgetState.assignments.collectAsState()
+            if (work.isNotEmpty()) {
+                Text("Due soon", color = Palette.amber, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+                work.take(6).forEach { a ->
+                    val days = dueInDays(a)
+                    Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
+                        Text(dueLabel(days), color = dueColor(days), fontSize = 16.sp, modifier = Modifier.width(110.dp))
+                        Text((if (a.course.isNotBlank()) "${a.course}: " else "") + a.title + (if (a.time.isNotBlank()) " · ${a.time}" else ""),
+                            color = Palette.ink.copy(alpha = 0.9f), fontSize = 17.sp, lineHeight = 22.sp)
+                    }
+                }
+            }
             // The next few days, so an empty today still shows what's ahead.
             if (day.upcoming.isNotEmpty()) {
                 Text("Coming up", color = Palette.amber, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
@@ -504,6 +550,26 @@ private fun AgendaPage(actions: UiActions) {
         }
     }
     }
+}
+
+/** Days until an assignment is due (0 = today), or null if its date is unreadable. */
+internal fun dueInDays(a: com.rusty.museecho.integrations.Assignment): Int? = runCatching {
+    java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), java.time.LocalDate.parse(a.due)).toInt()
+}.getOrNull()
+
+internal fun dueLabel(days: Int?): String = when (days) {
+    null -> "?"
+    0 -> "Today"
+    1 -> "Tomorrow"
+    else -> if (days < 7) java.time.LocalDate.now().plusDays(days.toLong()).dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }.take(3) else "in $days days"
+}
+
+/** Red on the day, amber the day before, teal otherwise. */
+internal fun dueColor(days: Int?): Color = when {
+    days == null -> Palette.muted
+    days <= 0 -> Palette.coral
+    days == 1 -> Palette.amber
+    else -> Palette.teal
 }
 
 /** "2026-10-11" as "Tomorrow" / "Monday, Oct 12"; other text as it is. */
@@ -1009,6 +1075,52 @@ private fun BlobCards(modifier: Modifier, actions: UiActions) {
     }
 }
 
+/** The laptop's battery and what it's playing, beside the status chips while it's home (not in guest mode). */
+@Composable
+private fun LaptopChip() {
+    val st by GadgetState.laptopStatus.collectAsState()
+    val guest = rememberGuest()
+    val s = st
+    AnimatedVisibility(s != null && !guest, enter = fadeIn(), exit = fadeOut()) {
+        if (s == null) return@AnimatedVisibility
+        val battery = s.batteryPercent?.let { p -> "$p%" + if (s.charging) " ⚡" else "" }
+        val playing = if (s.playing && s.track.isNotBlank()) "▶ " + s.track + (if (s.artist.isNotBlank()) " – ${s.artist}" else "") else null
+        Text(listOfNotNull("💻", battery, playing).joinToString("  "),
+            color = if (s.batteryPercent != null && s.batteryPercent <= 15 && !s.charging) Palette.coral else Palette.ink,
+            fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 300.dp).background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50))
+                .padding(horizontal = 12.dp, vertical = 6.dp))
+    }
+}
+
+/** The laptop's desktop notifications as quiet chips: each fades after 20 s; tap to read it in full. */
+@Composable
+private fun LaptopNotes() {
+    val notes by GadgetState.laptopNotes.collectAsState()
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.animateContentSize()) {
+        notes.forEach { n ->
+            androidx.compose.runtime.key(n.id) {
+                LaunchedEffect(n.id) {
+                    delay((n.atMs + 20_000 - System.currentTimeMillis()).coerceAtLeast(0))
+                    GadgetState.dismissLaptopNote(n.id)
+                }
+                val shown = remember { androidx.compose.animation.core.MutableTransitionState(false).apply { targetState = true } }
+                AnimatedVisibility(shown, enter = fadeIn(tween(300)) + androidx.compose.animation.expandVertically()) {
+                    Text("💻 ${n.app}: ${n.title.ifBlank { n.text }}", color = Palette.ink, fontSize = 13.sp, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp).widthIn(max = 420.dp)
+                            .background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50))
+                            .clickable {
+                                GadgetState.dismissLaptopNote(n.id)
+                                GadgetState.show(Screen.Text("💻 ${n.app}", listOf(n.title, n.text).filter { it.isNotBlank() }.joinToString("\n\n")))
+                            }
+                            .padding(horizontal = 12.dp, vertical = 5.dp))
+                }
+            }
+        }
+    }
+}
+
 /** A chip when the internet itself is down (Wi-Fi may still be up); the Echo answers offline meanwhile. */
 @Composable
 private fun InternetBanner() {
@@ -1048,40 +1160,8 @@ private fun Slideshow(actions: UiActions) {
 
 @Composable
 private fun SlideshowContent(actions: UiActions) {
-    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(Unit) {
-        var i = 0
-        while (true) {
-            val photos = actions.framePhotos()
-            if (photos.isEmpty()) {
-                GadgetState.showFrame(false)
-                return@LaunchedEffect
-            }
-            val file = photos[i % photos.size]
-            bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { com.rusty.museecho.gadget.EchoCommands.decodeScaled(file.readBytes()) }.getOrNull()
-            } ?: bitmap
-            i++
-            delay(30_000)
-            // Stop when something else needs the screen.
-            if (GadgetState.talk.value != Talk.IDLE || GadgetState.ringing.value || GadgetState.quiet.value) {
-                GadgetState.showFrame(false)
-                return@LaunchedEffect
-            }
-        }
-    }
     val now = rememberNow()
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        Crossfade(targetState = bitmap, animationSpec = tween(1500), label = "frame") { b ->
-            if (b != null) Image(b.asImageBitmap(), contentDescription = "Photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        }
-        val style by GadgetState.frameClock.collectAsState()
-        val weather by GadgetState.weather.collectAsState()
-        // Fades between styles too, if it's changed while the slideshow runs.
-        Crossfade(targetState = FrameClock.of(style), animationSpec = tween(600), label = "frameClock") { fc ->
-            FrameClockOverlay(fc, now, weather)
-        }
-    }
+    SlideshowContent(actions, now)
 }
 
 /** Full-screen while a timer or alarm rings; any tap silences it. */

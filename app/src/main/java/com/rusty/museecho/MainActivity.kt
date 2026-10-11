@@ -21,6 +21,7 @@ import com.rusty.museecho.ui.MuseEchoApp
 import com.rusty.museecho.ui.UiActions
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
@@ -57,6 +58,7 @@ class MainActivity : ComponentActivity() {
         }
         watchForRetreat()
         dimDuringQuietHours()
+        autoBrightness()
         // Started at boot only to bring the service up from the foreground.
         if (intent?.getBooleanExtra(EXTRA_BOOT, false) == true) moveTaskToBack(true)
     }
@@ -94,11 +96,7 @@ class MainActivity : ComponentActivity() {
                 window.attributes = window.attributes.apply { screenBrightness = 0.05f }
                 return true
             }
-            // A tap anywhere ends the photo frame (and does nothing else).
-            if (GadgetState.frameShowing.value) {
-                GadgetState.showFrame(false)
-                return true
-            }
+            // The photo frame handles its own touches (a tap ends it, press and hold for favourite / hide).
         }
         // A tap anywhere cuts Muse off mid-sentence.
         if (ev.action == android.view.MotionEvent.ACTION_DOWN && GadgetState.speaking.value) {
@@ -158,20 +156,54 @@ class MainActivity : ComponentActivity() {
                 val asleep = (quiet && calm && offAfter > 0 && idleMs >= offAfter * 60_000L) ||
                     (GadgetState.tuckedIn.value && dim != null && dim <= com.rusty.museecho.gadget.GadgetService.GOODNIGHT_DIM)
                 if (asleep != GadgetState.asleep.value) GadgetState.setAsleep(asleep)
-                val brightness = when {
+                // Overrides win; otherwise the auto-brightness ticker below follows the room.
+                brightnessOverride = when {
                     asleep -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF
                     dim != null -> dim
                     quiet && calm -> 0.05f
-                    else -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    else -> null
                 }
-                if (window.attributes.screenBrightness != brightness) {
-                    window.attributes = window.attributes.apply { screenBrightness = brightness }
-                }
+                applyBrightness()
                 // Wake promptly when something happens; otherwise check every few seconds.
                 kotlinx.coroutines.withTimeoutOrNull(5_000) {
                     combine(GadgetState.talk, GadgetState.ringing, GadgetState.screen, GadgetState.quiet, GadgetState.dim) { a, b, c, d, e -> listOf(a, b, c, d, e) }
                         .drop(1).first()
                 }
+            }
+        }
+    }
+
+    /** Set by the quiet-hours / goodnight logic; null means "normal", where auto brightness applies. */
+    @Volatile
+    private var brightnessOverride: Float? = null
+    private var autoLevel = -1f
+
+    private fun applyBrightness() {
+        val target = brightnessOverride
+            ?: if (com.rusty.museecho.gadget.Prefs(this).autoBrightness && autoLevel >= 0f) autoLevel
+            else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        if (abs(window.attributes.screenBrightness - target) > 0.008f) {
+            window.attributes = window.attributes.apply { screenBrightness = target }
+        }
+    }
+
+    /**
+     * Auto brightness from the light sensor: brightness follows the log of the room's lux
+     * (people see light roughly logarithmically), eased over a couple of seconds so it never
+     * jumps, and only stepping when the change is noticeable (the screen's own glow reaches
+     * the sensor, so tiny wobbles are ignored).
+     */
+    private fun autoBrightness() {
+        lifecycleScope.launch {
+            var smoothedLux = -1f
+            while (true) {
+                delay(250)
+                val lux = GadgetState.lux
+                if (lux < 0f) continue
+                smoothedLux = if (smoothedLux < 0f) lux else smoothedLux + (lux - smoothedLux) * 0.15f
+                val target = (0.06f + 0.94f * (kotlin.math.log10(smoothedLux + 1f) / kotlin.math.log10(400f))).coerceIn(0.06f, 1f)
+                autoLevel = if (autoLevel < 0f) target else autoLevel + (target - autoLevel) * 0.12f
+                if (brightnessOverride == null) applyBrightness()
             }
         }
     }
@@ -318,6 +350,10 @@ class MainActivity : ComponentActivity() {
         override fun lastBackupMs() = GadgetService.instance?.chores?.lastBackupMs() ?: 0L
 
         override suspend fun syncPhotosNow() = GadgetService.instance?.chores?.syncPhotos() ?: 0
+
+        override fun setGuestMode(hours: Int) {
+            GadgetService.instance?.setGuestMode(hours)
+        }
 
         override fun pinToHomeScreen(): String {
             if (!androidx.core.content.pm.ShortcutManagerCompat.isRequestPinShortcutSupported(this@MainActivity)) {

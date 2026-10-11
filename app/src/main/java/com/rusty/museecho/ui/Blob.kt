@@ -126,6 +126,8 @@ internal fun Blob(
     val replyText by GadgetState.reply.collectAsState()
     val turnActive by GadgetState.turnActive.collectAsState()
     val leaveBy by GadgetState.leaveBy.collectAsState()
+    val work by GadgetState.assignments.collectAsState()
+    val guest = if (mini) false else rememberGuest()
     var dreamPhoto by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var litAtMs by remember { mutableStateOf(0L) }
 
@@ -503,8 +505,8 @@ internal fun Blob(
                 ?: held?.takeIf { it.untilMs > nowMs }?.item
                 ?: (if (runningTimer != null) HeldItem.HOURGLASS else null)
                 ?: (if (wetAlert) HeldItem.UMBRELLA else null)
-                ?: (if (remindersToday) HeldItem.NOTE else null)
-                ?: (if (hour >= 18 && !quiet && hasTomorrow) HeldItem.BAG else null)
+                ?: (if (remindersToday && !guest) HeldItem.NOTE else null)
+                ?: (if (hour >= 18 && !quiet && hasTomorrow && !guest) HeldItem.BAG else null)
                 ?: if (hour >= 18 && !quiet) forecast else null
             val wobble = if (react == Reaction.DIZZY) sin(p * TAU * 3) * 10f * (1 - p) else 0f
 
@@ -665,8 +667,9 @@ internal fun Blob(
         // Cards under the blob: an event starting soon, the label on what it's holding, and the
         // sign it holds up when something on the server is wrong.
         val cards = mutableListOf<Pair<String, Color>>()
-        // Time to head out for something with an address (see Chores.leaveBy).
-        run {
+        // Time to head out for something with an address (see Chores.leaveBy). Guest mode skips
+        // everything personal and keeps only the server sign.
+        if (!guest) run {
             val nowCal = Calendar.getInstance().apply { timeInMillis = tick }
             val nowMin = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
             leaveBy.entries.filter { it.value - nowMin in -10..45 }.minByOrNull { it.value }?.let { (key, at) ->
@@ -675,22 +678,26 @@ internal fun Blob(
                 cards += (if (at - nowMin <= 0) "🚗 Leave now for $title" else "🚗 Leave by $clock · $title") to Palette.coral
             }
         }
-        soonEvent?.let { (title, mins) ->
+        if (!guest) soonEvent?.let { (title, mins) ->
             cards += when {
                 mins > 0 -> "⏰ $title in $mins min"
                 mins == 0 -> "⏰ $title now"
                 else -> "⏰ $title started"
             } to Palette.teal
         }
-        held?.takeIf { it.untilMs > tick && it.text.isNotEmpty() }?.let { cards += it.text to Palette.ink }
-        nextReminder(reminderDay, tick)?.let { cards += "📝 $it" to Color(0xFFFFE680) }
+        if (!guest) held?.takeIf { it.untilMs > tick && it.text.isNotEmpty() }?.let { cards += it.text to Palette.ink }
+        if (!guest) nextReminder(reminderDay, tick)?.let { cards += "📝 $it" to Color(0xFFFFE680) }
+        // The next piece of schoolwork due within a week.
+        if (!guest) work.mapNotNull { a -> dueInDays(a)?.let { a to it } }.filter { it.second in 0..6 }.minByOrNull { it.second }?.let { (a, d) ->
+            cards += "📚 ${a.title} · due ${dueLabel(d).lowercase().let { if (d >= 2) it.replaceFirstChar { c -> c.uppercase() } else it }}" to dueColor(d)
+        }
         val tickCal = Calendar.getInstance().apply { timeInMillis = tick }
-        if (tickCal.get(Calendar.HOUR_OF_DAY) >= 18 && !quiet) {
+        if (tickCal.get(Calendar.HOUR_OF_DAY) >= 18 && !quiet && !guest) {
             tomorrowEvents(agenda).firstOrNull()?.let { e ->
                 cards += ("🎒 Tomorrow: " + (if (e.time.isNotBlank()) "${e.time} " else "") + e.title) to Palette.violet.copy(alpha = 0.9f).let { lerp(it, Palette.ink, 0.5f) }
             }
         }
-        specialDays.firstOrNull()?.let { d ->
+        if (!guest) specialDays.firstOrNull()?.let { d ->
             sleepsUntil(d)?.takeIf { it in 0..60 }?.let { n ->
                 val e = d.emoji.ifEmpty { "🗓" }
                 cards += (if (n == 0) "$e ${d.title} is today!" else "$e $n sleep${if (n == 1) "" else "s"} until ${d.title}") to Palette.amber
@@ -780,8 +787,8 @@ private fun checkIn(weather: WeatherNow?, agenda: AgendaDay, server: ServerStatu
         if ("rain" in s || "shower" in s || "thunder" in s || "snow" in s) worries++
         if (w.tempF >= 95 || w.tempF <= 40) worries++
     }
-    val today = SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
-    if (BlobBrain.isToday(agenda.date, java.time.LocalDate.now())) {
+    val guest = GadgetState.guestMode()
+    if (!guest && BlobBrain.isToday(agenda.date, java.time.LocalDate.now())) {
         val n = agenda.items.size
         parts += when (n) { 0 -> "nothing planned"; 1 -> "1 thing today"; else -> "$n things today" }
         if (n >= 5) worries++
@@ -800,7 +807,7 @@ private fun checkIn(weather: WeatherNow?, agenda: AgendaDay, server: ServerStatu
     weather?.takeIf { it.tomorrowSummary.isNotEmpty() && Calendar.getInstance().get(Calendar.HOUR_OF_DAY) >= 17 }?.let { w ->
         parts += "tomorrow ${w.tomorrowSummary.lowercase()}" + (w.tomorrowHighF?.let { ", $it°" } ?: "")
     }
-    GadgetState.specialDays.value.firstOrNull()?.let { d ->
+    if (!guest) GadgetState.specialDays.value.firstOrNull()?.let { d ->
         val days = sleepsUntil(d)
         if (days != null && days in 0..60) parts += if (days == 0) "${d.title} is today!" else "$days sleep${if (days == 1) "" else "s"} until ${d.title}"
     }

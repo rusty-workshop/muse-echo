@@ -420,6 +420,59 @@ object GadgetState {
         _sounds.tryEmit(sound)
     }
 
+    /** Room light from the sensor, lux (-1 until it reports). */
+    @Volatile
+    var lux = -1f
+
+    /** Guest mode: personal things are hidden until this time (0 = off). */
+    private val _guestUntil = MutableStateFlow(0L)
+    val guestUntil: StateFlow<Long> = _guestUntil.asStateFlow()
+
+    fun setGuestUntil(ms: Long) {
+        _guestUntil.value = ms
+    }
+
+    fun guestMode(now: Long = System.currentTimeMillis()) = _guestUntil.value > now
+
+    /** The laptop's battery and what it's playing, while it's home. */
+    private val _laptopStatus = MutableStateFlow<com.rusty.museecho.integrations.LaptopStatus?>(null)
+    val laptopStatus: StateFlow<com.rusty.museecho.integrations.LaptopStatus?> = _laptopStatus.asStateFlow()
+
+    fun setLaptopStatus(s: com.rusty.museecho.integrations.LaptopStatus?) {
+        _laptopStatus.value = s
+    }
+
+    /** Recent laptop notifications shown as chips (newest last). */
+    private val _laptopNotes = MutableStateFlow<List<com.rusty.museecho.integrations.LaptopNotification>>(emptyList())
+    val laptopNotes: StateFlow<List<com.rusty.museecho.integrations.LaptopNotification>> = _laptopNotes.asStateFlow()
+
+    fun addLaptopNote(n: com.rusty.museecho.integrations.LaptopNotification) {
+        _laptopNotes.update { (it + n).takeLast(3) }
+    }
+
+    fun dismissLaptopNote(id: Int) {
+        _laptopNotes.update { list -> list.filterNot { it.id == id } }
+    }
+
+    /** Schoolwork due soon (mirrored from the service's store). */
+    private val _assignments = MutableStateFlow<List<com.rusty.museecho.integrations.Assignment>>(emptyList())
+    val assignments: StateFlow<List<com.rusty.museecho.integrations.Assignment>> = _assignments.asStateFlow()
+
+    fun setAssignments(list: List<com.rusty.museecho.integrations.Assignment>) {
+        _assignments.value = list
+    }
+
+    /** Photo-frame favourites and hidden photos (file names). */
+    private val _frameFavs = MutableStateFlow<Set<String>>(emptySet())
+    val frameFavs: StateFlow<Set<String>> = _frameFavs.asStateFlow()
+    private val _frameHidden = MutableStateFlow<Set<String>>(emptySet())
+    val frameHidden: StateFlow<Set<String>> = _frameHidden.asStateFlow()
+
+    fun setFrameMarks(favs: Set<String>, hidden: Set<String>) {
+        _frameFavs.value = favs
+        _frameHidden.value = hidden
+    }
+
     /** The photo slideshow's clock style (a FrameClock name). */
     private val _frameClock = MutableStateFlow("CORNER")
     val frameClock: StateFlow<String> = _frameClock.asStateFlow()

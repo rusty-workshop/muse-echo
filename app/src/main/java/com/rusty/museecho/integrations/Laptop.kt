@@ -21,6 +21,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * RUN_SHORTCUT), so Muse can fire the same safelisted shortcuts as Sofa's
  * Coding Mode. Uses the companion's own pairing token, entered in setup.
  */
+/** What the laptop companion reports: battery and what's playing. */
+data class LaptopStatus(val batteryPercent: Int?, val charging: Boolean, val track: String, val artist: String, val playing: Boolean)
+
+/** A desktop notification mirrored from the laptop. */
+data class LaptopNotification(val id: Int, val app: String, val title: String, val text: String, val atMs: Long)
+
 class Laptop(context: Context) {
     data class Shortcut(val key: String, val label: String)
 
@@ -51,6 +57,41 @@ class Laptop(context: Context) {
         call(Request.Builder().url("http://$host/shortcuts").get()) != null
     }
 
+    suspend fun status(): LaptopStatus? = withContext(Dispatchers.IO) {
+        val body = call(Request.Builder().url("http://$host/status").get()) ?: return@withContext null
+        runCatching {
+            val o = Json.parseToJsonElement(body) as JsonObject
+            val m = o["media"] as? JsonObject
+            val b = o["battery"] as? JsonObject
+            fun str(e: JsonObject?, k: String) = (e?.get(k) as? JsonPrimitive)?.contentOrNull.orEmpty()
+            LaptopStatus(
+                batteryPercent = str(b, "percent").toIntOrNull(),
+                charging = str(b, "charging") == "true",
+                track = str(m, "track"), artist = str(m, "artist"),
+                playing = str(m, "isPlaying") == "true",
+            )
+        }.getOrNull()
+    }
+
+    /**
+     * One long-poll of the companion's desktop-notification feed (the same one the watch
+     * mirrors). [after] -1 just learns the latest id. Returns (latest id, new items) or null.
+     */
+    suspend fun notifications(after: Int, waitS: Int): Pair<Int, List<LaptopNotification>>? = withContext(Dispatchers.IO) {
+        val body = call(Request.Builder().url("http://$host/notifications?after=$after&wait=$waitS").get(), longPoll = true)
+            ?: return@withContext null
+        runCatching {
+            val o = Json.parseToJsonElement(body) as JsonObject
+            val latest = (o["latest"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: after
+            val items = (o["items"] as? JsonArray).orEmpty().mapNotNull { e ->
+                val n = e as? JsonObject ?: return@mapNotNull null
+                fun s(k: String) = (n[k] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                LaptopNotification(s("id").toIntOrNull() ?: return@mapNotNull null, s("app"), s("title"), s("text"), System.currentTimeMillis())
+            }
+            latest to items
+        }.getOrNull()
+    }
+
     /** Returns (ok, message) from the companion. */
     suspend fun run(shortcutKey: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val payload = buildJsonObject {
@@ -66,8 +107,10 @@ class Laptop(context: Context) {
         ok to ((obj?.get("message") as? JsonPrimitive)?.contentOrNull ?: body.take(200))
     }
 
-    private fun call(builder: Request.Builder, allowError: Boolean = false): String? = runCatching {
-        http.newCall(builder.header("Authorization", "Bearer ${token.orEmpty()}").build()).execute().use {
+    private val longHttp = http.newBuilder().callTimeout(75, TimeUnit.SECONDS).readTimeout(70, TimeUnit.SECONDS).build()
+
+    private fun call(builder: Request.Builder, allowError: Boolean = false, longPoll: Boolean = false): String? = runCatching {
+        (if (longPoll) longHttp else http).newCall(builder.header("Authorization", "Bearer ${token.orEmpty()}").build()).execute().use {
             if (it.isSuccessful || allowError) it.body?.string() else null
         }
     }.getOrNull()

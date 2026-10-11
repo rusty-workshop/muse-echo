@@ -24,3 +24,18 @@ class ClockFacesTest {
         assertEquals(listOf("seven"), timeInWords(7, 0).second)
     }
 }
+
+class FrameOrderTest {
+    private fun files(vararg n: String) = n.map { java.io.File("/tmp/$it") }
+
+    @Test
+    fun hiddenNeverAndFavouritesTwice() {
+        repeat(50) {
+            val order = frameOrder(files("a", "b", "c", "d"), favs = setOf("a"), hidden = setOf("d"), last = "b")
+            assertEquals(4, order.size)
+            assertEquals(2, order.count { it.name == "a" })
+            assertEquals(0, order.count { it.name == "d" })
+            org.junit.Assert.assertNotEquals("b", order.first().name)
+        }
+    }
+}

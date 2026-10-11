@@ -52,6 +52,25 @@ class Reminders(file: File) : JsonFileState<ReminderDay>(file, ReminderDay.seria
     fun clear() = update { ReminderDay() }
 }
 
+/** Schoolwork with a due date (from Muse, off the school calendar). [due] is yyyy-MM-dd. */
+@Serializable
+data class Assignment(val title: String, val due: String, val time: String = "", val course: String = "")
+
+@Serializable
+data class AssignmentList(val items: List<Assignment> = emptyList())
+
+class Assignments(file: File) : JsonFileState<AssignmentList>(file, AssignmentList.serializer(), AssignmentList()) {
+    fun set(items: List<Assignment>) = update {
+        AssignmentList(items.map { Assignment(it.title.trim().take(60), it.due.trim(), it.time.trim().take(20), it.course.trim().take(30)) }
+            .filter { it.title.isNotEmpty() && runCatching { java.time.LocalDate.parse(it.due) }.isSuccess }
+            .sortedBy { it.due }.take(20))
+    }
+
+    fun prune(today: java.time.LocalDate) = update { list ->
+        AssignmentList(list.items.filter { runCatching { !java.time.LocalDate.parse(it.due).isBefore(today) }.getOrDefault(false) })
+    }
+}
+
 /** An active National Weather Service alert for here. */
 @Serializable
 data class WeatherAlert(
