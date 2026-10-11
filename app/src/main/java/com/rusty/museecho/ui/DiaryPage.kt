@@ -86,9 +86,10 @@ internal fun DailyThingSign() {
     val t = thing ?: return
     if (t.date != java.time.LocalDate.now().toString()) return
     val kind = when (t.kind) { "word" -> "Word of the day"; "history" -> "On this day"; else -> "Fact of the day" }
-    Text("${DayWriting.thingIcon(t.kind)} $kind: ${t.title}", color = Palette.teal, fontSize = 15.sp, maxLines = 1,
+    // Sized like the blob's chips beside it, in the card colour so it reads as "tap me".
+    Text("${DayWriting.thingIcon(t.kind)} $kind: ${t.title}", color = Palette.teal, fontSize = 13.sp, maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(top = 6.dp).background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50))
+        modifier = Modifier.background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50))
             .clickable { GadgetState.say(t.text, 25) }
-            .padding(horizontal = 12.dp, vertical = 5.dp))
+            .padding(horizontal = 11.dp, vertical = 5.dp))
 }

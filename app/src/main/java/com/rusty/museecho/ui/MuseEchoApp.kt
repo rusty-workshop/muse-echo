@@ -368,6 +368,9 @@ private fun IdleFace(actions: UiActions) {
     // The blob's centre and half-size in this page, for its room and its visiting friend.
     var blobCenter by remember { mutableStateOf(Offset.Unspecified) }
     var blobHalf by remember { mutableStateOf(0f) }
+    val quickShowing = quickActionsShowing(actions)
+    val chipsShowing by GadgetState.blobCards.collectAsState()
+    val thingNow by GadgetState.dailyThing.collectAsState()
     Box(Modifier.fillMaxSize()) {
     BlobRoom(blobCenter, blobHalf, Modifier.fillMaxSize())
     Row(
@@ -437,7 +440,10 @@ private fun IdleFace(actions: UiActions) {
                     blobCenter = r.localPositionOf(b, Offset(b.size.width / 2f, b.size.height / 2f))
                 }
             }
-            .padding(horizontal = if (hasNote) 24.dp else 40.dp),
+            .padding(horizontal = if (hasNote) 24.dp else 40.dp)
+            // Centred between the status chips at the top and the quick-action buttons at the bottom,
+            // so however much shows under the clock, nothing slides under the buttons.
+            .padding(top = 52.dp, bottom = if (quickShowing) 78.dp else 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(if (hasNote) 170.dp else 220.dp).onGloballyPositioned {
@@ -477,9 +483,10 @@ private fun IdleFace(actions: UiActions) {
                 Text(line, color = Palette.amber, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp))
             }
-            DailyThingSign()
             Spacer(Modifier.height(10.dp))
-            Text(
+            // The how-to line fills the space only when there are no chips there.
+            val hasThing = thingNow?.date == java.time.LocalDate.now().toString()
+            if (chipsShowing.isEmpty() && !hasThing || link != Link.CONNECTED) Text(
                 when (link) {
                     Link.CONNECTED -> "Tap the mic to talk to $name"
                     Link.NOT_PAIRED, Link.NO_TOKEN -> "Open setup (top right) to pair with $name"
@@ -1289,16 +1296,20 @@ private fun BlobCards() {
     val reply by GadgetState.reply.collectAsState()
     val talk by GadgetState.talk.collectAsState()
     val captions = heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE
+    val thing by GadgetState.dailyThing.collectAsState()
+    val hasThing = thing?.date == java.time.LocalDate.now().toString()
     AnimatedVisibility(
-        cards.isNotEmpty() && !captions,
+        (cards.isNotEmpty() || hasThing) && !captions,
         enter = fadeIn(tween(300)) + androidx.compose.animation.expandVertically(tween(300)),
         exit = fadeOut(tween(200)) + androidx.compose.animation.shrinkVertically(tween(250)),
     ) {
         androidx.compose.foundation.layout.FlowRow(
-            Modifier.padding(top = 12.dp).animateContentSize(),
+            Modifier.padding(top = 2.dp).animateContentSize(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // Today's word / fact rides along with the chips rather than taking a line of its own.
+            DailyThingSign()
             cards.forEach { (text, color) ->
                 androidx.compose.runtime.key(text) {
                     Text(text, color = Palette.night, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

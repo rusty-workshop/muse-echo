@@ -65,19 +65,21 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         val cx = blob.x
         val evening = hour >= 17 || hour < 7
 
-        // The wall's foot and a soft floor.
-        drawRect(Brush.verticalGradient(listOf(Palette.ink.copy(alpha = 0.035f * dim), Color.Transparent), floor, floor + 60 * u),
-            Offset(0f, floor), Size(cx + 135 * u, 60 * u))
-        drawLine(Palette.ink.copy(alpha = 0.08f * dim), Offset(0f, floor), Offset(cx + 135 * u, floor), 1.5f * u)
+        // The wall's foot and a soft pool of floor, fading out at the ends (no hard edges).
+        val floorW = 170 * u
+        drawOval(Brush.radialGradient(listOf(Palette.ink.copy(alpha = 0.04f * dim), Color.Transparent), Offset(cx, floor + 8 * u), floorW),
+            Offset(cx - floorW, floor - 10 * u), Size(floorW * 2, 46 * u))
+        drawLine(Brush.horizontalGradient(listOf(Color.Transparent, Palette.ink.copy(alpha = 0.07f * dim), Color.Transparent), cx - floorW, cx + floorW),
+            Offset(cx - floorW, floor), Offset(cx + floorW, floor), 1.5f * u)
 
-        if (has(Decor.WINDOW)) drawWindow(Offset(cx - 118 * u, blob.y - 140 * u), u, hour, dim)
-        if (has(Decor.STAR_POSTER)) drawStarPoster(Offset(cx + 58 * u, blob.y - 150 * u), u, dim)
-        if (has(Decor.MOVIE_POSTER)) drawMoviePoster(Offset(cx + 70 * u, blob.y - 92 * u), u, dim)
+        if (has(Decor.WINDOW)) drawWindow(Offset(cx - 122 * u, blob.y - 112 * u), u * 0.85f, hour, dim)
+        if (has(Decor.STAR_POSTER)) drawStarPoster(Offset(cx + 62 * u, blob.y - 118 * u), u, dim)
+        if (has(Decor.MOVIE_POSTER)) drawMoviePoster(Offset(cx + 74 * u, blob.y - 76 * u), u, dim)
         if (has(Decor.PHOTO_FRAME)) {
-            drawRect(Palette.amber.copy(alpha = 0.35f * dim), Offset(cx - 42 * u, blob.y - 156 * u), Size(30 * u, 24 * u), style = Stroke(2.5f * u))
-            drawRect(Palette.teal.copy(alpha = 0.2f * dim), Offset(cx - 39 * u, blob.y - 153 * u), Size(24 * u, 18 * u))
+            drawRect(Palette.amber.copy(alpha = 0.35f * dim), Offset(cx - 40 * u, blob.y - 122 * u), Size(26 * u, 20 * u), style = Stroke(2.5f * u))
+            drawRect(Palette.teal.copy(alpha = 0.2f * dim), Offset(cx - 37 * u, blob.y - 119 * u), Size(20 * u, 14 * u))
         }
-        if (has(Decor.FAIRY_LIGHTS)) drawFairyLights(blob.y - 168 * u, cx + 130 * u, u, now, dim)
+        if (has(Decor.FAIRY_LIGHTS)) drawFairyLights(blob.y - 130 * u, cx + 130 * u, u, now, dim)
         if (has(Decor.RUG)) drawOval(Palette.violet.copy(alpha = 0.16f * dim), Offset(cx - 88 * u, floor - 6 * u), Size(176 * u, 26 * u))
         if (has(Decor.BOOKSHELF)) drawShelf(Offset(cx - 160 * u, floor), u, dim, trophy = has(Decor.TROPHY), globe = has(Decor.SNOW_GLOBE) && month in listOf(11, 0, 1))
         if (has(Decor.PLANT)) drawPlant(Offset(cx - 118 * u, floor), u, dim)
