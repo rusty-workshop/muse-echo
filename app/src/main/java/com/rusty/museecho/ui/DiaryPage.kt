@@ -84,10 +84,13 @@ internal fun DailyThingSign() {
     val t = thing ?: return
     if (t.date != java.time.LocalDate.now().toString()) return
     val kind = when (t.kind) { "word" -> "Word of the day"; "history" -> "On this day"; else -> "Fact of the day" }
-    // Sized like the blob's chips beside it, in the card colour so it reads as "tap me".
-    Text("${DayWriting.thingIcon(t.kind)} $kind: ${t.title}", color = Palette.teal, fontSize = 13.sp, maxLines = 1,
+    // Short on the chip (the icon says which kind it is); tap for the whole thing on a card.
+    Text("${DayWriting.thingIcon(t.kind)} ${t.title}", color = Palette.teal, fontSize = 13.sp, maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50))
-            .clickable { GadgetState.say(t.text, 25) }
+            .clickable {
+                GadgetState.react(com.rusty.museecho.gadget.Reaction.HOP)
+                GadgetState.show(com.rusty.museecho.gadget.Screen.Text("${DayWriting.thingIcon(t.kind)} $kind: ${t.title}", t.text))
+            }
             .padding(horizontal = 11.dp, vertical = 5.dp))
 }
