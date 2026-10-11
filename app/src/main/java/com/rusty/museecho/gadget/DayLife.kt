@@ -15,7 +15,15 @@ data class DayFacts(
     val tvMinutes: Int = 0,
     /** Short "9:41 pm lights went off" style notes, oldest first. */
     val events: List<String> = emptyList(),
+    val musicMinutes: Int = 0,
+    val friendVisits: Int = 0,
+    /** Everything with a time, for the settings page's timeline. */
+    val marks: List<DayMark> = emptyList(),
 )
+
+/** One moment on today's timeline: minutes after midnight, what kind, and a few words. */
+@Serializable
+data class DayMark(val min: Int, val kind: String, val label: String = "")
 
 /** One night's diary entry, written by Pixel as the blob. */
 @Serializable
@@ -30,31 +38,57 @@ object DayLog {
     private var file: File? = null
     @Volatile
     private var facts = DayFacts()
+    /** The day before (what it dreams about after midnight). */
+    @Volatile
+    var yesterday = DayFacts()
+        private set
 
     fun init(f: File) {
         file = f
         facts = runCatching { json.decodeFromString(DayFacts.serializer(), f.readText()) }.getOrDefault(DayFacts())
+        yesterday = runCatching { json.decodeFromString(DayFacts.serializer(), File(f.path + ".prev").readText()) }.getOrDefault(DayFacts())
     }
+
+    private fun nowMin(): Int {
+        val c = java.util.Calendar.getInstance()
+        return c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE)
+    }
+
+    private fun DayFacts.mark(kind: String, label: String = "") = copy(marks = (marks + DayMark(nowMin(), kind, label.take(60))).takeLast(300))
 
     private fun todayDate() = java.time.LocalDate.now().toString()
 
     @Synchronized
     private fun update(change: (DayFacts) -> DayFacts) {
-        val base = facts.takeIf { it.date == todayDate() } ?: DayFacts(date = todayDate())
+        val base = facts.takeIf { it.date == todayDate() } ?: run {
+            // A new day: keep the old one for tonight's dreams.
+            if (facts.date.isNotEmpty()) {
+                yesterday = facts
+                runCatching { file?.let { File(it.path + ".prev").writeText(json.encodeToString(DayFacts.serializer(), facts)) } }
+            }
+            DayFacts(date = todayDate())
+        }
         facts = change(base)
         runCatching { file?.writeText(json.encodeToString(DayFacts.serializer(), facts)) }
     }
 
-    fun talked() = update { it.copy(talks = it.talks + 1) }
-    fun timerRang() = update { it.copy(timers = it.timers + 1) }
-    fun poked() = update { it.copy(pokes = it.pokes + 1) }
-    fun nudged() = update { it.copy(nudges = it.nudges + 1) }
+    fun talked() = update { it.copy(talks = it.talks + 1).mark("talk") }
+    fun timerRang() = update { it.copy(timers = it.timers + 1).mark("timer") }
+    fun poked() = update { it.copy(pokes = it.pokes + 1).mark("poke") }
+    fun nudged() = update { it.copy(nudges = it.nudges + 1).mark("nudge") }
     fun tvMinute() = update { it.copy(tvMinutes = it.tvMinutes + 1) }
+    fun friendVisited() = update { it.copy(friendVisits = it.friendVisits + 1).mark("friend") }
+    fun musicMinute() = update { it.copy(musicMinutes = it.musicMinutes + 1) }
+    fun mark(kind: String, label: String = "") = update { it.mark(kind, label) }
 
-    fun event(what: String) {
+    /** A diary-worthy moment ([what]), also on the timeline as [kind]. */
+    fun event(what: String, kind: String = "event") {
         val t = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date()).lowercase()
-        update { it.copy(events = (it.events + "$t $what").takeLast(20)) }
+        update { it.copy(events = (it.events + "$t $what").takeLast(20)).mark(kind, what) }
     }
+
+    /** The day it dreams about: yesterday until noon, today after. */
+    fun dreamDay(): DayFacts = if (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) < 12) yesterday else today()
 
     fun today(): DayFacts = facts.takeIf { it.date == todayDate() } ?: DayFacts(date = todayDate())
 }
@@ -69,6 +103,8 @@ object DayWriting {
         if (f.pokes > 0) append("- it got poked ${f.pokes} time(s)\n")
         if (f.timers > 0) append("- ${f.timers} timer(s) or alarm(s) went off\n")
         if (f.nudges > 0) append("- it reminded me to drink water / stretch / rest my eyes ${f.nudges} time(s)\n")
+        if (f.musicMinutes >= 10) append("- music played on the laptop for about ${f.musicMinutes} min\n")
+        if (f.friendVisits > 0) append("- its blob friend came over ${f.friendVisits} time(s)\n")
         if (f.tvMinutes >= 10) append("- the TV was on for about ${f.tvMinutes / 60} h ${f.tvMinutes % 60} min\n")
         f.events.forEach { append("- $it\n") }
         append("Reply with only the diary text: no title, no date, no commands, and don't change anything on any device.")

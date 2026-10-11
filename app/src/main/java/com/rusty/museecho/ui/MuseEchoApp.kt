@@ -176,6 +176,10 @@ interface UiActions {
     suspend fun laptopShortcuts(): List<Pair<String, String>>
     suspend fun laptopShortcut(key: String): String
     suspend fun restartContainer(name: String): Pair<Boolean, String>
+    suspend fun spotifySearch(q: String): Pair<List<com.rusty.museecho.integrations.SpotifyItem>, String?>
+    suspend fun spotifyQueue(): Pair<com.rusty.museecho.integrations.SpotifyItem?, List<com.rusty.museecho.integrations.SpotifyItem>>?
+    suspend fun spotify(uri: String, queue: Boolean): Pair<Boolean, String>
+    suspend fun spotifyImage(url: String): android.graphics.Bitmap?
     /** Whether the laptop link is set up (for "Send to laptop"). */
     fun canSendToLaptop(): Boolean
     /** Puts [text] on the laptop's clipboard and shows a notification there. */
@@ -334,6 +338,11 @@ fun MuseEchoApp(actions: UiActions) {
             QuickPanel(showQuick) { showQuick = false }
             val padOpen by GadgetState.timePad.collectAsState()
             TimePad(padOpen, actions) { GadgetState.setTimePad(false) }
+            VisitorPrompt(actions)
+            // Warm evenings: a faint orange wash from around sunset to sunrise (touches pass through).
+            val warmth by GadgetState.warmth.collectAsState()
+            val warmNow by androidx.compose.animation.core.animateFloatAsState(warmth, tween(4000), label = "warm")
+            if (warmNow > 0.01f) Box(Modifier.fillMaxSize().background(Color(0xFFFF8A3D).copy(alpha = 0.11f * warmNow)))
             CleaningOverlay()
         }
     }
@@ -356,6 +365,11 @@ private fun IdleFace(actions: UiActions) {
     var lookAtMs by remember { mutableStateOf(0L) }
     var tapAt by remember { mutableStateOf<Offset?>(null) }
     var tapAtMs by remember { mutableStateOf(0L) }
+    // The blob's centre and half-size in this page, for its room and its visiting friend.
+    var blobCenter by remember { mutableStateOf(Offset.Unspecified) }
+    var blobHalf by remember { mutableStateOf(0f) }
+    Box(Modifier.fillMaxSize()) {
+    BlobRoom(blobCenter, blobHalf, Modifier.fillMaxSize())
     Row(
         Modifier.fillMaxSize()
             .pointerInput(Unit) {
@@ -417,11 +431,23 @@ private fun IdleFace(actions: UiActions) {
                     }
                 }
             }
-            .onGloballyPositioned { rowCoords = it }
+            .onGloballyPositioned { r ->
+                rowCoords = r
+                blobCoords?.takeIf { b -> b.isAttached && r.isAttached }?.let { b ->
+                    blobCenter = r.localPositionOf(b, Offset(b.size.width / 2f, b.size.height / 2f))
+                }
+            }
             .padding(horizontal = if (hasNote) 24.dp else 40.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(if (hasNote) 170.dp else 220.dp).onGloballyPositioned { blobCoords = it }, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(if (hasNote) 170.dp else 220.dp).onGloballyPositioned {
+            blobCoords = it
+            blobHalf = it.size.width / 2f
+            // Measured against the whole page (the row's outer bounds), padding included.
+            rowCoords?.takeIf { r -> r.isAttached && it.isAttached }?.let { r ->
+                blobCenter = r.localPositionOf(it, Offset(it.size.width / 2f, it.size.height / 2f))
+            }
+        }, contentAlignment = Alignment.Center) {
             Blob(Modifier.fillMaxSize(), actions, lookAt, lookAtMs, tapAt, tapAtMs)
         }
         Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
@@ -464,6 +490,8 @@ private fun IdleFace(actions: UiActions) {
             BlobCards()
         }
         if (hasNote) NoteCard(note, actions)
+    }
+    FriendLayer(blobCenter, if (hasNote) 70.dp else 86.dp, actions)
     }
 }
 
@@ -517,7 +545,7 @@ private fun IdlePages(actions: UiActions) {
     // Guest mode leaves out the agenda page.
     val guest = rememberGuest()
     val diaryOn by GadgetState.diaryOn.collectAsState()
-    // Page ids: 0 clock, 1 agenda, 3 forecast, 6 diary, 4 TV remote, 5 laptop, 2 homelab (TV / laptop only when
+    // Page ids: 0 clock, 1 agenda, 3 forecast, 6 diary, 4 TV remote, 5 laptop, 7 Spotify, 2 homelab (TV / laptop only when
     // set up; guest mode leaves out the agenda, the diary and the laptop).
     val pages = buildList {
         add(0)
@@ -526,6 +554,7 @@ private fun IdlePages(actions: UiActions) {
         if (!guest && diaryOn) add(6)
         if (actions.tvAvailable()) add(4)
         if (!guest && actions.laptopAvailable()) add(5)
+        if (!guest && actions.laptopAvailable()) add(7)
         add(2)
     }
     val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { pages.size })
@@ -569,6 +598,7 @@ private fun IdlePages(actions: UiActions) {
             6 -> DiaryPage()
             4 -> TvRemotePage(actions)
             5 -> LaptopPage(actions)
+            7 -> SpotifyPage(actions)
             else -> HomelabPage(actions)
         }
     }
@@ -754,6 +784,16 @@ private fun HomelabPage(actions: UiActions) {
                 Text("  $label", color = Palette.muted, fontSize = 15.sp)
             }
             if (failed && h == null) Text("can't reach the Latitude", color = Palette.coral, fontSize = 15.sp)
+            // Pixel's weekly write-up (Sunday evenings).
+            val recap by GadgetState.weekRecap.collectAsState()
+            recap?.let { (text, at) ->
+                Spacer(Modifier.weight(1f))
+                val day = java.text.SimpleDateFormat("MMM d", Locale.US).format(Date(at))
+                Text("📰 This week ($day)", color = Palette.ink, fontSize = 14.sp,
+                    modifier = Modifier.background(Palette.card, RoundedCornerShape(50))
+                        .clickable { GadgetState.show(Screen.Text("This week on the Latitude", text)) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp))
+            }
         }
         val h = lab ?: return@Column
         Spacer(Modifier.height(10.dp))
@@ -1275,8 +1315,10 @@ private fun BlobCards() {
 private fun LaptopChip(modifier: Modifier = Modifier, actions: UiActions) {
     val st by GadgetState.laptopStatus.collectAsState()
     val guest = rememberGuest()
+    // Still polled overnight (for the wind-down nudge), but the chip stays hidden then, as before.
+    val quiet by GadgetState.quiet.collectAsState()
     val s = st
-    AnimatedVisibility(s != null && !guest, modifier, enter = fadeIn(), exit = fadeOut()) {
+    AnimatedVisibility(s != null && !guest && !quiet, modifier, enter = fadeIn(), exit = fadeOut()) {
         if (s == null) return@AnimatedVisibility
         val battery = s.batteryPercent?.let { p -> "$p%" + if (s.charging) " ⚡" else "" }
         val playing = if (s.playing && s.track.isNotBlank()) "▶ " + s.track + (if (s.artist.isNotBlank()) " – ${s.artist}" else "") else null
@@ -1548,4 +1590,28 @@ internal fun Body(text: String, color: Color = Palette.ink) {
 @Composable
 internal fun Mono(text: String) {
     Text(text, color = Palette.muted, fontSize = 11.sp, lineHeight = 14.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, textAlign = TextAlign.Start)
+}
+
+
+/** A new phone joined the Wi-Fi: offer guest mode for 4 hours. Goes away by itself after 10 minutes. */
+@Composable
+private fun VisitorPrompt(actions: UiActions) {
+    val who by GadgetState.visitorPrompt.collectAsState()
+    val name = who ?: return
+    LaunchedEffect(name) {
+        delay(10 * 60_000L)
+        GadgetState.setVisitorPrompt(null)
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { GadgetState.setVisitorPrompt(null) },
+        title = { Text(if (name.isNotEmpty()) "Hi, $name! 👋" else "A visitor! 👋") },
+        text = { Text("Turn on guest mode for 4 hours? It hides the agenda, notes, reminders and the laptop.") },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                actions.setGuestMode(4)
+                GadgetState.setVisitorPrompt(null)
+            }) { Text("Guest mode") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { GadgetState.setVisitorPrompt(null) }) { Text("No thanks") } },
+    )
 }

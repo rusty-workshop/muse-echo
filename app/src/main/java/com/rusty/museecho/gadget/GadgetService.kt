@@ -101,6 +101,7 @@ class GadgetService : Service() {
     private var disconnectedSince = 0L
     private lateinit var wakeWord: WakeWord
     private lateinit var diary: Diary
+    lateinit var life: BlobLife
     private var chime: android.media.Ringtone? = null
 
     override fun onCreate() {
@@ -193,6 +194,8 @@ class GadgetService : Service() {
         scope.launch { writeDiary() }
         scope.launch { fetchDailyThing() }
         scope.launch { watchDesktop() }
+        life = BlobLife(this, scope, hub, ::isQuietNow, ::quietAsk, { diary.load().size }, { frame.photos().size }).also { it.start() }
+        scope.launch { postJournal() }
         chores = Chores(this, scope, hub, timers, frame, agenda, laptop, ::applySettings,
             say = { text -> if (Prefs(this).speakReplies) speaker.speak(text) },
             chime = ::softChime,
@@ -202,6 +205,7 @@ class GadgetService : Service() {
             it.quickActionsNow = { quickActions.value.value }
             it.quickSetsNow = { quickSets.value.value }
             it.routinesNow = { routines.value.value.items }
+            it.askNow = ::askNow
             it.start()
         }
         // The blob's little sounds: its reactions, and taps from the screen.
@@ -1001,6 +1005,11 @@ class GadgetService : Service() {
         str("night_scene")?.let { v -> p.nightScene = v; GadgetState.setNightScene(v); done += "night_scene" }
         str("theme")?.let { v -> p.theme = v; GadgetState.setTheme(v); done += "theme" }
         str("background")?.let { v -> p.background = v; GadgetState.setBackground(v); done += "background" }
+        bool("blob_room")?.let { v -> p.blobRoom = v; life.loadRoom(); done += "blob_room" }
+        bool("blob_friend")?.let { v -> p.blobFriend = v; if (!v) life.endVisit(); done += "blob_friend" }
+        bool("laptop_break")?.let { v -> p.laptopBreak = v; done += "laptop_break" }
+        bool("warm_evenings")?.let { v -> p.warmEvenings = v; if (!v) GadgetState.setWarmth(0f); done += "warm_evenings" }
+        bool("bedtime_hint")?.let { v -> p.bedtimeHint = v; done += "bedtime_hint" }
         bool("room_sense")?.let { v -> p.roomSense = v; done += "room_sense" }
         bool("diary")?.let { v -> p.diary = v; GadgetState.setDiaryOn(v); done += "diary" }
         bool("daily_thing")?.let { v -> p.dailyThing = v; if (!v) GadgetState.setDailyThing(null); done += "daily_thing" }
@@ -1258,7 +1267,7 @@ class GadgetService : Service() {
             GadgetState.talk.value == Talk.LISTENING || GadgetState.talk.value == Talk.SENDING || GadgetState.speaking.value
         ) return
         GadgetState.log("room sense: dark at night, going to sleep")
-        DayLog.event("the lights went off, so I went to sleep")
+        DayLog.event("the lights went off, so I went to sleep", "sleep")
         goodnight()
     }
 
@@ -1268,7 +1277,7 @@ class GadgetService : Service() {
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         if (hour !in 5..11 || !(GadgetState.tuckedIn.value || GadgetState.asleep.value)) return
         GadgetState.log("room sense: lights on in the morning, waking up")
-        DayLog.event("the lights came on and I woke up")
+        DayLog.event("the lights came on and I woke up", "wake")
         GadgetState.setTuckedIn(false)
         GadgetState.setDim(null)
         GadgetState.lastTouch = System.currentTimeMillis()
@@ -1293,12 +1302,14 @@ class GadgetService : Service() {
      * has touched or talked to the Echo for a few minutes) and gives way to anything real:
      * talking cancels it. Null if there was no answer.
      */
-    private suspend fun quietAsk(prompt: String): String? {
+    private suspend fun quietAsk(prompt: String): String? = quietAskImpl(prompt, waitForCalm = true)
+
+    private suspend fun quietAskImpl(prompt: String, waitForCalm: Boolean): String? {
         val calm = kotlinx.coroutines.withTimeoutOrNull(20 * 60_000L) {
-            while (!(GadgetState.link.value == Link.CONNECTED && chat.feedOpen && turnJob?.isActive != true &&
-                    (GadgetState.talk.value == Talk.IDLE || GadgetState.talk.value == Talk.REPLIED) &&
-                    !GadgetState.speaking.value && System.currentTimeMillis() - GadgetState.lastTouch > 3 * 60_000L)
-            ) delay(15_000)
+            while (!(GadgetState.link.value == Link.CONNECTED && chat.feedOpen && turnJob?.isActive != true && quietJob?.isActive != true &&
+                    (GadgetState.talk.value == Talk.IDLE || GadgetState.talk.value == Talk.REPLIED) && !GadgetState.speaking.value &&
+                    (!waitForCalm || System.currentTimeMillis() - GadgetState.lastTouch > 3 * 60_000L))
+            ) delay(if (waitForCalm) 15_000 else 2_000)
             true
         } ?: return null
         if (!calm) return null
@@ -1336,12 +1347,20 @@ class GadgetService : Service() {
             if (triedFor != today) { triedFor = today; tries = 0 }
             if (tries >= 3) continue
             tries++
-            val w = GadgetState.weather.value?.let { "${it.summary}, high ${it.highF}° low ${it.lowF}°" }
-            val text = quietAsk(DayWriting.diaryPrompt(DayLog.today(), w)) ?: continue
-            if (java.time.LocalDate.now().toString() != today) continue
-            GadgetState.setDiary(diary.add(DiaryEntry(today, text.take(1500), System.currentTimeMillis())))
-            GadgetState.log("diary written")
+            diaryNow(waitForCalm = true)
         }
+    }
+
+    /** Write (or rewrite) today's diary entry now. */
+    suspend fun diaryNow(waitForCalm: Boolean): Boolean {
+        val today = java.time.LocalDate.now().toString()
+        val w = GadgetState.weather.value?.let { "${it.summary}, high ${it.highF}° low ${it.lowF}°" }
+        val text = quietAskImpl(DayWriting.diaryPrompt(DayLog.today(), w), waitForCalm) ?: return false
+        if (java.time.LocalDate.now().toString() != today) return false
+        GadgetState.setDiary(diary.add(DiaryEntry(today, text.take(1500), System.currentTimeMillis())))
+        GadgetState.log("diary written")
+        scope.launch { postJournalOnce() }
+        return true
     }
 
     /** Each morning: a word, fact or bit of history for the little sign on the clock page. */
@@ -1358,44 +1377,112 @@ class GadgetService : Service() {
                 if (triedFor != today) { triedFor = today; tries = 0 }
                 if (tries < 4) {
                     tries++
-                    val t = quietAsk(DayWriting.THING_PROMPT)?.let { DayWriting.parseThing(it, today) }
-                    if (t != null) {
-                        p.dailyThingJson = kotlinx.serialization.json.Json.encodeToString(DailyThing.serializer(), t)
-                        GadgetState.setDailyThing(t)
-                        GadgetState.log("thing of the day: ${t.title}")
-                        // Shown off for a few minutes when it arrives.
-                        if (!GadgetState.asleep.value) {
-                            GadgetState.react(Reaction.HOP)
-                            GadgetState.hold(HeldItem.NOTE, "${DayWriting.thingIcon(t.kind)} ${t.title}", 5)
-                        }
-                    }
+                    thingNow(waitForCalm = true)
                 }
             }
             delay(5 * 60_000L)
         }
     }
 
+    /** A new thing of the day now (replacing today's). */
+    suspend fun thingNow(waitForCalm: Boolean): Boolean {
+        val today = java.time.LocalDate.now().toString()
+        val t = quietAskImpl(DayWriting.THING_PROMPT, waitForCalm)?.let { DayWriting.parseThing(it, today) } ?: return false
+        val p = Prefs(this)
+        p.dailyThingJson = kotlinx.serialization.json.Json.encodeToString(DailyThing.serializer(), t)
+        val ser = kotlinx.serialization.builtins.ListSerializer(DailyThing.serializer())
+        val past = runCatching { kotlinx.serialization.json.Json.decodeFromString(ser, p.thingHistoryJson ?: "[]") }.getOrDefault(emptyList())
+        p.thingHistoryJson = kotlinx.serialization.json.Json.encodeToString(ser, (past + t).takeLast(30))
+        GadgetState.setDailyThing(t)
+        GadgetState.log("thing of the day: ${t.title}")
+        // Shown off for a few minutes when it arrives.
+        if (!GadgetState.asleep.value) {
+            GadgetState.react(Reaction.HOP)
+            GadgetState.hold(HeldItem.NOTE, "${DayWriting.thingIcon(t.kind)} ${t.title}", 5)
+        }
+        scope.launch { postJournalOnce() }
+        return true
+    }
+
+    /** From the settings page: the diary or a new thing of the day, now. */
+    fun askNow(what: String) {
+        scope.launch {
+            val ok = if (what == "diary") diaryNow(waitForCalm = false) else thingNow(waitForCalm = false)
+            GadgetState.log("asked from the laptop for the $what: ${if (ok) "done" else "no answer"}")
+        }
+    }
+
+    // -- The settings page's journal -------------------------------------------------------
+
+    private suspend fun postJournal() {
+        delay(30_000)
+        while (true) {
+            postJournalOnce()
+            delay(5 * 60_000L)
+        }
+    }
+
+    suspend fun postJournalOnce() {
+        val json = kotlinx.serialization.json.Json
+        val things = Prefs(this).thingHistoryJson ?: "[]"
+        hub.postJournal(kotlinx.serialization.json.buildJsonObject {
+            put("diary", json.parseToJsonElement(json.encodeToString(kotlinx.serialization.builtins.ListSerializer(DiaryEntry.serializer()),
+                GadgetState.diary.value.takeLast(30))))
+            put("things", json.parseToJsonElement(things))
+            put("day", json.parseToJsonElement(json.encodeToString(DayFacts.serializer(), DayLog.today())))
+            put("room", kotlinx.serialization.json.JsonArray(GadgetState.room.value.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            GadgetState.weekRecap.value?.let { (text, at) -> put("week_recap", text); put("week_recap_ms", at) }
+        })
+    }
+
     // -- Who's home ----------------------------------------------------------------------
 
-    /** Rusty's phone joining or leaving the home Wi-Fi (echo-hub watches for it). Also counts TV minutes. */
+    /** Rusty's phone joining or leaving the home Wi-Fi (echo-hub watches for it), and visitors. Also counts TV minutes. */
     private suspend fun watchPresence() {
         var last: com.rusty.museecho.integrations.Presence? = null
+        var tvWas = false
+        val greeted = HashSet<String>()
+        var first = true
         while (true) {
-            if (GadgetState.tvPlaying.value) DayLog.tvMinute()
-            val now = hub.presence()?.takeIf { it.configured && it.home != null }
+            val tv = GadgetState.tvPlaying.value
+            if (tv) DayLog.tvMinute()
+            if (tv != tvWas) DayLog.mark(if (tv) "tv_on" else "tv_off")
+            tvWas = tv
+            val p = hub.presence()
+            val now = p?.takeIf { it.configured && it.home != null }
             val prev = last
             if (now != null) {
                 if (prev?.home != null && prev.home != now.home) onPresence(now.home == true, prev.since)
                 last = now
             }
+            // A new phone on the Wi-Fi: say hi and offer guest mode (not if it's already on, or at night).
+            // (Ones already there when the app starts were greeted before.)
+            val fresh = p?.visitors?.filter { greeted.add(it.mac) }.orEmpty()
+            if (!first) fresh.lastOrNull()?.let { onVisitor(it.name) }
+            if (p != null) first = false
             delay(60_000)
         }
+    }
+
+    private fun noteLightsOff() {
+        if (::life.isInitialized) life.lightsOff()
+    }
+
+    private fun onVisitor(name: String) {
+        val nice = name.substringBefore('.').replace('-', ' ').takeIf { it.isNotBlank() && !it.first().isDigit() }.orEmpty()
+        GadgetState.log("visitor on the Wi-Fi${if (nice.isNotEmpty()) ": $nice" else ""}")
+        DayLog.event("a visitor's phone joined the Wi-Fi", "visitor")
+        if (isQuietNow() || GadgetState.guestMode()) return
+        GadgetState.react(Reaction.WAVE)
+        GadgetState.setMood(Mood.HAPPY, 60)
+        GadgetState.say("Oh, a visitor! Hi there! 👋", 30)
+        GadgetState.setVisitorPrompt(nice)
     }
 
     private fun onPresence(home: Boolean, prevSince: Double?) {
         if (home) {
             val away = prevSince?.let { System.currentTimeMillis() - (it * 1000).toLong() }
-            DayLog.event("you came home" + (away?.let { " after ${DayWriting.awayFor(it)} out" } ?: ""))
+            DayLog.event("you came home" + (away?.let { " after ${DayWriting.awayFor(it)} out" } ?: ""), "home")
             GadgetState.setMood(Mood.NEUTRAL, 0)
             // Short trips (and not knowing how long) don't get the fuss.
             if (away == null || away < 20 * 60_000L) return
@@ -1405,7 +1492,7 @@ class GadgetService : Service() {
             GadgetState.say("Welcome home! 🏠 You were out ${DayWriting.awayFor(away)}.", 90)
         } else {
             GadgetState.log("phone left")
-            DayLog.event("you went out")
+            DayLog.event("you went out", "left")
             GadgetState.react(Reaction.WAVE)
             GadgetState.say("Bye! 👋 See you later.", 60)
             // Dozes while you're out (until you're back, or a few hours).
@@ -1537,6 +1624,8 @@ class GadgetService : Service() {
                     if (wasDark != true && now - darkSince >= 60_000) {
                         GadgetState.setRoomDark(true)
                         GadgetState.log("room went dark (%.0f lux)".format(lux))
+                        DayLog.mark("lights_off")
+                        noteLightsOff()
                         onRoomDark()
                     }
                 } else {
@@ -1545,6 +1634,7 @@ class GadgetService : Service() {
                         GadgetState.setRoomDark(false)
                         if (wasDark == true) {
                             GadgetState.log("lights came on (%.0f lux)".format(lux))
+                            DayLog.mark("lights_on")
                             onLightsOn()
                         }
                     }
@@ -1944,6 +2034,27 @@ class Prefs(context: Context) {
         set(v) = prefs.edit().putString("background", v).apply()
 
     /** Lights off at night: go to sleep; lights on in the morning: wake up. */
+    var blobRoom: Boolean
+        get() = prefs.getBoolean("blob_room", true)
+        set(v) = prefs.edit().putBoolean("blob_room", v).apply()
+
+    var blobFriend: Boolean
+        get() = prefs.getBoolean("blob_friend", true)
+        set(v) = prefs.edit().putBoolean("blob_friend", v).apply()
+
+    /** Break and wind-down nudges from laptop use. */
+    var laptopBreak: Boolean
+        get() = prefs.getBoolean("laptop_break", true)
+        set(v) = prefs.edit().putBoolean("laptop_break", v).apply()
+
+    var warmEvenings: Boolean
+        get() = prefs.getBoolean("warm_evenings", true)
+        set(v) = prefs.edit().putBoolean("warm_evenings", v).apply()
+
+    var bedtimeHint: Boolean
+        get() = prefs.getBoolean("bedtime_hint", true)
+        set(v) = prefs.edit().putBoolean("bedtime_hint", v).apply()
+
     var roomSense: Boolean
         get() = prefs.getBoolean("room_sense", true)
         set(v) = prefs.edit().putBoolean("room_sense", v).apply()
@@ -1955,6 +2066,10 @@ class Prefs(context: Context) {
     var dailyThing: Boolean
         get() = prefs.getBoolean("daily_thing", true)
         set(v) = prefs.edit().putBoolean("daily_thing", v).apply()
+
+    var thingHistoryJson: String?
+        get() = prefs.getString("thing_history", null)
+        set(v) = prefs.edit().putString("thing_history", v).apply()
 
     var dailyThingJson: String?
         get() = prefs.getString("daily_thing_json", null)

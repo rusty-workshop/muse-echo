@@ -136,6 +136,7 @@ class Chores(
                         applySettings(changes)
                         postSettings()
                     }
+                    "ask" -> (item["what"] as? JsonPrimitive)?.contentOrNull?.let { askNow(it) }
                     "announce" -> {
                         val text = (item["text"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
                         GadgetState.log("announcement from the watch")
@@ -330,8 +331,15 @@ class Chores(
     /** Battery and what's playing, every minute while the laptop answers (cleared when it's away). */
     private suspend fun laptopStatus() {
         while (true) {
-            GadgetState.setLaptopStatus(if (laptop.configured && !isQuiet()) laptop.status() else null)
-            delay(60_000)
+            // Overnight too (for the late-night wind-down), just less often; quicker while music plays
+            // so the blob's moves follow the song.
+            val st = if (laptop.configured) laptop.status() else null
+            GadgetState.setLaptopStatus(st)
+            delay(when {
+                isQuiet() -> 180_000L
+                st?.playing == true -> 20_000L
+                else -> 60_000L
+            })
         }
     }
 
@@ -386,6 +394,11 @@ class Chores(
             put("theme", p.theme)
             put("background", p.background)
             put("room_sense", p.roomSense)
+            put("blob_room", p.blobRoom)
+            put("blob_friend", p.blobFriend)
+            put("laptop_break", p.laptopBreak)
+            put("warm_evenings", p.warmEvenings)
+            put("bedtime_hint", p.bedtimeHint)
             put("diary", p.diary)
             put("daily_thing", p.dailyThing)
             put("wellness_water", p.wellnessWater)
@@ -440,12 +453,13 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("state", list("EARS", "THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE"))
+                put("state", list("EARS", "THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
         })
     }
 
+    var askNow: (String) -> Unit = {}
     var quickActionsNow: () -> List<com.rusty.museecho.integrations.QuickAction> = { emptyList() }
     var routinesNow: () -> List<com.rusty.museecho.integrations.Routine> = { emptyList() }
     var quickSetsNow: () -> com.rusty.museecho.integrations.QuickActionSets = { com.rusty.museecho.integrations.QuickActionSets() }
@@ -466,8 +480,12 @@ class Chores(
         when (kind) {
             "reaction" -> Reaction.entries.firstOrNull { it.name == value }?.let { GadgetState.react(it) }
             "mood" -> Mood.entries.firstOrNull { it.name == value }?.let { GadgetState.setMood(it, 5) }
-            "state" -> if (value == "BUBBLE") GadgetState.say("Hi there! 👋 This is a speech bubble.", 5)
-                else GadgetState.preview(kind, value, PREVIEW_MS)
+            "state" -> when (value) {
+                "BUBBLE" -> GadgetState.say("Hi there! 👋 This is a speech bubble.", 5)
+                // A short real visit (a minute), since a friend can't pop in for just 5 seconds.
+                "FRIEND" -> GadgetService.instance?.life?.visit("chat", 1)
+                else -> GadgetState.preview(kind, value, PREVIEW_MS)
+            }
             else -> GadgetState.preview(kind, value, PREVIEW_MS)
         }
     }

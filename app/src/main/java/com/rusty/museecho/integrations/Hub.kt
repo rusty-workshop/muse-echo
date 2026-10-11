@@ -72,7 +72,12 @@ data class Activity(val busy: Boolean = false, val kinds: List<String> = emptyLi
 
 /** Whether Rusty's phone is on the home Wi-Fi (echo-hub looks for it every minute). */
 @Serializable
-data class Presence(val configured: Boolean = false, val label: String = "", val home: Boolean? = null, val since: Double? = null)
+data class Presence(val configured: Boolean = false, val label: String = "", val home: Boolean? = null, val since: Double? = null,
+    val visitors: List<Visitor> = emptyList())
+
+/** A new phone that joined the Wi-Fi recently. */
+@Serializable
+data class Visitor(val mac: String, val name: String = "", val at: Double = 0.0)
 
 /** The laptop's desktop colours and whether it sent a wallpaper (tools/desktop-sync). */
 @Serializable
@@ -145,6 +150,12 @@ class Hub(private val context: Context) {
     suspend fun homelab(): Homelab? = withContext(Dispatchers.IO) {
         get("/homelab")?.let { runCatching { json.decodeFromString(Homelab.serializer(), it) }.getOrNull() }
     }
+
+    /** The last 7 days on the Latitude, as raw JSON for Pixel to write up. */
+    suspend fun weekFacts(): String? = withContext(Dispatchers.IO) { get("/homelab/week") }
+
+    /** The diary, things of the day and today's timeline, for the settings page. */
+    suspend fun postJournal(j: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/journal", j.toString()).first == 200 }
 
     suspend fun presence(): Presence? = withContext(Dispatchers.IO) {
         get("/presence")?.let { runCatching { json.decodeFromString(Presence.serializer(), it) }.getOrNull() }

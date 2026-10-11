@@ -26,7 +26,15 @@ data class LaptopStatus(
     val batteryPercent: Int?, val charging: Boolean, val track: String, val artist: String, val playing: Boolean,
     val volume: Int = 0, val muted: Boolean = false,
     val keepAwake: Boolean = false, val nightlight: Boolean = false, val brightness: Int? = null,
+    val album: String = "",
+    /** Minutes of use without a 5-minute break, and seconds since the last input. */
+    val activeMinutes: Int = 0, val idleSeconds: Int = 0,
+    /** What the music sounds like: "calm", "groove", "hype", or "" (nothing / can't tell). */
+    val musicVibe: String = "",
 )
+
+/** A Spotify search result or queue entry (via the companion and spotify_player). */
+data class SpotifyItem(val uri: String, val title: String, val sub: String, val image: String, val kind: String = "track")
 
 /** A desktop notification mirrored from the laptop. */
 data class LaptopNotification(val id: Int, val app: String, val title: String, val text: String, val atMs: Long)
@@ -78,6 +86,10 @@ class Laptop(context: Context) {
                 keepAwake = (o["keepAwake"] as? JsonPrimitive)?.contentOrNull == "true",
                 nightlight = (o["nightlight"] as? JsonPrimitive)?.contentOrNull == "true",
                 brightness = (o["brightness"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull(),
+                album = str(m, "album"),
+                activeMinutes = (o["activeMinutes"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                idleSeconds = (o["idleSeconds"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                musicVibe = (o["musicVibe"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
             )
         }.getOrNull()
     }
@@ -126,6 +138,53 @@ class Laptop(context: Context) {
         val obj = runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull()
         val ok = (obj?.get("ok") as? JsonPrimitive)?.contentOrNull == "true"
         ok to ((obj?.get("message") as? JsonPrimitive)?.contentOrNull ?: body.take(200))
+    }
+
+    private fun items(arr: kotlinx.serialization.json.JsonElement?, kind: String): List<SpotifyItem> =
+        (arr as? JsonArray).orEmpty().mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            fun s(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            if (s("uri").isEmpty()) null else SpotifyItem(s("uri"), s("title"), s("sub"), s("image"), s("kind").ifEmpty { kind })
+        }
+
+    /** Spotify search: songs, albums and playlists. Error text in the second half when it fails. */
+    suspend fun spotifySearch(q: String): Pair<List<SpotifyItem>, String?> = withContext(Dispatchers.IO) {
+        val url = "http://$host/spotify/search?q=" + java.net.URLEncoder.encode(q, "UTF-8")
+        val body = call(Request.Builder().url(url).get(), allowError = true) ?: return@withContext emptyList<SpotifyItem>() to "couldn't reach the laptop"
+        runCatching {
+            val o = Json.parseToJsonElement(body) as JsonObject
+            (o["error"] as? JsonPrimitive)?.contentOrNull?.let { return@runCatching emptyList<SpotifyItem>() to it }
+            (items(o["tracks"], "track") + items(o["albums"], "album") + items(o["playlists"], "playlist")) to null
+        }.getOrDefault(emptyList<SpotifyItem>() to "bad answer from the laptop")
+    }
+
+    /** What's playing and what's next on Spotify (null: couldn't tell). */
+    suspend fun spotifyQueue(): Pair<SpotifyItem?, List<SpotifyItem>>? = withContext(Dispatchers.IO) {
+        val body = call(Request.Builder().url("http://$host/spotify/queue").get()) ?: return@withContext null
+        runCatching {
+            val o = Json.parseToJsonElement(body) as JsonObject
+            items(kotlinx.serialization.json.JsonArray(listOfNotNull(o["current"]?.takeIf { it is JsonObject })), "track").firstOrNull() to items(o["next"], "track")
+        }.getOrNull()
+    }
+
+    /** Play now ([queue] false) or add a song to the queue. Returns (ok, message). */
+    suspend fun spotify(uri: String, queue: Boolean): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject { put("uri", uri) }
+        val body = call(Request.Builder().url("http://$host/spotify/" + if (queue) "queue" else "play")
+            .post(payload.toString().toRequestBody("application/json".toMediaType())), allowError = true)
+            ?: return@withContext false to "couldn't reach the laptop"
+        val obj = runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+        ((obj?.get("ok") as? JsonPrimitive)?.contentOrNull == "true") to ((obj?.get("message") as? JsonPrimitive)?.contentOrNull ?: "")
+    }
+
+    /** A small picture (album art) from Spotify's image server. */
+    suspend fun image(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        if (!url.startsWith("https://")) return@withContext null
+        runCatching {
+            http.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                r.body?.bytes()?.takeIf { r.isSuccessful }?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
+            }
+        }.getOrNull()
     }
 
     private val longHttp = http.newBuilder().callTimeout(75, TimeUnit.SECONDS).readTimeout(70, TimeUnit.SECONDS).build()

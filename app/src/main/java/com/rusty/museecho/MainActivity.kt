@@ -376,6 +376,13 @@ class MainActivity : ComponentActivity() {
         override suspend fun restartContainer(name: String) =
             GadgetService.instance?.hub?.restartContainer(name) ?: (false to "the service isn't running")
 
+        override suspend fun spotifySearch(q: String) =
+            GadgetService.instance?.laptop?.spotifySearch(q) ?: (emptyList<com.rusty.museecho.integrations.SpotifyItem>() to "the service isn't running")
+        override suspend fun spotifyQueue() = GadgetService.instance?.laptop?.spotifyQueue()
+        override suspend fun spotify(uri: String, queue: Boolean) =
+            GadgetService.instance?.laptop?.spotify(uri, queue) ?: (false to "the service isn't running")
+        override suspend fun spotifyImage(url: String) = GadgetService.instance?.laptop?.image(url)
+
         override fun canSendToLaptop() = GadgetService.instance?.laptop?.configured == true
 
         override fun sendToLaptop(text: String, onResult: (Boolean) -> Unit) {

@@ -95,6 +95,8 @@ internal fun Blob(
     /** Where a mini blob looks, -1..1 each way. */
     gaze: Offset? = null,
     moodOverride: Mood? = null,
+    /** A colour of its own (the visiting friend). */
+    tintOverride: Color? = null,
 ) {
     val quiet by GadgetState.quiet.collectAsState()
     val speaking by GadgetState.speaking.collectAsState()
@@ -108,6 +110,9 @@ internal fun Blob(
     val alertGlow by GadgetState.alertGlow.collectAsState()
     val style by GadgetState.style.collectAsState()
     val nowPlaying by GadgetState.nowPlaying.collectAsState()
+    val laptopSt by GadgetState.laptopStatus.collectAsState()
+    // Music on the laptop counts too; how it sounds picks the moves.
+    val laptopVibe = laptopSt?.takeIf { it.playing && !mini }?.musicVibe.orEmpty()
     val tvPlaying by GadgetState.tvPlaying.collectAsState()
     val workingOn by GadgetState.workingOn.collectAsState()
     val bubble by GadgetState.bubble.collectAsState()
@@ -144,7 +149,7 @@ internal fun Blob(
     val state = rememberUpdatedState(Triple(quiet, speaking, talk))
     val reactionNow = rememberUpdatedState(reaction)
     val glowNow = rememberUpdatedState(alertGlow)
-    val musicOn = rememberUpdatedState(nowPlaying != null)
+    val musicOn = rememberUpdatedState(nowPlaying != null || laptopVibe.isNotEmpty())
     val timerSoon = rememberUpdatedState(timers.filter { it.kind == "timer" }.minOfOrNull { it.dueAtMs })
     val thinking = remember { object { var value = 0f } }
     // Eased values carried between frames (plain fields: they're only touched while drawing).
@@ -345,6 +350,8 @@ internal fun Blob(
     val wetAlert = remember(alerts) { alerts.any { a -> listOf("flood", "rain", "storm", "hurricane", "wind", "tornado").any { it in a.event.lowercase() } } }
     val severeAlert = remember(alerts) { alerts.any { it.severity.equals("Severe", true) || it.severity.equals("Extreme", true) } }
     val forecast = remember(weather) { forecastProp(weather) }
+    // What happened today (or yesterday, after midnight), to dream about.
+    val dreamTopics = remember(tick / 600_000) { dreamTopics(com.rusty.museecho.gadget.DayLog.dreamDay()) }
     Box(modifier.onSizeChanged { sizePx = it.width.toFloat() }) {
         Canvas(Modifier.fillMaxSize()) {
             val nowMs = System.currentTimeMillis()
@@ -365,7 +372,8 @@ internal fun Blob(
             val pv = previewNow?.takeIf { it.untilMs > nowMs && !mini }
             fun forced(kind: String) = pv?.takeIf { it.kind == kind }?.value
             val forcedState = forced("state")
-            val playingMusic = nowPlaying != null || forcedState == "MUSIC"
+            val playingMusic = nowPlaying != null || laptopVibe.isNotEmpty() || forcedState == "MUSIC"
+            val vibe = if (nowPlaying == null) laptopVibe else "groove"
             val newYear = isNewYearMidnight(cal)
             var mood = when {
                 moodOverride != null -> moodOverride
@@ -378,6 +386,7 @@ internal fun Blob(
                 talk == Talk.LISTENING -> Mood.CURIOUS
                 talk == Talk.ERROR -> Mood.SAD
                 (serverDown || severeAlert) && talk == Talk.IDLE && !speaking -> Mood.WORRIED
+                playingMusic && vibe == "calm" && !speaking && talk == Talk.IDLE -> Mood.DROWSY
                 playingMusic && !speaking && talk == Talk.IDLE -> Mood.HAPPY
                 else -> Mood.NEUTRAL
             }
@@ -396,6 +405,7 @@ internal fun Blob(
                 speaking -> Palette.teal
                 talk == Talk.LISTENING -> Palette.coral
                 talk == Talk.SENDING || talk == Talk.WAITING -> Palette.amber
+                tintOverride != null -> tintOverride
                 link == Link.CONNECTED -> ownColor ?: seasonal(cal)
                 else -> Palette.muted
             }
@@ -455,11 +465,24 @@ internal fun Blob(
             }
             if (react != null) looking = true
 
-            // Music: bob along (to its real loudness when the ROM lets us measure it).
-            if (playingMusic && react == null) {
-                val bob = abs(sin(t * PIF * 2f))
-                dy -= bob * r * 0.05f * (0.4f + 0.6f * music)
-                sy *= 1f - 0.03f * (1 - bob)
+            // Music: slow songs get a sleepy sway, loud ones a headbang, the rest a bob
+            // (to its real loudness when the ROM lets us measure it).
+            if (playingMusic && react == null) when (vibe) {
+                "calm" -> {
+                    dx += sin(t * 1.3f) * r * 0.05f
+                    dy -= abs(sin(t * 1.3f)) * r * 0.015f
+                }
+                "hype" -> {
+                    val bang = abs(sin(t * PIF * 2.3f))
+                    dy -= (1 - bang) * r * 0.07f
+                    sy *= 1f - 0.05f * bang
+                    if (!looking) { lookY = 0.2f + 0.7f * bang; looking = true }
+                }
+                else -> {
+                    val bob = abs(sin(t * PIF * 2f))
+                    dy -= bob * r * 0.05f * (0.4f + 0.6f * music)
+                    sy *= 1f - 0.03f * (1 - bob)
+                }
             }
             // A timer about to go off: glance up at it and fidget, faster near the end.
             val soon = timers.filter { it.kind == "timer" }.minOfOrNull { it.dueAtMs }?.minus(nowMs)
@@ -621,13 +644,19 @@ internal fun Blob(
                     if (react == Reaction.TEAR_PAGE) drawTornPage(hand, r, p)
                 }
                 if ((museBusy || forcedState == "BUSY_GEAR") && talk == Talk.IDLE && !mini) drawGear(core + Offset(r * 0.52f, -r * 0.46f), r * 0.09f, t * 1.5f)
-                if (mood == Mood.SLEEPY && react == null && !mini) drawDream(core, r, t, weather, dreamPhoto)
+                if (mood == Mood.SLEEPY && react == null && !mini) drawDream(core, r, t, weather, dreamPhoto, dreamTopics)
                 if (react == Reaction.COVER_EARS) drawEarCovers(core, r, p, tint)
                 // Ears perk up while it listens, and pop up the moment it hears the wake word.
                 val earsTarget = if (talk == Talk.LISTENING || System.currentTimeMillis() - GadgetState.earsAt < 2_500 || forcedState == "EARS") 1f else 0f
                 sm.ears += (earsTarget - sm.ears) * ease(if (earsTarget > sm.ears) 14f else 6f)
                 if (sm.ears > 0.02f) drawEars(core, r, sm.ears, tint, t)
                 if ((muted || forcedState == "MUTED") && !mini) drawMuted(core + Offset(-r * 0.5f, -r * 0.42f), r * 0.07f)
+            }
+
+            // A new album started on the laptop: a little record spins beside it for a while.
+            if (!mini && nowMs - GadgetState.vinylAt < 20_000) {
+                val fade = (1f - (nowMs - GadgetState.vinylAt - 17_000) / 3_000f).coerceIn(0f, 1f)
+                drawVinyl(body + Offset(r * 0.62f, r * 0.42f), r * 0.17f, t, fade)
             }
 
             // -- In front: confetti --------------------------------------------------------
@@ -1306,8 +1335,76 @@ private fun DrawScope.drawGear(c: Offset, size: Float, angle: Float) {
     drawCircle(Palette.night, size * 0.4f, c)
 }
 
-/** A thought cloud while it sleeps, dreaming of the weather, a photo, a heart, music or confetti. */
-private fun DrawScope.drawDream(core: Offset, r: Float, t: Float, weather: WeatherNow?, photo: androidx.compose.ui.graphics.ImageBitmap?) {
+/** Things from the day worth dreaming about. */
+internal enum class DreamTopic { TV, OUT, TALK, TIMER, WATER, MUSIC, FRIEND, POKE }
+
+internal fun dreamTopics(f: com.rusty.museecho.gadget.DayFacts): List<DreamTopic> = buildList {
+    if (f.tvMinutes >= 15) add(DreamTopic.TV)
+    if (f.events.any { "went out" in it }) add(DreamTopic.OUT)
+    if (f.talks > 0) add(DreamTopic.TALK)
+    if (f.timers > 0) add(DreamTopic.TIMER)
+    if (f.nudges > 0) add(DreamTopic.WATER)
+    if (f.musicMinutes >= 10) add(DreamTopic.MUSIC)
+    if (f.friendVisits > 0) add(DreamTopic.FRIEND)
+    if (f.pokes > 0) add(DreamTopic.POKE)
+}
+
+private fun DrawScope.drawVinyl(c: Offset, rad: Float, t: Float, alpha: Float) {
+    drawCircle(Color(0xFF151218).copy(alpha = alpha), rad, c)
+    for (i in 1..3) drawCircle(Color.White.copy(alpha = 0.08f * alpha), rad * (0.45f + i * 0.15f), c, style = Stroke(rad * 0.03f))
+    drawCircle(Palette.coral.copy(alpha = alpha), rad * 0.3f, c)
+    val a = t * 4f
+    drawLine(Color.White.copy(alpha = 0.35f * alpha), c + Offset(cos(a) * rad * 0.35f, sin(a) * rad * 0.35f),
+        c + Offset(cos(a) * rad * 0.9f, sin(a) * rad * 0.9f), rad * 0.06f, StrokeCap.Round)
+    drawCircle(Palette.night.copy(alpha = alpha), rad * 0.06f, c)
+}
+
+/** A doodle of something from the day, inside the dream cloud at [d]. */
+private fun DrawScope.drawDayDoodle(topic: DreamTopic, d: Offset, r: Float, t: Float) {
+    val ink = Palette.ink.copy(alpha = 0.8f)
+    when (topic) {
+        DreamTopic.TV -> {
+            drawRoundRect(ink, Offset(d.x - r * 0.09f, d.y - r * 0.06f), Size(r * 0.18f, r * 0.12f), CornerRadius(r * 0.02f), style = Stroke(r * 0.015f))
+            drawRect(Palette.teal.copy(alpha = 0.5f + 0.3f * sin(t * 3f)), Offset(d.x - r * 0.07f, d.y - r * 0.045f), Size(r * 0.14f, r * 0.09f))
+            drawLine(ink, d + Offset(-r * 0.04f, -r * 0.06f), d + Offset(-r * 0.07f, -r * 0.1f), r * 0.012f)
+            drawLine(ink, d + Offset(r * 0.04f, -r * 0.06f), d + Offset(r * 0.07f, -r * 0.1f), r * 0.012f)
+        }
+        DreamTopic.OUT -> {
+            // A little door, ajar.
+            drawRect(Palette.amber.copy(alpha = 0.8f), Offset(d.x - r * 0.06f, d.y - r * 0.1f), Size(r * 0.12f, r * 0.19f))
+            drawRect(Palette.night.copy(alpha = 0.7f), Offset(d.x - r * 0.06f, d.y - r * 0.1f), Size(r * 0.05f, r * 0.19f))
+            drawCircle(Palette.night, r * 0.012f, d + Offset(r * 0.035f, 0f))
+        }
+        DreamTopic.TALK -> {
+            drawRoundRect(ink, Offset(d.x - r * 0.09f, d.y - r * 0.06f), Size(r * 0.18f, r * 0.1f), CornerRadius(r * 0.04f))
+            drawPath(Path().apply { moveTo(d.x - r * 0.04f, d.y + r * 0.04f); lineTo(d.x - r * 0.06f, d.y + r * 0.08f); lineTo(d.x, d.y + r * 0.04f); close() }, ink)
+            for (i in -1..1) drawCircle(Palette.night, r * 0.012f, d + Offset(i * r * 0.04f, -r * 0.01f))
+        }
+        DreamTopic.TIMER -> {
+            drawCircle(ink, r * 0.08f, d, style = Stroke(r * 0.015f))
+            val a = t * 1.5f
+            drawLine(ink, d, d + Offset(cos(a) * r * 0.06f, sin(a) * r * 0.06f), r * 0.015f, StrokeCap.Round)
+        }
+        DreamTopic.WATER -> drawPath(Path().apply {
+            moveTo(d.x, d.y - r * 0.1f)
+            cubicTo(d.x + r * 0.08f, d.y, d.x + r * 0.06f, d.y + r * 0.07f, d.x, d.y + r * 0.07f)
+            cubicTo(d.x - r * 0.06f, d.y + r * 0.07f, d.x - r * 0.08f, d.y, d.x, d.y - r * 0.1f)
+        }, Palette.teal)
+        DreamTopic.MUSIC -> drawVinyl(d, r * 0.09f, t, 0.9f)
+        DreamTopic.FRIEND -> {
+            drawCircle(Palette.coral.copy(alpha = 0.8f), r * 0.06f, d + Offset(-r * 0.05f, 0f))
+            drawCircle(Palette.teal.copy(alpha = 0.8f), r * 0.05f, d + Offset(r * 0.06f, r * 0.01f))
+        }
+        DreamTopic.POKE -> for (i in 0 until 5) {
+            val ang = i * TAU / 5 - PIF / 2
+            drawLine(Palette.amber, d, d + Offset(cos(ang) * r * 0.08f, sin(ang) * r * 0.08f), r * 0.02f, StrokeCap.Round)
+        }
+    }
+}
+
+/** A thought cloud while it sleeps, dreaming of its day, the weather, a photo, a heart, music or confetti. */
+private fun DrawScope.drawDream(core: Offset, r: Float, t: Float, weather: WeatherNow?, photo: androidx.compose.ui.graphics.ImageBitmap?,
+    topics: List<DreamTopic> = emptyList()) {
     val bob = sin(t * 0.8f) * r * 0.02f
     val d = core + Offset(-r * 0.66f, -r * 0.78f + bob)
     val puff = Palette.ink.copy(alpha = 0.16f)
@@ -1316,7 +1413,13 @@ private fun DrawScope.drawDream(core: Offset, r: Float, t: Float, weather: Weath
     drawCircle(puff, r * 0.2f, d)
     drawCircle(puff, r * 0.13f, d + Offset(-r * 0.16f, r * 0.05f))
     drawCircle(puff, r * 0.13f, d + Offset(r * 0.16f, r * 0.05f))
-    val theme = ((t / 40f).toInt()) % 5
+    // Mostly the day's own moments (each for 40 s), with the old dreams mixed in.
+    val slot = (t / 40f).toInt()
+    if (topics.isNotEmpty() && slot % 3 != 2) {
+        drawDayDoodle(topics[(slot / 3 * 2 + slot % 3) % topics.size], d, r, t)
+        return
+    }
+    val theme = slot % 5
     when (theme) {
         0 -> {
             val s = (weather?.tomorrowSummary?.ifEmpty { null } ?: weather?.summary).orEmpty().lowercase()

@@ -538,6 +538,26 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 ToggleRow("Thing of the day", "A word, fact or bit of history on a little sign each morning", thingOn) {
                     thingOn = it; prefs.dailyThing = it; if (!it) GadgetState.setDailyThing(null)
                 }
+                var roomOn by remember { mutableStateOf(prefs.blobRoom) }
+                var friendOn by remember { mutableStateOf(prefs.blobFriend) }
+                var breakOn by remember { mutableStateOf(prefs.laptopBreak) }
+                var warmOn by remember { mutableStateOf(prefs.warmEvenings) }
+                var bedOn by remember { mutableStateOf(prefs.bedtimeHint) }
+                ToggleRow("Blob's room", "Things it collects over the weeks, drawn faintly behind it", roomOn) {
+                    roomOn = it; prefs.blobRoom = it; com.rusty.museecho.gadget.GadgetService.instance?.life?.loadRoom()
+                }
+                ToggleRow("Friend visits", "A second blob drops by now and then to chat, play tag or nap", friendOn) {
+                    friendOn = it; prefs.blobFriend = it
+                }
+                ToggleRow("Laptop breaks", "A nudge after 2 hours at the laptop, and a wind-down hint late at night", breakOn) {
+                    breakOn = it; prefs.laptopBreak = it
+                }
+                ToggleRow("Warm evenings", "The screen turns a little warmer from sunset to sunrise", warmOn) {
+                    warmOn = it; prefs.warmEvenings = it; if (!it) GadgetState.setWarmth(0f)
+                }
+                ToggleRow("Bedtime reminder", "Learns when the lights usually go off and mentions it if you're up much later", bedOn) {
+                    bedOn = it; prefs.bedtimeHint = it
+                }
                 Body("Welcome home: pick your phone on the laptop settings page (http://${actions.hubHost()}/settings).", Palette.muted)
 
                 SectionTitle("Wellness nudges")

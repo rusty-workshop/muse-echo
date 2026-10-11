@@ -128,6 +128,13 @@ class EchoCommands(
                 "say \"You did it!\", then accessory party_hat for 1 hour.",
             required = mapOf("steps" to param("array", "The steps, each an object as described.")),
             timeoutMs = 75_000)
+        spec("blob.friend",
+            "Invite the blob's friend (a second, smaller blob) over to the Echo Show for a visit: they chat in " +
+                "speech bubbles, play tag, or nap together. It also drops by by itself now and then.",
+            optional = mapOf(
+                "activity" to param("string", "chat, tag or nap. Default: one that suits the time of day."),
+                "minutes" to param("integer", "How long it stays, 1 to 30."),
+            ))
         spec("blob.say",
             "Show a short silent speech bubble beside the Echo Show's blob, e.g. \"Don't forget the trash!\". " +
                 "Nothing is spoken, so it suits quiet hours. Empty text clears it.",
@@ -165,6 +172,11 @@ class EchoCommands(
                 "blob.style" -> blobStyle(params.string("color"), params.string("accessory"), params.int("hours"))
                 "blob.hold" -> hold(params.string("item"), params.string("text"), params.int("minutes"))
                 "blob.sequence" -> sequence(params["steps"])
+                "blob.friend" -> {
+                    val life = GadgetService.instance?.life ?: return@withTimeout commandError("not ready yet")
+                    val msg = life.visit(params.string("activity"), params.int("minutes"))
+                    if (msg == "already visiting") commandError(msg) else commandOk(buildJsonObject { put("status", msg) })
+                }
                 "blob.say" -> {
                     val text = params.string("text").orEmpty()
                     if (text.length > 120) return@withTimeout commandError("text must be 120 characters or fewer")

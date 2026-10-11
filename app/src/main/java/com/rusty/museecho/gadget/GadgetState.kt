@@ -40,6 +40,9 @@ data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
 data class Bubble(val text: String, val untilMs: Long)
 
+/** The blob's friend visiting: chatting, playing tag or napping, until [untilMs]. */
+data class FriendVisit(val activity: String, val startMs: Long, val untilMs: Long, val color: Long)
+
 data class MoodSet(val mood: Mood, val untilMs: Long)
 
 data class ReactionEvent(val reaction: Reaction, val atMs: Long)
@@ -170,6 +173,10 @@ object GadgetState {
     fun setAsleep(on: Boolean) {
         _asleep.value = on
     }
+
+    /** When the laptop started a new album (the blob spins a little record for a while). */
+    @Volatile
+    var vinylAt = 0L
 
     /** Last time someone touched the screen (for the idle slideshow). */
     @Volatile
@@ -501,6 +508,54 @@ object GadgetState {
 
     fun setDailyThing(t: DailyThing?) {
         _dailyThing.value = t
+    }
+
+    /** What's in the blob's room so far (Decor names). Empty: room switched off or nothing yet. */
+    private val _room = MutableStateFlow<Set<String>>(emptySet())
+    val room: StateFlow<Set<String>> = _room.asStateFlow()
+
+    fun setRoom(items: Set<String>) {
+        _room.value = items
+    }
+
+    /** The blob's friend, while it's visiting. */
+    private val _friend = MutableStateFlow<FriendVisit?>(null)
+    val friend: StateFlow<FriendVisit?> = _friend.asStateFlow()
+
+    fun setFriend(v: FriendVisit?) {
+        _friend.value = v
+    }
+
+    /** What the friend is saying right now. */
+    private val _friendSay = MutableStateFlow<String?>(null)
+    val friendSay: StateFlow<String?> = _friendSay.asStateFlow()
+
+    fun setFriendSay(text: String?) {
+        _friendSay.value = text
+    }
+
+    /** A new phone on the Wi-Fi: offer guest mode (its name, or "" for unnamed). Null: nothing to ask. */
+    private val _visitorPrompt = MutableStateFlow<String?>(null)
+    val visitorPrompt: StateFlow<String?> = _visitorPrompt.asStateFlow()
+
+    fun setVisitorPrompt(name: String?) {
+        _visitorPrompt.value = name
+    }
+
+    /** This week on the Latitude, as Pixel wrote it (text, when). */
+    private val _weekRecap = MutableStateFlow<Pair<String, Long>?>(null)
+    val weekRecap: StateFlow<Pair<String, Long>?> = _weekRecap.asStateFlow()
+
+    fun setWeekRecap(r: Pair<String, Long>?) {
+        _weekRecap.value = r
+    }
+
+    /** Warm evening tint over the screen, 0 (off) to 1 (full). */
+    private val _warmth = MutableStateFlow(0f)
+    val warmth: StateFlow<Float> = _warmth.asStateFlow()
+
+    fun setWarmth(v: Float) {
+        _warmth.value = v
     }
 
     /** The touch timer / alarm pad is open (tap the clock). */
