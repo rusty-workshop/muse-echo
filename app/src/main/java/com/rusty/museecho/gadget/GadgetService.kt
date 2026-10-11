@@ -119,6 +119,7 @@ class GadgetService : Service() {
         GadgetState.setServerPill(Prefs(this).showServerPill)
         GadgetState.setBlobEnergy(Prefs(this).blobEnergy)
         GadgetState.setClockFace(Prefs(this).clockFace)
+        GadgetState.setFrameClock(Prefs(this).frameClock)
         GadgetState.setDismissedAlerts(Prefs(this).dismissedAlerts)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
@@ -1425,6 +1426,10 @@ class Prefs(context: Context) {
     var blobSounds: Boolean
         get() = prefs.getBoolean("blob_sounds", true)
         set(v) = prefs.edit().putBoolean("blob_sounds", v).apply()
+
+    var frameClock: String
+        get() = prefs.getString("frame_clock", "CORNER") ?: "CORNER"
+        set(v) = prefs.edit().putString("frame_clock", v).apply()
 
     var clockFace: String
         get() = prefs.getString("clock_face", "CLASSIC") ?: "CLASSIC"

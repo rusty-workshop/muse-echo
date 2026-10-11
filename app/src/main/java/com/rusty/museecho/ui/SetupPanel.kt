@@ -1,6 +1,8 @@
 package com.rusty.museecho.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.LaunchedEffect
@@ -258,6 +260,8 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     "brings them over within 15 minutes), or $museName can add some (frame.add)." else
                     "$photoCount photos. Starts after the Echo's been idle this long; a tap ends it. New pictures in the " +
                     "laptop's \"Pictures/Echo Frame\" folder arrive by themselves.", Palette.muted)
+                Body("Slideshow clock", Palette.ink)
+                FrameClockPicker(actions)
                 var syncMsg by remember { mutableStateOf<String?>(null) }
                 TextButton(onClick = {
                     syncMsg = "Checking the Latitude…"
@@ -593,6 +597,59 @@ private fun ClockFacePicker() {
                 }
                 Text(face.label, color = Palette.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text(face.blurb, color = Palette.muted, fontSize = 11.sp, maxLines = 2)
+            }
+        }
+    }
+}
+
+/** The slideshow clock styles as live miniatures over one of the frame's own photos; tap one to use it. */
+@Composable
+private fun FrameClockPicker(actions: UiActions) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val current by GadgetState.frameClock.collectAsState()
+    val weather by GadgetState.weather.collectAsState()
+    var now by remember { mutableStateOf(java.util.Date()) }
+    var photo by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(Unit) {
+        photo = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            actions.framePhotos().randomOrNull()?.let { f ->
+                runCatching {
+                    android.graphics.BitmapFactory.decodeFile(f.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 })?.asImageBitmap()
+                }.getOrNull()
+            }
+        }
+        while (true) {
+            kotlinx.coroutines.delay(1000L - System.currentTimeMillis() % 1000L)
+            now = java.util.Date()
+        }
+    }
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+    ) {
+        FrameClock.entries.forEach { style ->
+            val selected = style.name == current
+            Column(
+                Modifier.width(205.dp)
+                    .background(if (selected) Palette.violet.copy(alpha = 0.22f) else Palette.card, RoundedCornerShape(14.dp))
+                    .border(if (selected) 2.dp else 0.dp, if (selected) Palette.violet else Color.Transparent, RoundedCornerShape(14.dp))
+                    .clickable {
+                        GadgetState.setFrameClock(style.name)
+                        com.rusty.museecho.gadget.Prefs(ctx).frameClock = style.name
+                    }
+                    .padding(8.dp),
+            ) {
+                // A 2:1 miniature of the Echo's screen: the photo (or a dusky gradient) and the clock on it.
+                Box(Modifier.fillMaxWidth().height(92.dp).clip(RoundedCornerShape(8.dp))
+                    .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF5B7DB8), Color(0xFFE8A27A))))) {
+                    photo?.let {
+                        androidx.compose.foundation.Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                    }
+                    FrameClockOverlay(style, now, weather, scale = 0.2f)
+                }
+                Text(style.label, color = Palette.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+                Text(style.blurb, color = Palette.muted, fontSize = 11.sp, maxLines = 2)
             }
         }
     }

@@ -1075,12 +1075,11 @@ private fun SlideshowContent(actions: UiActions) {
         Crossfade(targetState = bitmap, animationSpec = tween(1500), label = "frame") { b ->
             if (b != null) Image(b.asImageBitmap(), contentDescription = "Photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        Column(
-            Modifier.align(Alignment.BottomStart).padding(20.dp)
-                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
-        ) {
-            Text(SimpleDateFormat("h:mm", Locale.US).format(now), color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Light)
-            Text(SimpleDateFormat("EEEE, MMMM d", Locale.US).format(now), color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp)
+        val style by GadgetState.frameClock.collectAsState()
+        val weather by GadgetState.weather.collectAsState()
+        // Fades between styles too, if it's changed while the slideshow runs.
+        Crossfade(targetState = FrameClock.of(style), animationSpec = tween(600), label = "frameClock") { fc ->
+            FrameClockOverlay(fc, now, weather)
         }
     }
 }

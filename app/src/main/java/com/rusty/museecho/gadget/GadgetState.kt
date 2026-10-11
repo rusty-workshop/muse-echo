@@ -420,6 +420,14 @@ object GadgetState {
         _sounds.tryEmit(sound)
     }
 
+    /** The photo slideshow's clock style (a FrameClock name). */
+    private val _frameClock = MutableStateFlow("CORNER")
+    val frameClock: StateFlow<String> = _frameClock.asStateFlow()
+
+    fun setFrameClock(name: String) {
+        _frameClock.value = name
+    }
+
     /** The idle screen's clock style (a ClockFace name). */
     private val _clockFace = MutableStateFlow("CLASSIC")
     val clockFace: StateFlow<String> = _clockFace.asStateFlow()
