@@ -68,6 +68,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -211,14 +212,21 @@ fun MuseEchoApp(actions: UiActions) {
                     is Screen.Text -> TextScreen(s, actions::dismissScreen)
                 }
             }
-            Row(Modifier.align(Alignment.TopStart).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // The status chips stop short of the icons on the right (their width varies), and the laptop
+            // chip shrinks with an ellipsis rather than running into them.
+            var iconsWidth by remember { mutableStateOf(0) }
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            Row(
+                Modifier.align(Alignment.TopStart).padding(14.dp).padding(end = with(density) { iconsWidth.toDp() } + 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 StatusChip(Modifier)
                 val showPill by GadgetState.serverPill.collectAsState()
                 if (showPill) ServerLight(Modifier)
-                LaptopChip()
+                LaptopChip(Modifier.weight(1f, fill = false))
             }
             UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
-            Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
+            Row(Modifier.align(Alignment.TopEnd).padding(6.dp).onSizeChanged { iconsWidth = it.width }) {
                 IconButton(onClick = { actions.setMicOff(!micOff) }) {
                     Icon(if (micOff) Icons.Filled.MicOff else Icons.Filled.Mic, if (micOff) "Turn mic on" else "Turn mic off",
                         tint = if (micOff) Palette.coral else Palette.muted)
@@ -1077,18 +1085,18 @@ private fun BlobCards(modifier: Modifier, actions: UiActions) {
 
 /** The laptop's battery and what it's playing, beside the status chips while it's home (not in guest mode). */
 @Composable
-private fun LaptopChip() {
+private fun LaptopChip(modifier: Modifier = Modifier) {
     val st by GadgetState.laptopStatus.collectAsState()
     val guest = rememberGuest()
     val s = st
-    AnimatedVisibility(s != null && !guest, enter = fadeIn(), exit = fadeOut()) {
+    AnimatedVisibility(s != null && !guest, modifier, enter = fadeIn(), exit = fadeOut()) {
         if (s == null) return@AnimatedVisibility
         val battery = s.batteryPercent?.let { p -> "$p%" + if (s.charging) " ⚡" else "" }
         val playing = if (s.playing && s.track.isNotBlank()) "▶ " + s.track + (if (s.artist.isNotBlank()) " – ${s.artist}" else "") else null
         Text(listOfNotNull("💻", battery, playing).joinToString("  "),
             color = if (s.batteryPercent != null && s.batteryPercent <= 15 && !s.charging) Palette.coral else Palette.ink,
             fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 300.dp).background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50))
+            modifier = Modifier.background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50))
                 .padding(horizontal = 12.dp, vertical = 6.dp))
     }
 }
