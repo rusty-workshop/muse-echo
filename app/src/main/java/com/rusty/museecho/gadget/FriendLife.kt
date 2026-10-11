@@ -51,28 +51,43 @@ class FriendLife(
         return f
     }
 
-    /** More friends turn up over the weeks: a second after 5 days, a third after 12, a fourth after 25. */
+    /**
+     * More friends turn up over the weeks: after 5, 12 and 25 days, then one every two weeks
+     * (up to 12), on top of any added by hand.
+     */
     private fun maybeNewFriend() {
         val have = store.data.friends
         val first = have.minOfOrNull { it.metMs } ?: return
         val days = (System.currentTimeMillis() - first) / 86_400_000L
-        val due = 1 + listOf(5L, 12L, 25L).count { days >= it }
-        if (have.size < due && have.all { it.visits > 0 }) newFriend()
+        val due = 1 + listOf(5L, 12L, 25L).count { days >= it } + ((days - 25) / 14).coerceAtLeast(0).toInt() +
+            prefs.getInt("friends_bonus", 0)
+        if (have.size < due.coerceAtMost(12) && have.all { it.visits > 0 }) newFriend()
     }
 
-    /** Pixel names each friend and writes a little bio. */
+    /** New friends now (the settings page, Pixel); Pixel names them over the next few minutes. */
+    fun addFriends(count: Int): Int {
+        val n = count.coerceIn(1, 6).coerceAtMost(12 - store.data.friends.size).coerceAtLeast(0)
+        repeat(n) { newFriend() }
+        prefs.edit().putInt("friends_bonus", prefs.getInt("friends_bonus", 0) + n).apply()
+        return n
+    }
+
+    /** Pixel names each friend and writes a little bio (one at a time, so the names all differ). */
     private suspend fun namingLoop() {
         delay(2 * 60_000L)
         while (true) {
-            store.data.friends.firstOrNull { it.name.isBlank() }?.let { f ->
+            val f = store.data.friends.firstOrNull { it.name.isBlank() }
+            if (f != null) {
                 val named = quietAsk(FriendsBrain.namePrompt(f, store.data.friends.filter { it.name.isNotBlank() }))
                     ?.let(FriendsBrain::parseName)
+                    ?.takeIf { n -> store.data.friends.none { it.name.equals(n.first, ignoreCase = true) } }
                 if (named != null) {
                     store.edit(f.id) { it.copy(name = named.first, bio = named.second) }
                     GadgetState.log("friend named ${named.first}")
                 }
             }
-            delay(10 * 60_000L)
+            // Quickly while there are names to give, then just a look now and then.
+            delay(if (store.data.friends.any { it.name.isBlank() }) 60_000L else 10 * 60_000L)
         }
     }
 

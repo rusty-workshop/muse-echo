@@ -196,6 +196,11 @@ class Chores(
                         }
                         postState()
                     }
+                    "friends_add" -> {
+                        val n = (item["count"] as? JsonPrimitive)?.intOrNull ?: 1
+                        val added = GadgetService.instance?.life?.friends?.addFriends(n) ?: 0
+                        GadgetState.log("new friends from the laptop: $added")
+                    }
                     "ask" -> (item["what"] as? JsonPrimitive)?.contentOrNull?.let { askNow(it) }
                     "announce" -> {
                         val text = (item["text"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
