@@ -1,0 +1,6 @@
+[Unit]
+Description=Send desktop colours and wallpaper to the Muse Echo (via echo-hub)
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/muse-echo/tools/desktop-sync/desktop-sync.py

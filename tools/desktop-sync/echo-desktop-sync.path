@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch ii dots' generated colours for the Muse Echo
+
+[Path]
+PathChanged=%h/.local/state/quickshell/user/generated/colors.json
+PathChanged=%h/.local/state/quickshell/user/generated/wallpaper/path.txt
+
+[Install]
+WantedBy=default.target

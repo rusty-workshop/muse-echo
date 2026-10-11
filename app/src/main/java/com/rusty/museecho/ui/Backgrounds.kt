@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import com.rusty.museecho.gadget.GadgetState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +38,7 @@ enum class AppBackground(val label: String, val blurb: String) {
     AURORA("Aurora", "Soft coloured light drifting very slowly"),
     CLOUDS("Clouds", "Faint clouds sliding across"),
     PHOTO("Photo", "One of your frame photos, blurred and dimmed, changing hourly"),
+    LAPTOP_WALLPAPER("Laptop wallpaper", "The laptop's current wallpaper, blurred and dimmed"),
     ;
 
     companion object {
@@ -93,26 +96,36 @@ internal fun AppBackgroundView(style: AppBackground, actions: UiActions) {
             var photo by remember { mutableStateOf<ImageBitmap?>(null) }
             LaunchedEffect(Unit) {
                 while (true) {
-                    photo = withContext(Dispatchers.IO) {
-                        actions.framePhotos().randomOrNull()?.let { f ->
-                            runCatching {
-                                val bmp = android.graphics.BitmapFactory.decodeFile(f.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 })
-                                    ?: return@runCatching null
-                                // Shrunk hard and stretched back up: a soft blur without RenderEffect (Android 11).
-                                android.graphics.Bitmap.createScaledBitmap(bmp, 40, (40f * bmp.height / bmp.width).toInt().coerceAtLeast(1), true).asImageBitmap()
-                            }.getOrNull()
-                        }
-                    } ?: photo
+                    photo = withContext(Dispatchers.IO) { actions.framePhotos().randomOrNull()?.let(::blurred) } ?: photo
                     delay(60 * 60_000L)
                 }
             }
-            Crossfade(targetState = photo, animationSpec = tween(3000), label = "bgPhoto") { p ->
-                if (p != null) Box(Modifier.fillMaxSize()) {
-                    Image(p, null, Modifier.fillMaxSize().graphicsLayer { scaleX = 1.15f; scaleY = 1.15f },
-                        contentScale = ContentScale.Crop, filterQuality = FilterQuality.High)
-                    Box(Modifier.fillMaxSize().background(Palette.night.copy(alpha = 0.62f)))
-                }
-            }
+            BlurredPhoto(photo)
+        }
+        AppBackground.LAPTOP_WALLPAPER -> {
+            // Redecoded whenever the laptop sends a new one.
+            val wp by GadgetState.desktopWallpaper.collectAsState()
+            var photo by remember { mutableStateOf<ImageBitmap?>(null) }
+            LaunchedEffect(wp) { photo = withContext(Dispatchers.IO) { wp?.first?.let(::blurred) } ?: photo }
+            BlurredPhoto(photo)
+        }
+    }
+}
+
+/** Shrunk hard and stretched back up: a soft blur without RenderEffect (Android 11). */
+private fun blurred(f: java.io.File): ImageBitmap? = runCatching {
+    val bmp = android.graphics.BitmapFactory.decodeFile(f.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 })
+        ?: return@runCatching null
+    android.graphics.Bitmap.createScaledBitmap(bmp, 40, (40f * bmp.height / bmp.width).toInt().coerceAtLeast(1), true).asImageBitmap()
+}.getOrNull()
+
+@Composable
+private fun BlurredPhoto(photo: ImageBitmap?) {
+    Crossfade(targetState = photo, animationSpec = tween(3000), label = "bgPhoto") { p ->
+        if (p != null) Box(Modifier.fillMaxSize()) {
+            Image(p, null, Modifier.fillMaxSize().graphicsLayer { scaleX = 1.15f; scaleY = 1.15f },
+                contentScale = ContentScale.Crop, filterQuality = FilterQuality.High)
+            Box(Modifier.fillMaxSize().background(Palette.night.copy(alpha = 0.62f)))
         }
     }
 }

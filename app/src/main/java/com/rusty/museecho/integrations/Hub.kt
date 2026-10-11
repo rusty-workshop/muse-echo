@@ -70,6 +70,14 @@ data class HubPhoto(val name: String, val size: Long = 0, val mtime: Long = 0)
 @Serializable
 data class Activity(val busy: Boolean = false, val kinds: List<String> = emptyList())
 
+/** Whether Rusty's phone is on the home Wi-Fi (echo-hub looks for it every minute). */
+@Serializable
+data class Presence(val configured: Boolean = false, val label: String = "", val home: Boolean? = null, val since: Double? = null)
+
+/** The laptop's desktop colours and whether it sent a wallpaper (tools/desktop-sync). */
+@Serializable
+data class Desktop(val colors: Map<String, String> = emptyMap(), val updated_at: Double = 0.0, val wallpaper: Boolean = false)
+
 @Serializable
 data class Release(val versionCode: Int, val versionName: String, val sha256: String, val notes: String = "")
 
@@ -136,6 +144,20 @@ class Hub(private val context: Context) {
 
     suspend fun homelab(): Homelab? = withContext(Dispatchers.IO) {
         get("/homelab")?.let { runCatching { json.decodeFromString(Homelab.serializer(), it) }.getOrNull() }
+    }
+
+    suspend fun presence(): Presence? = withContext(Dispatchers.IO) {
+        get("/presence")?.let { runCatching { json.decodeFromString(Presence.serializer(), it) }.getOrNull() }
+    }
+
+    suspend fun desktop(): Desktop? = withContext(Dispatchers.IO) {
+        get("/desktop")?.let { runCatching { json.decodeFromString(Desktop.serializer(), it) }.getOrNull() }
+    }
+
+    suspend fun desktopWallpaper(): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            http.newCall(Request.Builder().url("http://$host/desktop/wallpaper").build()).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
+        }.getOrNull()
     }
 
     suspend fun photos(): List<HubPhoto>? = withContext(Dispatchers.IO) {

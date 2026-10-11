@@ -521,6 +521,24 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     prefs.background = it
                 }
                 Body(AppBackground.of(bgName).blurb, Palette.muted)
+                if (themeName == AppTheme.LAPTOP_COLOURS.name || bgName == AppBackground.LAPTOP_WALLPAPER.name) {
+                    Body("The laptop sends these with tools/desktop-sync in the muse-echo repo (install.sh there).", Palette.muted)
+                }
+
+                SectionTitle("Home and room")
+                var roomSense by remember { mutableStateOf(prefs.roomSense) }
+                var diaryOn by remember { mutableStateOf(prefs.diary) }
+                var thingOn by remember { mutableStateOf(prefs.dailyThing) }
+                ToggleRow("Room sense", "Lights off at night: the Echo goes to sleep. Lights on in the morning: the blob wakes up.", roomSense) {
+                    roomSense = it; prefs.roomSense = it
+                }
+                ToggleRow("Blob diary", "Each evening ${GadgetState.museName.value} writes the blob's day (a page of its own)", diaryOn) {
+                    diaryOn = it; prefs.diary = it; GadgetState.setDiaryOn(it)
+                }
+                ToggleRow("Thing of the day", "A word, fact or bit of history on a little sign each morning", thingOn) {
+                    thingOn = it; prefs.dailyThing = it; if (!it) GadgetState.setDailyThing(null)
+                }
+                Body("Welcome home: pick your phone on the laptop settings page (http://${actions.hubHost()}/settings).", Palette.muted)
 
                 SectionTitle("Wellness nudges")
                 var water by remember { mutableStateOf(prefs.wellnessWater) }

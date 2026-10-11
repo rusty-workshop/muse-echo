@@ -233,6 +233,7 @@ internal fun Blob(
         val d = at - c
         if (sqrt(d.x * d.x + d.y * d.y) < sizePx * 0.32f) {
             GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.TAP)
+            com.rusty.museecho.gadget.DayLog.poked()
             checkIn(weather, agenda, server, morning = false, seconds = 12)
         }
     }

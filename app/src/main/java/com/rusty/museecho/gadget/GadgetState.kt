@@ -464,6 +464,45 @@ object GadgetState {
         _background.value = name
     }
 
+    /** The laptop's desktop colours (matugen names to "#rrggbb"), for the Laptop colours theme. */
+    private val _desktopColors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val desktopColors: StateFlow<Map<String, String>> = _desktopColors.asStateFlow()
+
+    fun setDesktopColors(c: Map<String, String>) {
+        _desktopColors.value = c
+    }
+
+    /** The laptop's wallpaper, saved on the Echo (the file, and when it last changed). */
+    private val _desktopWallpaper = MutableStateFlow<Pair<java.io.File, Long>?>(null)
+    val desktopWallpaper: StateFlow<Pair<java.io.File, Long>?> = _desktopWallpaper.asStateFlow()
+
+    fun setDesktopWallpaper(f: java.io.File?) {
+        _desktopWallpaper.value = f?.takeIf { it.isFile }?.let { it to it.lastModified() }
+    }
+
+    /** The blob's diary (newest last). */
+    private val _diary = MutableStateFlow<List<DiaryEntry>>(emptyList())
+    val diary: StateFlow<List<DiaryEntry>> = _diary.asStateFlow()
+
+    fun setDiary(list: List<DiaryEntry>) {
+        _diary.value = list
+    }
+
+    private val _diaryOn = MutableStateFlow(true)
+    val diaryOn: StateFlow<Boolean> = _diaryOn.asStateFlow()
+
+    fun setDiaryOn(on: Boolean) {
+        _diaryOn.value = on
+    }
+
+    /** Today's thing of the day (null: none yet, or switched off). */
+    private val _dailyThing = MutableStateFlow<DailyThing?>(null)
+    val dailyThing: StateFlow<DailyThing?> = _dailyThing.asStateFlow()
+
+    fun setDailyThing(t: DailyThing?) {
+        _dailyThing.value = t
+    }
+
     /** The touch timer / alarm pad is open (tap the clock). */
     private val _timePad = MutableStateFlow(false)
     val timePad: StateFlow<Boolean> = _timePad.asStateFlow()

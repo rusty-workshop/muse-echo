@@ -207,7 +207,13 @@ internal fun rememberGuest(): Boolean {
 fun MuseEchoApp(actions: UiActions) {
     // The chosen colour theme, applied before anything draws.
     val themeName by GadgetState.theme.collectAsState()
-    androidx.compose.runtime.SideEffect { Palette.theme = AppTheme.of(themeName).colors }
+    val desktopColors by GadgetState.desktopColors.collectAsState()
+    // Read here, in composition (a read only inside SideEffect wouldn't recompose on a change).
+    val colors = remember(themeName, desktopColors) {
+        val t = AppTheme.of(themeName)
+        (if (t == AppTheme.LAPTOP_COLOURS) desktopTheme(desktopColors) else null) ?: t.colors
+    }
+    androidx.compose.runtime.SideEffect { Palette.theme = colors }
     MaterialTheme(colorScheme = darkColorScheme(primary = Palette.violet, background = Palette.night, surface = Palette.card)) {
         val screen by GadgetState.screen.collectAsState()
         var showSetup by remember { mutableStateOf(false) }
@@ -445,6 +451,7 @@ private fun IdleFace(actions: UiActions) {
                 Text(line, color = Palette.amber, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp))
             }
+            DailyThingSign()
             Spacer(Modifier.height(10.dp))
             Text(
                 when (link) {
@@ -509,12 +516,14 @@ private fun AlertBanner() {
 private fun IdlePages(actions: UiActions) {
     // Guest mode leaves out the agenda page.
     val guest = rememberGuest()
-    // Page ids: 0 clock, 1 agenda, 3 forecast, 4 TV remote, 5 laptop, 2 homelab (TV / laptop only when set up;
-    // guest mode leaves out the agenda and the laptop).
+    val diaryOn by GadgetState.diaryOn.collectAsState()
+    // Page ids: 0 clock, 1 agenda, 3 forecast, 6 diary, 4 TV remote, 5 laptop, 2 homelab (TV / laptop only when
+    // set up; guest mode leaves out the agenda, the diary and the laptop).
     val pages = buildList {
         add(0)
         if (!guest) add(1)
         add(3)
+        if (!guest && diaryOn) add(6)
         if (actions.tvAvailable()) add(4)
         if (!guest && actions.laptopAvailable()) add(5)
         add(2)
@@ -557,6 +566,7 @@ private fun IdlePages(actions: UiActions) {
             0 -> IdleFace(actions)
             1 -> AgendaPage(actions)
             3 -> ForecastPage(actions)
+            6 -> DiaryPage()
             4 -> TvRemotePage(actions)
             5 -> LaptopPage(actions)
             else -> HomelabPage(actions)

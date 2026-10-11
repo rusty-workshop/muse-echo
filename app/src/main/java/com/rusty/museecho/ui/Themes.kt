@@ -28,11 +28,35 @@ enum class AppTheme(val label: String, internal val colors: ThemeColors) {
     MONO("Mono", ThemeColors(
         night = Color(0xFF000000), dusk = Color(0xFF111111), ink = Color(0xFFFFFFFF), muted = Color(0xFFB0B0B0),
         violet = Color(0xFFE6E6E6), coral = Color(0xFFFF6B6B), teal = Color(0xFFCFCFCF), amber = Color(0xFFFFD166), card = Color(0xFF1C1C1C))),
+    /** Follows the laptop's ii dots colours (tools/desktop-sync); Midnight until they arrive. */
+    LAPTOP_COLOURS("Laptop colours", MIDNIGHT.colors),
     ;
 
     companion object {
         fun of(name: String) = entries.firstOrNull { it.name == name } ?: MIDNIGHT
     }
+}
+
+/**
+ * The app's colours from the laptop's matugen scheme. Accents map to the Material roles that
+ * play the same part: primary for the main accent, tertiary for the second, error for warnings,
+ * and the light primary-container text for headings. Null if too few colours came over.
+ */
+internal fun desktopTheme(c: Map<String, String>): ThemeColors? {
+    fun col(vararg keys: String): Color? = keys.firstNotNullOfOrNull { k ->
+        c[k]?.removePrefix("#")?.toLongOrNull(16)?.let { Color(0xFF000000 or it) }
+    }
+    return ThemeColors(
+        night = col("surface_container_lowest", "background") ?: return null,
+        dusk = col("surface_container_low", "background") ?: return null,
+        ink = col("on_surface") ?: return null,
+        muted = col("on_surface_variant") ?: return null,
+        violet = col("primary") ?: return null,
+        coral = col("error") ?: Color(0xFFFF7A8A),
+        teal = col("tertiary", "primary") ?: return null,
+        amber = col("on_primary_container", "primary") ?: return null,
+        card = col("surface_container_high", "surface_container_low") ?: return null,
+    )
 }
 
 /**

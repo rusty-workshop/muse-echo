@@ -1,0 +1,9 @@
+[Unit]
+Description=Resend desktop colours to the Muse Echo now and then (after being away, the hub restarting)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target
