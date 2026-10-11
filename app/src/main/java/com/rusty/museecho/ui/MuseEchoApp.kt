@@ -281,7 +281,6 @@ fun MuseEchoApp(actions: UiActions) {
                 }
             }
             QuickActionRow(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 30.dp), actions)
-            BlobCards(Modifier.align(Alignment.BottomStart), actions)
             Captions(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 120.dp, bottom = 18.dp), actions)
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
 
@@ -428,6 +427,7 @@ private fun IdleFace(actions: UiActions) {
                 },
                 color = Palette.muted.copy(alpha = 0.8f), fontSize = 15.sp,
             )
+            BlobCards()
         }
         if (hasNote) NoteCard(note, actions)
     }
@@ -1090,32 +1090,32 @@ private fun quickActionsShowing(actions: UiActions): Boolean {
 }
 
 /**
- * The blob's cards (an event soon, when to leave, reminders, what it's holding, server signs),
- * under the blob on the clock page and always above the quick-action buttons, so neither
- * hides the other. Hidden while a reply caption is up.
+ * The blob's cards (an event soon, when to leave, reminders, schoolwork, countdowns, server
+ * signs) as a row of chips under the clock, beside the blob rather than over it. Hidden while
+ * a reply caption is up.
  */
 @Composable
-private fun BlobCards(modifier: Modifier, actions: UiActions) {
+private fun BlobCards() {
     val cards by GadgetState.blobCards.collectAsState()
-    val page by GadgetState.idlePage.collectAsState()
-    val screen by GadgetState.screen.collectAsState()
     val heard by GadgetState.heard.collectAsState()
     val reply by GadgetState.reply.collectAsState()
     val talk by GadgetState.talk.collectAsState()
-    val quick = quickActionsShowing(actions)
     val captions = heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE
-    val bottom by androidx.compose.animation.core.animateDpAsState(if (quick) 86.dp else 20.dp, tween(300), label = "cardsBottom")
     AnimatedVisibility(
-        cards.isNotEmpty() && page == 0 && screen is Screen.Idle && !captions,
-        modifier.padding(start = 20.dp, bottom = bottom).width(260.dp),
-        enter = fadeIn(tween(300)), exit = fadeOut(tween(200)),
+        cards.isNotEmpty() && !captions,
+        enter = fadeIn(tween(300)) + androidx.compose.animation.expandVertically(tween(300)),
+        exit = fadeOut(tween(200)) + androidx.compose.animation.shrinkVertically(tween(250)),
     ) {
-        Column(Modifier.animateContentSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier.padding(top = 12.dp).animateContentSize(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             cards.forEach { (text, color) ->
                 androidx.compose.runtime.key(text) {
                     Text(text, color = Palette.night, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(bottom = 3.dp).background(Color(color), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 10.dp, vertical = 4.dp))
+                        modifier = Modifier.background(Color(color), RoundedCornerShape(50))
+                            .padding(horizontal = 11.dp, vertical = 5.dp))
                 }
             }
         }
