@@ -22,7 +22,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Coding Mode. Uses the companion's own pairing token, entered in setup.
  */
 /** What the laptop companion reports: battery and what's playing. */
-data class LaptopStatus(val batteryPercent: Int?, val charging: Boolean, val track: String, val artist: String, val playing: Boolean)
+data class LaptopStatus(
+    val batteryPercent: Int?, val charging: Boolean, val track: String, val artist: String, val playing: Boolean,
+    val volume: Int = 0, val muted: Boolean = false,
+)
 
 /** A desktop notification mirrored from the laptop. */
 data class LaptopNotification(val id: Int, val app: String, val title: String, val text: String, val atMs: Long)
@@ -69,6 +72,8 @@ class Laptop(context: Context) {
                 charging = str(b, "charging") == "true",
                 track = str(m, "track"), artist = str(m, "artist"),
                 playing = str(m, "isPlaying") == "true",
+                volume = (o["volumePercent"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                muted = (o["muted"] as? JsonPrimitive)?.contentOrNull == "true",
             )
         }.getOrNull()
     }
@@ -90,6 +95,18 @@ class Laptop(context: Context) {
             }
             latest to items
         }.getOrNull()
+    }
+
+    /** A plain companion command (PLAY_PAUSE, NEXT, SET_VOLUME...). Returns whether it worked. */
+    suspend fun command(command: String, intArg: Int = 0, stringArg: String = ""): Boolean = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject {
+            put("command", command)
+            put("intArg", intArg)
+            put("stringArg", stringArg)
+        }
+        val body = call(Request.Builder().url("http://$host/command")
+            .post(payload.toString().toRequestBody("application/json".toMediaType())), allowError = true) ?: return@withContext false
+        runCatching { ((Json.parseToJsonElement(body) as JsonObject)["ok"] as? JsonPrimitive)?.contentOrNull == "true" }.getOrDefault(false)
     }
 
     /** Returns (ok, message) from the companion. */

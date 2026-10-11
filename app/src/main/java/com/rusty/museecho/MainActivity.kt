@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        // Screen-cleaning mode: every touch is ignored until it ends.
+        if (GadgetState.cleaning()) return true
         if (ev.action == android.view.MotionEvent.ACTION_DOWN) {
             val away = System.currentTimeMillis() - GadgetState.lastTouch
             GadgetState.lastTouch = System.currentTimeMillis()
@@ -179,8 +181,10 @@ class MainActivity : ComponentActivity() {
     private var autoLevel = -1f
 
     private fun applyBrightness() {
+        val p = com.rusty.museecho.gadget.Prefs(this)
         val target = brightnessOverride
-            ?: if (com.rusty.museecho.gadget.Prefs(this).autoBrightness && autoLevel >= 0f) autoLevel
+            ?: if (p.autoBrightness && autoLevel >= 0f) autoLevel
+            else if (!p.autoBrightness && p.manualBrightness >= 0f) p.manualBrightness
             else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
         if (abs(window.attributes.screenBrightness - target) > 0.008f) {
             window.attributes = window.attributes.apply { screenBrightness = target }
@@ -199,7 +203,10 @@ class MainActivity : ComponentActivity() {
             while (true) {
                 delay(250)
                 val lux = GadgetState.lux
-                if (lux < 0f) continue
+                if (lux < 0f) {
+                    if (brightnessOverride == null) applyBrightness()
+                    continue
+                }
                 smoothedLux = if (smoothedLux < 0f) lux else smoothedLux + (lux - smoothedLux) * 0.15f
                 val target = (0.06f + 0.94f * (kotlin.math.log10(smoothedLux + 1f) / kotlin.math.log10(400f))).coerceIn(0.06f, 1f)
                 autoLevel = if (autoLevel < 0f) target else autoLevel + (target - autoLevel) * 0.12f
@@ -350,6 +357,10 @@ class MainActivity : ComponentActivity() {
         override fun lastBackupMs() = GadgetService.instance?.chores?.lastBackupMs() ?: 0L
 
         override suspend fun syncPhotosNow() = GadgetService.instance?.chores?.syncPhotos() ?: 0
+
+        override fun laptopMedia(command: String, intArg: Int) {
+            GadgetService.instance?.laptopMedia(command, intArg)
+        }
 
         override fun setGuestMode(hours: Int) {
             GadgetService.instance?.setGuestMode(hours)

@@ -16,6 +16,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -158,6 +161,8 @@ interface UiActions {
     suspend fun syncPhotosNow(): Int
     /** Guest mode for [hours]; 0 turns it off. */
     fun setGuestMode(hours: Int)
+    /** Music on the laptop: PLAY / PAUSE / NEXT / PREVIOUS / SET_VOLUME / MUTE / UNMUTE. */
+    fun laptopMedia(command: String, intArg: Int = 0)
 }
 
 /** Whether guest mode is on right now (turns itself off on time, even with nothing else changing). */
@@ -196,7 +201,30 @@ fun MuseEchoApp(actions: UiActions) {
         var showHistory by remember { mutableStateOf(false) }
         val micOff by GadgetState.micOff.collectAsState()
 
-        Box(Modifier.fillMaxSize().background(Palette.night)) {
+        var showQuick by remember { mutableStateOf(false) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        Box(
+            Modifier.fillMaxSize().background(Palette.night).pointerInput(Unit) {
+                // A swipe down from the very top edge opens the volume / brightness panel.
+                val edge = with(density) { 30.dp.toPx() }
+                val pull = with(density) { 70.dp.toPx() }
+                awaitPointerEventScope {
+                    while (true) {
+                        val down = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes
+                            .firstOrNull { it.pressed && !it.previousPressed } ?: continue
+                        if (down.position.y > edge) continue
+                        while (true) {
+                            val c = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.firstOrNull() ?: break
+                            if (!c.pressed) break
+                            if (c.position.y - down.position.y > pull) {
+                                showQuick = true
+                                break
+                            }
+                        }
+                    }
+                }
+            },
+        ) {
             // Pictures and cards fade and grow in; the clock eases back afterwards.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen,
@@ -223,7 +251,7 @@ fun MuseEchoApp(actions: UiActions) {
                 StatusChip(Modifier)
                 val showPill by GadgetState.serverPill.collectAsState()
                 if (showPill) ServerLight(Modifier)
-                LaptopChip(Modifier.weight(1f, fill = false))
+                LaptopChip(Modifier.weight(1f, fill = false), actions)
             }
             UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp).onSizeChanged { iconsWidth = it.width }) {
@@ -278,6 +306,8 @@ fun MuseEchoApp(actions: UiActions) {
                 TypeSheet(onSend = { actions.sendText(it); showKeyboard = false }, onClose = { showKeyboard = false })
             }
             AnimatedVisibility(showSetup, enter = panelIn, exit = panelOut) { SetupPanel(actions, onClose = { showSetup = false }) }
+            QuickPanel(showQuick) { showQuick = false }
+            CleaningOverlay()
         }
     }
 }
@@ -370,7 +400,14 @@ private fun IdleFace(actions: UiActions) {
         Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
         Column(Modifier.weight(1f)) {
             val faceName by GadgetState.clockFace.collectAsState()
-            ClockFaceView(ClockFace.of(faceName), now, compact = hasNote)
+            // Hold the clock for 3 seconds: the screen ignores touches for 30, so it can be wiped.
+            ClockFaceView(ClockFace.of(faceName), now, compact = hasNote, modifier = Modifier.pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val letGo = withTimeoutOrNull(CLEAN_HOLD_MS) { waitForUpOrCancellation(); true }
+                    if (letGo == null) GadgetState.startCleaning(CLEAN_SECONDS)
+                }
+            })
             if (faceName != ClockFace.CLASSIC.name) Spacer(Modifier.height(8.dp))
             Text(SimpleDateFormat("EEEE, MMMM d", Locale.US).format(now), color = Palette.muted, fontSize = 20.sp)
             weather?.let { w ->
@@ -592,6 +629,8 @@ private fun friendlyDate(date: String): String {
 }
 
 private const val HOLD_TO_TALK_MS = 380L
+private const val CLEAN_HOLD_MS = 3_000L
+private const val CLEAN_SECONDS = 30
 private const val CAPTION_ASIDE_MS = 8_000L
 
 /** The Latitude in detail: Kuma monitors with 24-hour uptime, disk, memory, load, battery, containers and the last backup. */
@@ -1085,7 +1124,7 @@ private fun BlobCards(modifier: Modifier, actions: UiActions) {
 
 /** The laptop's battery and what it's playing, beside the status chips while it's home (not in guest mode). */
 @Composable
-private fun LaptopChip(modifier: Modifier = Modifier) {
+private fun LaptopChip(modifier: Modifier = Modifier, actions: UiActions) {
     val st by GadgetState.laptopStatus.collectAsState()
     val guest = rememberGuest()
     val s = st
@@ -1093,11 +1132,156 @@ private fun LaptopChip(modifier: Modifier = Modifier) {
         if (s == null) return@AnimatedVisibility
         val battery = s.batteryPercent?.let { p -> "$p%" + if (s.charging) " ⚡" else "" }
         val playing = if (s.playing && s.track.isNotBlank()) "▶ " + s.track + (if (s.artist.isNotBlank()) " – ${s.artist}" else "") else null
-        Text(listOfNotNull("💻", battery, playing).joinToString("  "),
-            color = if (s.batteryPercent != null && s.batteryPercent <= 15 && !s.charging) Palette.coral else Palette.ink,
-            fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50))
-                .padding(horizontal = 12.dp, vertical = 6.dp))
+        var open by remember { mutableStateOf(false) }
+        Box {
+            Text(listOfNotNull("💻", battery, playing).joinToString("  "),
+                color = if (s.batteryPercent != null && s.batteryPercent <= 15 && !s.charging) Palette.coral else Palette.ink,
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50))
+                    .clickable { open = !open }
+                    .padding(horizontal = 12.dp, vertical = 6.dp))
+            if (open) LaptopMusicPopup(s, actions) { open = false }
+        }
+    }
+}
+
+/** Play / pause, skip and volume for whatever the laptop is playing; closes itself after a while. */
+@Composable
+private fun LaptopMusicPopup(s: com.rusty.museecho.integrations.LaptopStatus, actions: UiActions, onClose: () -> Unit) {
+    var touched by remember { mutableStateOf(0) }
+    LaunchedEffect(touched) {
+        delay(12_000)
+        onClose()
+    }
+    androidx.compose.ui.window.Popup(
+        alignment = Alignment.TopStart, offset = androidx.compose.ui.unit.IntOffset(0, 120),
+        onDismissRequest = onClose,
+    ) {
+        Column(
+            Modifier.width(320.dp).background(Palette.card, RoundedCornerShape(18.dp)).padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(if (s.track.isNotBlank()) s.track else "Nothing playing", color = Palette.ink, fontSize = 16.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (s.artist.isNotBlank()) Text(s.artist, color = Palette.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                @Composable
+                fun key(label: String, size: Int, command: String) {
+                    Box(
+                        Modifier.size(size.dp).background(Palette.violet.copy(alpha = if (size > 50) 1f else 0.35f), CircleShape)
+                            .clickable { touched++; actions.laptopMedia(command) },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(label, color = Palette.ink, fontSize = (size / 2.4).sp) }
+                }
+                key("⏮", 46, "PREVIOUS")
+                key(if (s.playing) "⏸" else "▶", 60, if (s.playing) "PAUSE" else "PLAY")
+                key("⏭", 46, "NEXT")
+            }
+            var vol by remember(s.volume) { mutableStateOf(s.volume.toFloat()) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (s.muted) "🔇" else "🔊", fontSize = 20.sp,
+                    modifier = Modifier.clickable { touched++; actions.laptopMedia(if (s.muted) "UNMUTE" else "MUTE") }.padding(6.dp))
+                androidx.compose.material3.Slider(
+                    value = vol, onValueChange = { vol = it; touched++ }, valueRange = 0f..100f,
+                    onValueChangeFinished = { actions.laptopMedia("SET_VOLUME", vol.toInt()) },
+                    modifier = Modifier.weight(1f),
+                )
+                Text("${vol.toInt()}%", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.width(44.dp).padding(start = 6.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Swipe down from the top edge: the Echo's own volume (with mute) and screen brightness
+ * (with auto). Closes with a tap outside or after 15 seconds untouched.
+ */
+@Composable
+private fun QuickPanel(open: Boolean, onClose: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val audio = remember { ctx.getSystemService(android.media.AudioManager::class.java) }
+    var touched by remember { mutableStateOf(0) }
+    LaunchedEffect(open, touched) {
+        if (open) {
+            delay(15_000)
+            onClose()
+        }
+    }
+    AnimatedVisibility(open, enter = fadeIn(tween(200)), exit = fadeOut(tween(200))) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable(onClick = onClose))
+    }
+    AnimatedVisibility(open,
+        enter = androidx.compose.animation.slideInVertically(tween(260)) { -it } + fadeIn(tween(200)),
+        exit = androidx.compose.animation.slideOutVertically(tween(220)) { -it } + fadeOut(tween(200))) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            Column(
+                Modifier.padding(top = 10.dp).width(560.dp).background(Palette.card, RoundedCornerShape(22.dp))
+                    .clickable(enabled = false) {}.padding(horizontal = 22.dp, vertical = 16.dp),
+            ) {
+                val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                var vol by remember(open) { mutableStateOf(audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat()) }
+                var muted by remember(open) { mutableStateOf(audio.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (muted || vol == 0f) "🔇" else "🔊", fontSize = 26.sp, modifier = Modifier.clickable {
+                        touched++
+                        audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                            if (muted) android.media.AudioManager.ADJUST_UNMUTE else android.media.AudioManager.ADJUST_MUTE, 0)
+                        muted = !muted
+                    }.padding(8.dp))
+                    androidx.compose.material3.Slider(
+                        value = vol, valueRange = 0f..max.toFloat(), steps = (max - 1).coerceAtLeast(0),
+                        onValueChange = {
+                            vol = it; touched++
+                            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, it.toInt(), 0)
+                            if (muted && it > 0f) muted = false
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("${(100 * vol / max).toInt()}%", color = Palette.muted, fontSize = 15.sp, modifier = Modifier.width(52.dp).padding(start = 8.dp))
+                }
+                val prefs = remember { com.rusty.museecho.gadget.Prefs(ctx) }
+                var auto by remember(open) { mutableStateOf(prefs.autoBrightness) }
+                var bright by remember(open) { mutableStateOf(prefs.manualBrightness.takeIf { it >= 0f } ?: 0.6f) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("☀️", fontSize = 26.sp, modifier = Modifier.padding(8.dp))
+                    androidx.compose.material3.Slider(
+                        value = bright, valueRange = 0.04f..1f,
+                        onValueChange = {
+                            // Picking a brightness by hand turns auto off (the switch turns it back on).
+                            bright = it; touched++
+                            prefs.manualBrightness = it
+                            if (auto) { auto = false; prefs.autoBrightness = false }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("Auto", color = if (auto) Palette.teal else Palette.muted, fontSize = 15.sp, modifier = Modifier.padding(start = 8.dp))
+                    androidx.compose.material3.Switch(checked = auto, onCheckedChange = { touched++; auto = it; prefs.autoBrightness = it })
+                }
+            }
+        }
+    }
+}
+
+/** Shown while touches are locked for wiping the screen, with the seconds left. */
+@Composable
+private fun CleaningOverlay() {
+    val until by GadgetState.cleaningUntil.collectAsState()
+    var left by remember { mutableStateOf(0) }
+    LaunchedEffect(until) {
+        while (true) {
+            left = ((until - System.currentTimeMillis() + 999) / 1000).toInt().coerceAtLeast(0)
+            if (left == 0) break
+            delay(250)
+        }
+    }
+    AnimatedVisibility(left > 0, enter = fadeIn(tween(300)), exit = fadeOut(tween(400))) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.82f)), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🧽", fontSize = 64.sp)
+                Text("Cleaning mode", color = Palette.ink, fontSize = 28.sp, fontWeight = FontWeight.Light)
+                Text("Touches are ignored for $left s", color = Palette.muted, fontSize = 16.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
     }
 }
 

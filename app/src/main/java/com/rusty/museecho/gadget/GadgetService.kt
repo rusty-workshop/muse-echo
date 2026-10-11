@@ -984,6 +984,15 @@ class GadgetService : Service() {
         return done
     }
 
+    /** Music on the laptop from its chip: a command, then a fresh status for the chip. */
+    fun laptopMedia(command: String, intArg: Int = 0) {
+        scope.launch {
+            laptop.command(command, intArg)
+            kotlinx.coroutines.delay(400)
+            laptop.status()?.let { GadgetState.setLaptopStatus(it) }
+        }
+    }
+
     /** Guest mode for [hours] (0 turns it off). */
     fun setGuestMode(hours: Int) {
         val until = if (hours <= 0) 0L else System.currentTimeMillis() + hours.coerceAtMost(24) * 3_600_000L
@@ -1480,6 +1489,11 @@ class Prefs(context: Context) {
         set(v) = prefs.edit().putStringSet("announced_alerts", v.toSet()).apply()
 
     /** Come back to the front after a minute behind another app. */
+    /** Brightness picked on the swipe-down panel while auto brightness is off (-1: the system's). */
+    var manualBrightness: Float
+        get() = prefs.getFloat("manual_brightness", -1f)
+        set(v) = prefs.edit().putFloat("manual_brightness", v).apply()
+
     var autoBrightness: Boolean
         get() = prefs.getBoolean("auto_brightness", true)
         set(v) = prefs.edit().putBoolean("auto_brightness", v).apply()

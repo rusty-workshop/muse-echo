@@ -420,6 +420,16 @@ object GadgetState {
         _sounds.tryEmit(sound)
     }
 
+    /** Screen-cleaning mode: touches are ignored until this time. */
+    private val _cleaningUntil = MutableStateFlow(0L)
+    val cleaningUntil: StateFlow<Long> = _cleaningUntil.asStateFlow()
+
+    fun startCleaning(seconds: Int) {
+        _cleaningUntil.value = System.currentTimeMillis() + seconds * 1000L
+    }
+
+    fun cleaning(now: Long = System.currentTimeMillis()) = _cleaningUntil.value > now
+
     /** Room light from the sensor, lux (-1 until it reports). */
     @Volatile
     var lux = -1f
