@@ -158,9 +158,9 @@ class Hub(private val context: Context) {
     suspend fun postJournal(j: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/journal", j.toString()).first == 200 }
 
     /** Today's album picture, for the settings page. */
-    suspend fun postAlbum(date: String, caption: String, jpeg: ByteArray): Boolean = withContext(Dispatchers.IO) {
+    suspend fun postAlbum(date: String, caption: String, jpeg: ByteArray, kind: String = "daily"): Boolean = withContext(Dispatchers.IO) {
         runCatching {
-            val url = "http://$host/echo/album?date=$date&caption=" + java.net.URLEncoder.encode(caption, "UTF-8")
+            val url = "http://$host/echo/album?kind=$kind&date=$date&caption=" + java.net.URLEncoder.encode(caption, "UTF-8")
             http.newCall(Request.Builder().url(url).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()).execute().use { it.isSuccessful }
         }.getOrDefault(false)
     }

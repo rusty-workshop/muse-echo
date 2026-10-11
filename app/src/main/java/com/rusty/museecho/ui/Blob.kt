@@ -102,6 +102,9 @@ internal fun Blob(
      * routines (antics, check-ins, yawns, cards) to the one on the clock, so nothing happens twice.
      */
     follower: Boolean = false,
+    /** A friend: wears [accessoryOverride] (or nothing), never the main blob's style or automatic hats. */
+    ownStyle: Boolean = true,
+    accessoryOverride: Accessory? = null,
 ) {
     val quiet by GadgetState.quiet.collectAsState()
     val speaking by GadgetState.speaking.collectAsState()
@@ -418,7 +421,7 @@ internal fun Blob(
             forced("color")?.let { name -> com.rusty.museecho.gadget.BlobStyles.parseColor(name)?.let { tint = Color(it) } }
 
             val evening = hour >= 17
-            val accessory = forced("accessory")?.let { v -> Accessory.entries.firstOrNull { it.name == v } }
+            val accessory = if (!ownStyle) accessoryOverride else forced("accessory")?.let { v -> Accessory.entries.firstOrNull { it.name == v } }
                 ?: style.takeIf { it.active(nowMs) }?.accessory
                 ?: autoAccessory(cal, weather, playingMusic, tvPlaying && evening)
 

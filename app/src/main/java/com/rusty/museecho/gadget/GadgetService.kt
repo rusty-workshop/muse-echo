@@ -1441,6 +1441,7 @@ class GadgetService : Service() {
             put("day", json.parseToJsonElement(json.encodeToString(DayFacts.serializer(), DayLog.today())))
             put("room", kotlinx.serialization.json.JsonArray(GadgetState.room.value.map { kotlinx.serialization.json.JsonPrimitive(it) }))
             GadgetState.weekRecap.value?.let { (text, at) -> put("week_recap", text); put("week_recap_ms", at) }
+            put("friends", json.parseToJsonElement(json.encodeToString(FriendsData.serializer(), GadgetState.friends.value.copy(today = emptyMap()))))
         })
     }
 

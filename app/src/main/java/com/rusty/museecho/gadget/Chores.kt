@@ -63,7 +63,7 @@ class Chores(
         // The blob's look for the watch: whenever it changes (settled for a moment), and once a minute.
         scope.launch {
             kotlinx.coroutines.flow.merge(GadgetState.mood, GadgetState.bubble, GadgetState.held, GadgetState.style,
-                GadgetState.friend, GadgetState.quiet, GadgetState.tuckedIn, GadgetState.talk)
+                GadgetState.friend, GadgetState.friendSay, GadgetState.quiet, GadgetState.tuckedIn, GadgetState.talk)
                 .debounce(1_500).collect { postState() }
         }
         scope.launch {
@@ -139,7 +139,14 @@ class Chores(
         }
         GadgetState.bubble.value?.takeIf { it.untilMs > now }?.let { put("bubble", it.text) }
         GadgetState.held.value?.takeIf { it.untilMs > now }?.let { h -> put("holding", h.item.name.lowercase()); if (h.text.isNotEmpty()) put("label", h.text) }
-        GadgetState.friend.value?.let { put("friend", it.activity) }
+        GadgetState.friend.value?.let { v ->
+            put("friend", v.activity)
+            val f = v.friendIds.firstOrNull()?.let { id -> GadgetState.friends.value.friends.firstOrNull { it.id == id } }
+            put("friend_id", f?.id ?: "")
+            put("friend_name", f?.shownName ?: "Friend")
+            put("friend_color", "#%06X".format((f?.color ?: v.color) and 0xFFFFFF))
+            GadgetState.friendSay.value[f?.id]?.let { put("friend_says", it) }
+        }
     }
 
     // -- The watch's inbox ------------------------------------------------------------------
@@ -174,7 +181,11 @@ class Chores(
                         applySettings(changes)
                         postSettings()
                     }
-                    "poke" -> {
+                    "poke" -> if ((item["target"] as? JsonPrimitive)?.contentOrNull == "friend") {
+                        // The watch tapped the friend instead.
+                        GadgetService.instance?.life?.friends?.tapped((item["friend_id"] as? JsonPrimitive)?.contentOrNull)
+                        postState()
+                    } else {
                         // A tap on the watch: the blob hops and says hi (a little chirp, not overnight).
                         GadgetState.log("poked from the watch")
                         DayLog.poked()
@@ -505,6 +516,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
+                put("friend", buildJsonArray { FriendsBrain.ACTIVITIES.forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("EARS", "THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -538,6 +550,8 @@ class Chores(
                 "FRIEND" -> GadgetService.instance?.life?.visit("chat", 1)
                 else -> GadgetState.preview(kind, value, PREVIEW_MS)
             }
+            // A real (short) visit doing that: friends can't pop in for just 5 seconds.
+            "friend" -> GadgetService.instance?.life?.visit(value.lowercase(), if (value.uppercase() == "SLEEPOVER") 2 else 1)
             else -> GadgetState.preview(kind, value, PREVIEW_MS)
         }
     }

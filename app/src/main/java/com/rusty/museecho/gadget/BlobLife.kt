@@ -19,6 +19,9 @@ enum class Decor(val label: String, val emoji: String) {
     MOVIE_POSTER("a movie poster", "🎬"), UMBRELLA_STAND("an umbrella stand", "☂️"), SNOW_GLOBE("a snow globe", "❄️"),
     PUMPKIN("a pumpkin", "🎃"), PHOTO_FRAME("a photo on the wall", "🖼️"), RECORD_PLAYER("a record player", "🎶"),
     TROPHY("a little trophy", "🏆"),
+    // Gifts from friends, and their postcards.
+    LAVA_LAMP("a lava lamp", "🫧"), FRIENDSHIP_PHOTO("a friendship photo", "📷"), RARE_PLANT("a rare glowing plant", "🌿"),
+    POSTCARDS("postcards on the wall", "💌"),
 }
 
 /** Pure helpers (unit-tested). */
@@ -97,10 +100,13 @@ object LifeMath {
  * eye on laptop use, the weekly homelab recap, warm evenings and bedtime. Each loop is cheap
  * and checks its own switch in Prefs.
  */
+/** GadgetState.blobBounds key for the Blob page's whole room (the friends' album crops to it). */
+const val ROOM_BOUNDS = 80
+
 class BlobLife(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val hub: Hub,
+    internal val hub: Hub,
     private val isQuiet: () -> Boolean,
     private val quietAsk: suspend (String) -> String?,
     private val diaryCount: () -> Int,
@@ -112,19 +118,20 @@ class BlobLife(
     fun start() {
         loadRoom()
         GadgetState.setAlbum(album.load())
+        GadgetState.setFriendAlbum(friendAlbum.load())
         scope.launch { albumLoop() }
         GadgetState.setWeekRecap(prefs.getString("week_recap", null)?.let { it to prefs.getLong("week_recap_ms", 0L) })
         scope.launch { roomLoop() }
-        scope.launch { friendLoop() }
+        friends.start()
         scope.launch { laptopLoop() }
         scope.launch { weekRecapLoop() }
         scope.launch { eveningLoop() }
     }
 
-    private fun idle() = GadgetState.talk.value.let { it == Talk.IDLE || it == Talk.REPLIED } && !GadgetState.speaking.value &&
+    internal fun idle() = GadgetState.talk.value.let { it == Talk.IDLE || it == Talk.REPLIED } && !GadgetState.speaking.value &&
         !GadgetState.ringing.value && GadgetState.screen.value is Screen.Idle && !GadgetState.asleep.value
 
-    private fun hour() = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    internal fun hour() = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 
     // -- The room -----------------------------------------------------------------------------
 
@@ -134,15 +141,17 @@ class BlobLife(
         GadgetState.setRoom(if (Prefs(context).blobRoom) owned() else emptySet())
     }
 
+    fun has(d: Decor) = d.name in owned()
+
     /** Add [d] to the room (once), with a little show if anyone's around. */
-    fun unlock(d: Decor, why: String = "") {
+    fun unlock(d: Decor, why: String = "", quietly: Boolean = false) {
         val have = owned()
         if (d.name in have) return
         prefs.edit().putString("room_decor", (have + d.name).joinToString(",")).apply()
         loadRoom()
         GadgetState.log("room: got ${d.name}")
         DayLog.event("got ${d.label} for its room$why", "room")
-        if (Prefs(context).blobRoom && !isQuiet() && !GadgetState.asleep.value) {
+        if (Prefs(context).blobRoom && !isQuiet() && !GadgetState.asleep.value && !quietly) {
             GadgetState.react(Reaction.HOP)
             GadgetState.say("New for my room: ${d.label}! ${d.emoji}", 20)
             snapshotSoon("Showing off ${d.label} ${d.emoji}", 1_500)
@@ -179,88 +188,14 @@ class BlobLife(
         if (diaryCount() >= 7) add(Decor.TROPHY)
     }
 
-    // -- The friend ---------------------------------------------------------------------------
+    // -- Friends (gadget/FriendLife.kt) -----------------------------------------------------------
 
-    private var friendJob: kotlinx.coroutines.Job? = null
+    val friends = FriendLife(context, scope, this, isQuiet, quietAsk)
 
-    /** A visit now: "chat", "tag" or "nap" (null picks one for the time of day). */
-    fun visit(activity: String? = null, minutes: Int? = null): String {
-        if (GadgetState.friend.value != null) return "already visiting"
-        val act = activity?.lowercase()?.takeIf { it in setOf("chat", "tag", "nap") }
-            ?: if (hour() >= 19 || hour() < 7) "nap" else listOf("chat", "chat", "tag").random()
-        val len = (minutes?.coerceIn(1, 30) ?: when (act) { "nap" -> 5; "tag" -> 1; else -> 2 }) * 60_000L
-        val now = System.currentTimeMillis()
-        val colors = listOf(0xFFFF9EC7, 0xFFFFC266, 0xFF7FE0A8, 0xFF9AB8FF, 0xFFFF8A65)
-        val v = FriendVisit(act, now, now + len, colors.random())
-        prefs.edit().putLong("friend_last", now).apply()
-        DayLog.friendVisited()
-        GadgetState.log("friend visiting ($act)")
-        friendJob = scope.launch {
-            GadgetState.setFriend(v)
-            try {
-                delay(1_800) // walking in
-                when (act) {
-                    "chat" -> {
-                        val talk = LifeMath.FRIEND_CHATS.random()
-                        GadgetState.react(Reaction.WAVE)
-                        snapshotSoon("Hanging out with a friend 👯", 3_000)
-                        for ((mine, line) in talk) {
-                            if (mine) GadgetState.say(line, 4) else GadgetState.setFriendSay(line)
-                            delay(4_200)
-                            if (!mine) GadgetState.setFriendSay(null)
-                        }
-                        GadgetState.setMood(Mood.HAPPY, 30)
-                        delay((v.untilMs - System.currentTimeMillis() - 2_500).coerceAtLeast(0))
-                        GadgetState.setFriendSay("Bye! 👋")
-                        GadgetState.react(Reaction.WAVE)
-                        delay(2_000)
-                    }
-                    "tag" -> {
-                        GadgetState.setFriendSay("Tag, you're it! 🏃")
-                        delay(2_000)
-                        GadgetState.setFriendSay(null)
-                        while (System.currentTimeMillis() < v.untilMs - 3_000) {
-                            GadgetState.react(listOf(Reaction.WANDER, Reaction.HOP, Reaction.WANDER).random())
-                            delay(Reaction.WANDER.ms)
-                        }
-                        GadgetState.setMood(Mood.HAPPY, 30)
-                        GadgetState.say("Phew! 😅", 5)
-                        GadgetState.setFriendSay("Again tomorrow! 👋")
-                        delay(2_500)
-                    }
-                    else -> {
-                        GadgetState.setFriendSay("Mind if I nap here? 😴")
-                        delay(3_000)
-                        GadgetState.setFriendSay(null)
-                        GadgetState.setMood(Mood.SLEEPY, ((v.untilMs - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(5))
-                        delay((v.untilMs - System.currentTimeMillis()).coerceAtLeast(0))
-                        GadgetState.setMood(Mood.NEUTRAL, 0)
-                        GadgetState.react(Reaction.STRETCH)
-                        GadgetState.setFriendSay("Thanks for the nap! 👋")
-                        delay(2_500)
-                    }
-                }
-            } finally {
-                GadgetState.setFriendSay(null)
-                GadgetState.setFriend(null)
-            }
-        }
-        return "visiting ($act)"
-    }
+    /** A visit now (Pixel's blob.friend, the playground). */
+    fun visit(activity: String? = null, minutes: Int? = null, name: String? = null): String = friends.visit(activity, minutes, name)
 
-    fun endVisit() {
-        friendJob?.cancel()
-    }
-
-    private suspend fun friendLoop() {
-        while (true) {
-            delay((25 + (Math.random() * 30).toInt()) * 60_000L)
-            if (!Prefs(context).blobFriend || isQuiet() || !idle() || hour() !in 9..21) continue
-            if (System.currentTimeMillis() - prefs.getLong("friend_last", 0L) < 3 * 3_600_000L) continue
-            if (System.currentTimeMillis() - GadgetState.lastTouch < 60_000) continue
-            if (Math.random() < 0.35) visit()
-        }
-    }
+    fun endVisit() = friends.endVisit()
 
     // -- Photo album -----------------------------------------------------------------------------
 
@@ -279,25 +214,43 @@ class BlobLife(
         if (!force && album.hasToday()) return false
         val page = GadgetState.idlePage.value
         val rect = GadgetState.blobBounds[page]?.takeIf { page == 0 || page == 8 } ?: return false
-        if (!com.rusty.museecho.MainActivity.visible || GadgetState.screen.value !is Screen.Idle ||
-            GadgetState.frameShowing.value || GadgetState.asleep.value || GadgetState.timePad.value) return false
-        val full = com.rusty.museecho.MainActivity.captureBitmap() ?: return false
-        val jpeg = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            // A bit around the blob too (its bubble, what it holds), square, at most 480 px.
-            val grow = rect.width() / 4
-            val r = android.graphics.Rect(rect.left - grow, rect.top - grow, rect.right + grow, rect.bottom + grow / 2)
-            r.intersect(0, 0, full.width, full.height)
-            if (r.width() < 40 || r.height() < 40) return@withContext null
-            val crop = android.graphics.Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height())
-            val scale = (480f / maxOf(crop.width, crop.height)).coerceAtMost(1f)
-            val out = android.graphics.Bitmap.createScaledBitmap(crop, (crop.width * scale).toInt(), (crop.height * scale).toInt(), true)
-            java.io.ByteArrayOutputStream().also { out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
-        } ?: return false
+        val jpeg = grab(rect, 480) ?: return false
         GadgetState.setAlbum(album.add(jpeg, caption))
         GadgetState.log("album: $caption")
         DayLog.mark("photo", caption)
         scope.launch { hub.postAlbum(java.time.LocalDate.now().toString(), caption, jpeg) }
         return true
+    }
+
+    val friendAlbum = BlobAlbum(java.io.File(context.filesDir, "album_friends"), perDay = false, keep = 150)
+
+    /** A friend moment for the friends' album: the whole room, if the Blob page is on screen. */
+    suspend fun friendSnapshot(caption: String): Boolean {
+        if (GadgetState.idlePage.value != 8) return false
+        val rect = GadgetState.blobBounds[ROOM_BOUNDS] ?: return false
+        val jpeg = grab(rect, 640, around = false) ?: return false
+        GadgetState.setFriendAlbum(friendAlbum.add(jpeg, caption))
+        GadgetState.log("friend album: $caption")
+        scope.launch { hub.postAlbum(java.time.LocalDate.now().toString(), caption, jpeg, kind = "friends") }
+        return true
+    }
+
+    /** A picture of [rect] (window pixels) when the app is on screen with nothing in front of the blob. */
+    private suspend fun grab(rect: android.graphics.Rect, maxEdge: Int, around: Boolean = true): ByteArray? {
+        if (!com.rusty.museecho.MainActivity.visible || GadgetState.screen.value !is Screen.Idle ||
+            GadgetState.frameShowing.value || GadgetState.asleep.value || GadgetState.timePad.value) return null
+        val full = com.rusty.museecho.MainActivity.captureBitmap() ?: return null
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            // A bit around the blob too (its bubble, what it holds).
+            val grow = if (around) rect.width() / 4 else 0
+            val r = android.graphics.Rect(rect.left - grow, rect.top - grow, rect.right + grow, rect.bottom + grow / 2)
+            r.intersect(0, 0, full.width, full.height)
+            if (r.width() < 40 || r.height() < 40) return@withContext null
+            val crop = android.graphics.Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height())
+            val scale = (maxEdge.toFloat() / maxOf(crop.width, crop.height)).coerceAtMost(1f)
+            val out = android.graphics.Bitmap.createScaledBitmap(crop, (crop.width * scale).toInt(), (crop.height * scale).toInt(), true)
+            java.io.ByteArrayOutputStream().also { out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+        }
     }
 
     /** Other cute moments, and a plain one in the afternoon if nothing better came along. */

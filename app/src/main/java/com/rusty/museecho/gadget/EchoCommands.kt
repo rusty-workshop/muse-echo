@@ -129,12 +129,17 @@ class EchoCommands(
             required = mapOf("steps" to param("array", "The steps, each an object as described.")),
             timeoutMs = 75_000)
         spec("blob.friend",
-            "Invite the blob's friend (a second, smaller blob) over to the Echo Show for a visit: they chat in " +
-                "speech bubbles, play tag, or nap together. It also drops by by itself now and then.",
+            "Invite one of the blob's friends (other little blobs, each with a name and personality) over to the Echo " +
+                "Show's Blob page for a visit. They also drop by by themselves now and then.",
             optional = mapOf(
-                "activity" to param("string", "chat, tag or nap. Default: one that suits the time of day."),
-                "minutes" to param("integer", "How long it stays, 1 to 30."),
+                "activity" to param("string", "One of: ${FriendsBrain.ACTIVITIES.joinToString()}. " +
+                    "(tictactoe = tic-tac-toe, rps = rock-paper-scissors, hideseek = hide and seek, tea = tea party, " +
+                    "gift = brings a present for the blob's room.) Default: one that suits the moment."),
+                "name" to param("string", "Which friend, by name. Default: whoever hasn't been over for a while."),
+                "minutes" to param("integer", "How long it stays, 1 to 600."),
             ))
+        spec("blob.friends",
+            "List the blob's friends: their names, personalities, bios, how close they are and their favourite games.")
         spec("blob.say",
             "Show a short silent speech bubble beside the Echo Show's blob, e.g. \"Don't forget the trash!\". " +
                 "Nothing is spoken, so it suits quiet hours. Empty text clears it.",
@@ -174,8 +179,20 @@ class EchoCommands(
                 "blob.sequence" -> sequence(params["steps"])
                 "blob.friend" -> {
                     val life = GadgetService.instance?.life ?: return@withTimeout commandError("not ready yet")
-                    val msg = life.visit(params.string("activity"), params.int("minutes"))
+                    val msg = life.visit(params.string("activity"), params.int("minutes"), params.string("name"))
                     if (msg == "already visiting") commandError(msg) else commandOk(buildJsonObject { put("status", msg) })
+                }
+                "blob.friends" -> {
+                    val fs = GadgetState.friends.value.friends
+                    commandOk(buildJsonObject {
+                        put("friends", kotlinx.serialization.json.JsonArray(fs.map { f ->
+                            buildJsonObject {
+                                put("name", f.shownName); put("personality", f.p.label); put("bio", f.bio)
+                                put("closeness", f.closeness); put("visits", f.visits)
+                                f.favourite()?.let { put("favourite_game", FriendsBrain.activityLabel(it)) }
+                            }
+                        }))
+                    })
                 }
                 "blob.say" -> {
                     val text = params.string("text").orEmpty()

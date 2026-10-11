@@ -8,8 +8,11 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class AlbumShot(val date: String, val caption: String, val file: String, val atMs: Long)
 
-/** The blob's photo album: at most one snapshot a day, about three months kept. */
-class BlobAlbum(private val dir: File) {
+/**
+ * The blob's photo album: at most one snapshot a day, about three months kept. With [perDay]
+ * false (the friends' album) every moment is kept, up to [keep].
+ */
+class BlobAlbum(private val dir: File, private val perDay: Boolean = true, private val keep: Int = 90) {
     private val json = Json { ignoreUnknownKeys = true }
     private val ser = kotlinx.serialization.builtins.ListSerializer(AlbumShot.serializer())
     private val index get() = File(dir, "album.json")
@@ -25,11 +28,11 @@ class BlobAlbum(private val dir: File) {
     fun add(jpeg: ByteArray, caption: String): List<AlbumShot> {
         dir.mkdirs()
         val date = java.time.LocalDate.now().toString()
-        val name = "$date.jpg"
+        val name = if (perDay) "$date.jpg" else "${date}_${System.currentTimeMillis() % 86_400_000L}.jpg"
         File(dir, name).writeBytes(jpeg)
-        var list = load().filter { it.date != date } + AlbumShot(date, caption.take(80), name, System.currentTimeMillis())
-        // Oldest pictures go after about three months.
-        while (list.size > 90) {
+        var list = load().filter { !perDay || it.date != date } + AlbumShot(date, caption.take(80), name, System.currentTimeMillis())
+        // The oldest pictures go first.
+        while (list.size > keep) {
             File(dir, list.first().file).delete()
             list = list.drop(1)
         }

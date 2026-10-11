@@ -17,6 +17,7 @@ data class DayFacts(
     val events: List<String> = emptyList(),
     val musicMinutes: Int = 0,
     val friendVisits: Int = 0,
+    val friendTaps: Int = 0,
     /** Everything with a time, for the settings page's timeline. */
     val marks: List<DayMark> = emptyList(),
 )
@@ -77,7 +78,13 @@ object DayLog {
     fun poked() = update { it.copy(pokes = it.pokes + 1).mark("poke") }
     fun nudged() = update { it.copy(nudges = it.nudges + 1).mark("nudge") }
     fun tvMinute() = update { it.copy(tvMinutes = it.tvMinutes + 1) }
-    fun friendVisited() = update { it.copy(friendVisits = it.friendVisits + 1).mark("friend") }
+    /** A friend visit, described ("Sprout came over for tic-tac-toe (Sprout won)"), for the diary and the timeline. */
+    fun friendVisited(what: String) {
+        val t = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date()).lowercase()
+        update { it.copy(friendVisits = it.friendVisits + 1, events = (it.events + "$t $what").takeLast(20)).mark("friend", what) }
+    }
+
+    fun friendTapped(name: String) = update { it.copy(friendTaps = it.friendTaps + 1).mark("friend_tap", name) }
     fun musicMinute() = update { it.copy(musicMinutes = it.musicMinutes + 1) }
     fun mark(kind: String, label: String = "") = update { it.mark(kind, label) }
 
@@ -104,7 +111,8 @@ object DayWriting {
         if (f.timers > 0) append("- ${f.timers} timer(s) or alarm(s) went off\n")
         if (f.nudges > 0) append("- it reminded me to drink water / stretch / rest my eyes ${f.nudges} time(s)\n")
         if (f.musicMinutes >= 10) append("- music played on the laptop for about ${f.musicMinutes} min\n")
-        if (f.friendVisits > 0) append("- its blob friend came over ${f.friendVisits} time(s)\n")
+        if (f.friendVisits > 0) append("- its blob friends came over ${f.friendVisits} time(s) (what they did is in the notes below)\n")
+        if (f.friendTaps > 0) append("- I tapped its friends ${f.friendTaps} time(s) (they giggled)\n")
         if (f.tvMinutes >= 10) append("- the TV was on for about ${f.tvMinutes / 60} h ${f.tvMinutes % 60} min\n")
         f.events.forEach { append("- $it\n") }
         append("Reply with only the diary text: no title, no date, no commands, and don't change anything on any device.")

@@ -65,6 +65,12 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
     val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
     val month = cal.get(java.util.Calendar.MONTH)
     val t = (now % 3_600_000L) / 1000f
+    // Things a friend moved slide over (and back).
+    val shifts by GadgetState.roomShift.collectAsState()
+    val moved = MOVABLE.associateWith { d ->
+        androidx.compose.animation.core.animateFloatAsState(shifts[d.name] ?: 0f, androidx.compose.animation.core.tween(1400), label = d.name).value
+    }
+    val postcards by GadgetState.friends.collectAsState()
     Canvas(modifier) {
         val has = { d: Decor -> d.name in items }
         val u = radius / 110f // one "dp" of the blob's 220 dp box
@@ -90,22 +96,39 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         if (has(Decor.FAIRY_LIGHTS)) drawFairyLights(blob.y - 130 * u, cx + 130 * u, u, now, dim)
         if (has(Decor.RUG)) drawOval(Palette.violet.copy(alpha = 0.16f * dim), Offset(cx - 88 * u, floor - 6 * u), Size(176 * u, 26 * u))
         if (has(Decor.BOOKSHELF)) drawShelf(Offset(cx - 160 * u, floor), u, dim, trophy = has(Decor.TROPHY), globe = has(Decor.SNOW_GLOBE) && month in listOf(11, 0, 1))
-        if (has(Decor.PLANT)) drawPlant(Offset(cx - 118 * u, floor), u, dim, flowers = month in 2..4)
+        val sx = { d: Decor -> (moved[d] ?: 0f) * u }
+        if (has(Decor.PLANT)) drawPlant(Offset(cx - 118 * u + sx(Decor.PLANT), floor), u, dim, flowers = month in 2..4)
+        if (has(Decor.RARE_PLANT)) drawRarePlant(Offset(cx - 142 * u + sx(Decor.RARE_PLANT), floor), u, dim, t)
+        if (has(Decor.LAVA_LAMP)) drawLavaLamp(Offset(cx + 78 * u + sx(Decor.LAVA_LAMP), floor), u, dim, now)
+        if (has(Decor.FRIENDSHIP_PHOTO)) {
+            val a = Offset(cx + 20 * u, blob.y - 124 * u)
+            drawRect(Color.White.copy(alpha = 0.4f * dim), a, Size(26 * u, 22 * u))
+            drawCircle(Palette.teal.copy(alpha = 0.6f * dim), 4.5f * u, a + Offset(9 * u, 11 * u))
+            drawCircle(Color(0xFFFF9EC7).copy(alpha = 0.6f * dim), 4 * u, a + Offset(17 * u, 12 * u))
+        }
+        if (has(Decor.POSTCARDS)) {
+            val n = postcards.postcards.size.coerceIn(1, 4)
+            for (i in 0 until n) {
+                val a = Offset(cx + 112 * u + i * 9 * u, blob.y - 150 * u + (i % 2) * 5 * u)
+                drawRect(listOf(Color(0xFFFFE08A), Color(0xFFBFE6F5), Color(0xFFFFC7DD), Color(0xFFD7F5C4))[i].copy(alpha = 0.45f * dim), a, Size(16 * u, 11 * u))
+            }
+        }
         // The seasons: a little leaf pile in autumn, a tiny tree in December.
         if (month in 8..10) drawLeafPile(Offset(cx - 92 * u, floor), u, dim)
         if (month == java.util.Calendar.DECEMBER) drawTinyTree(Offset(cx + 90 * u, floor), u, dim, now)
         if (has(Decor.RECORD_PLAYER)) {
-            drawRoundRect(Palette.card.copy(alpha = 0.9f * dim), Offset(cx - 98 * u, floor - 14 * u), Size(30 * u, 14 * u), CornerRadius(2 * u))
-            drawOval(Color(0xFF151218).copy(alpha = 0.9f * dim), Offset(cx - 95 * u, floor - 18 * u), Size(24 * u, 7 * u))
+            val x = sx(Decor.RECORD_PLAYER)
+            drawRoundRect(Palette.card.copy(alpha = 0.9f * dim), Offset(cx - 98 * u + x, floor - 14 * u), Size(30 * u, 14 * u), CornerRadius(2 * u))
+            drawOval(Color(0xFF151218).copy(alpha = 0.9f * dim), Offset(cx - 95 * u + x, floor - 18 * u), Size(24 * u, 7 * u))
         }
         if (has(Decor.PUMPKIN) && month == java.util.Calendar.OCTOBER) drawPumpkin(Offset(cx + 66 * u, floor), u, dim)
         if (has(Decor.UMBRELLA_STAND)) {
-            val a = Offset(cx + 96 * u, floor)
+            val a = Offset(cx + 96 * u + sx(Decor.UMBRELLA_STAND), floor)
             drawRect(Palette.muted.copy(alpha = 0.35f * dim), Offset(a.x - 6 * u, a.y - 18 * u), Size(12 * u, 18 * u))
             drawLine(Palette.teal.copy(alpha = 0.5f * dim), a + Offset(-2 * u, -18 * u), a + Offset(-4 * u, -42 * u), 3 * u, StrokeCap.Round)
             drawArc(Palette.teal.copy(alpha = 0.5f * dim), 180f, 120f, false, a + Offset(-8 * u, -48 * u), Size(10 * u, 10 * u), style = Stroke(2.5f * u))
         }
-        if (has(Decor.LAMP)) drawLamp(Offset(cx + 120 * u, floor), u, lit = evening, dim)
+        if (has(Decor.LAMP)) drawLamp(Offset(cx + 120 * u + sx(Decor.LAMP), floor), u, lit = evening, dim)
     }
 }
 
@@ -240,6 +263,43 @@ private fun DrawScope.drawShelf(at: Offset, u: Float, dim: Float, trophy: Boolea
     }
 }
 
+/** Room items a friend may move about. */
+internal val MOVABLE = listOf(Decor.PLANT, Decor.LAMP, Decor.RECORD_PLAYER, Decor.UMBRELLA_STAND, Decor.RARE_PLANT, Decor.LAVA_LAMP)
+
+/**
+ * Where a room item stands (its x, and the height of its top above the floor), in room units
+ * from the blob's centre: for hide and seek.
+ */
+internal fun decorSpot(d: Decor): Pair<Float, Float> = when (d) {
+    Decor.PLANT -> -118f to 45f
+    Decor.RARE_PLANT -> -142f to 50f
+    Decor.LAMP -> 120f to 100f
+    Decor.BOOKSHELF -> -143f to 86f
+    Decor.LAVA_LAMP -> 78f to 36f
+    else -> 60f to 10f
+}
+
+private fun DrawScope.drawRarePlant(at: Offset, u: Float, dim: Float, t: Float) {
+    drawRect(Color(0xFF6E5A8A).copy(alpha = 0.5f * dim), Offset(at.x - 7 * u, at.y - 14 * u), Size(14 * u, 14 * u))
+    val glow = 0.45f + 0.2f * sin(t * 1.2f)
+    for (i in 0 until 3) {
+        val tip = Offset(at.x + (i - 1) * 9 * u, at.y - (34 + (i % 2) * 10) * u)
+        drawLine(Color(0xFF45D3C7).copy(alpha = 0.5f * dim), Offset(at.x, at.y - 14 * u), tip, 3 * u, StrokeCap.Round)
+        drawCircle(Color(0xFF9FFFF0).copy(alpha = glow * dim), 3.5f * u, tip)
+    }
+}
+
+private fun DrawScope.drawLavaLamp(at: Offset, u: Float, dim: Float, now: Long) {
+    drawPath(Path().apply {
+        moveTo(at.x - 5 * u, at.y - 36 * u); lineTo(at.x + 5 * u, at.y - 36 * u); lineTo(at.x + 8 * u, at.y - 6 * u); lineTo(at.x - 8 * u, at.y - 6 * u); close()
+    }, Color(0xFFFF7A8A).copy(alpha = 0.3f * dim))
+    val p = (now % 20_000L) / 20_000f
+    drawCircle(Color(0xFFFFC266).copy(alpha = 0.6f * dim), 3 * u, Offset(at.x, at.y - 10 * u - 22 * u * kotlin.math.abs(sin(p * 3.14159f))))
+    drawCircle(Color(0xFFFFC266).copy(alpha = 0.5f * dim), 2.2f * u, Offset(at.x + 1.5f * u, at.y - 30 * u + 16 * u * kotlin.math.abs(sin(p * 3.14159f + 1f))))
+    drawRect(Palette.muted.copy(alpha = 0.4f * dim), Offset(at.x - 8 * u, at.y - 6 * u), Size(16 * u, 6 * u))
+    drawRect(Palette.muted.copy(alpha = 0.4f * dim), Offset(at.x - 4 * u, at.y - 40 * u), Size(8 * u, 4 * u))
+}
+
 private fun DrawScope.drawLeafPile(at: Offset, u: Float, dim: Float) {
     val c = listOf(Color(0xFFE07A3A), Color(0xFFD9A441), Color(0xFFB5523A))
     for (i in 0 until 6) drawOval(c[i % 3].copy(alpha = 0.45f * dim), Offset(at.x - 10 * u + i * 4 * u, at.y - 4 * u - (i % 2) * 2 * u), Size(6 * u, 3.5f * u))
@@ -291,50 +351,4 @@ private fun DrawScope.drawLamp(at: Offset, u: Float, lit: Boolean, dim: Float) {
     drawPath(Path().apply {
         moveTo(at.x - 8 * u, top); lineTo(at.x + 8 * u, top); lineTo(at.x + 15 * u, top + 16 * u); lineTo(at.x - 15 * u, top + 16 * u); close()
     }, (if (lit) Color(0xFFFFD58A) else Palette.muted).copy(alpha = (if (lit) 0.6f else 0.3f) * dim))
-}
-
-/**
- * The visiting friend: walks in from the left, sits beside the blob, chats in its own bubble,
- * runs about for tag or dozes, then walks off. [blob] is the main blob's centre.
- */
-@Composable
-internal fun FriendLayer(blob: Offset, size: Dp, actions: UiActions) {
-    val visit by GadgetState.friend.collectAsState()
-    val say by GadgetState.friendSay.collectAsState()
-    val v = visit
-    var t by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    LaunchedEffect(v) {
-        val start = System.currentTimeMillis()
-        while (v != null) {
-            kotlinx.coroutines.delay(50)
-            t = (System.currentTimeMillis() - start) / 1000f
-        }
-    }
-    val here = v != null && System.currentTimeMillis() < (v?.untilMs ?: 0)
-    val enter by animateFloatAsState(if (here) 1f else 0f, tween(1600), label = "friend")
-    if (enter <= 0.001f || blob == Offset.Unspecified) return
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val sizePx = with(density) { size.toPx() }
-    // Sits just right of and below the blob; walks in from off the left edge.
-    val homeX = blob.x + sizePx * 1.05f
-    val homeY = blob.y + sizePx * 0.25f
-    val tag = v?.activity == "tag"
-    val runX = if (tag && t > 2f) sin(t * 1.7f) * sizePx * 1.1f else 0f
-    val runY = if (tag && t > 2f) -kotlin.math.abs(sin(t * 5f)) * sizePx * 0.25f else 0f
-    val x = -sizePx + (homeX + sizePx) * enter + runX
-    val y = homeY + runY
-    val nap = v?.activity == "nap" && t > 3f
-    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((x - sizePx / 2).toInt(), (y - sizePx / 2).toInt()) }) {
-        Blob(Modifier.size(size), actions, mini = true,
-            gaze = Offset(if (tag) kotlin.math.cos(t * 1.7f) else -0.8f, 0f),
-            moodOverride = if (nap) Mood.SLEEPY else Mood.HAPPY,
-            tintOverride = Color(v?.color ?: 0xFFFF9EC7))
-    }
-    say?.let { text ->
-        Column(Modifier.offset { androidx.compose.ui.unit.IntOffset((x - sizePx * 0.2f).toInt(), (y - sizePx * 1.05f).toInt()) }) {
-            Text(text, color = Palette.night, fontSize = 14.sp, maxLines = 2,
-                modifier = Modifier.widthIn(max = 220.dp).background(Color(v?.color ?: 0xFFFF9EC7).copy(alpha = 0.92f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp))
-        }
-    }
 }

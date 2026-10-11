@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import com.rusty.museecho.gadget.GadgetState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -68,6 +70,27 @@ internal fun NightScreen(scene: NightScene, actions: UiActions) {
         val dy = (sin(lap * 2f) * 60 + if (scene == NightScene.AQUARIUM) sin(t * 0.6f) * 8 else 0f).dp
         Blob(Modifier.align(Alignment.Center).offset(dx, dy).size(150.dp), actions, mini = true,
             moodOverride = Mood.SLEEPY)
+        // A sleepover: the friend snoozes beside it, and they share one dream.
+        val visit by GadgetState.friend.collectAsState()
+        val friends by GadgetState.friends.collectAsState()
+        visit?.takeIf { it.activity == "sleepover" }?.let { v ->
+            val f = friends.friends.firstOrNull { it.id == v.friendIds.firstOrNull() }
+            val friendSize = (110 * (f?.p?.scale ?: 1f)).dp
+            Blob(Modifier.align(Alignment.Center).offset(dx + 115.dp, dy + 20.dp).size(friendSize), actions, mini = true,
+                moodOverride = Mood.SLEEPY, tintOverride = Color(f?.color ?: v.color), ownStyle = false)
+            Canvas(Modifier.align(Alignment.Center).offset(dx + 55.dp, dy - 95.dp).size(90.dp, 60.dp)) {
+                val puff = Color.White.copy(alpha = 0.12f)
+                drawCircle(puff, size.height * 0.4f, Offset(size.width * 0.5f, size.height * 0.45f))
+                drawCircle(puff, size.height * 0.3f, Offset(size.width * 0.25f, size.height * 0.55f))
+                drawCircle(puff, size.height * 0.3f, Offset(size.width * 0.75f, size.height * 0.55f))
+                // Both of them, holding hands under the stars.
+                drawCircle(Color(0xFF8B6CFF).copy(alpha = 0.55f), size.height * 0.12f, Offset(size.width * 0.4f, size.height * 0.5f))
+                drawCircle(Color(f?.color ?: v.color).copy(alpha = 0.55f), size.height * 0.1f, Offset(size.width * 0.6f, size.height * 0.52f))
+                val twinkle = 0.3f + 0.3f * sin(t * 1.5f)
+                drawCircle(Color.White.copy(alpha = twinkle), 1.5f, Offset(size.width * 0.3f, size.height * 0.2f))
+                drawCircle(Color.White.copy(alpha = 0.6f - twinkle), 1.5f, Offset(size.width * 0.7f, size.height * 0.25f))
+            }
+        }
     }
 }
 

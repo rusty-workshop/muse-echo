@@ -40,8 +40,30 @@ data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
 data class Bubble(val text: String, val untilMs: Long)
 
-/** The blob's friend visiting: chatting, playing tag or napping, until [untilMs]. */
-data class FriendVisit(val activity: String, val startMs: Long, val untilMs: Long, val color: Long)
+/** The blob's friend(s) visiting: what they're doing, who (Friend ids), until [untilMs]. */
+data class FriendVisit(val activity: String, val startMs: Long, val untilMs: Long, val color: Long, val friendIds: List<String> = emptyList())
+
+/** What the friends' visit looks like right now (the visit's script updates it as it goes). */
+data class FriendScene(
+    /** Tic-tac-toe: 9 cells of ' ', 'X' (the blob) or 'O' (the friend). */
+    val board: String? = null,
+    /** Catch: when the current throw started, and which way it's going. */
+    val throwAt: Long = 0,
+    val toFriend: Boolean = true,
+    val teacups: Boolean = false,
+    val snack: String = "",
+    val book: Boolean = false,
+    val popcorn: Boolean = false,
+    val party: Boolean = false,
+    val pillow: Boolean = false,
+    /** Hide and seek: the room item the friend is behind (a Decor name). */
+    val hidingAt: String? = null,
+    val hug: Boolean = false,
+    val apart: Boolean = false,
+    /** Which friend (id) is blushing / giggling after a tap, until when. */
+    val tappedId: String? = null,
+    val tappedUntil: Long = 0,
+)
 
 data class MoodSet(val mood: Mood, val untilMs: Long)
 
@@ -548,12 +570,48 @@ object GadgetState {
         _friend.value = v
     }
 
-    /** What the friend is saying right now. */
-    private val _friendSay = MutableStateFlow<String?>(null)
-    val friendSay: StateFlow<String?> = _friendSay.asStateFlow()
+    /** What each visiting friend is saying right now (friend id to text; "" = the first friend). */
+    private val _friendSay = MutableStateFlow<Map<String, String>>(emptyMap())
+    val friendSay: StateFlow<Map<String, String>> = _friendSay.asStateFlow()
 
-    fun setFriendSay(text: String?) {
-        _friendSay.value = text
+    /** [text] for friend [id] (null clears it). */
+    fun setFriendSay(text: String?, id: String = "") {
+        _friendSay.update { if (text == null) it - id else it + (id to text) }
+    }
+
+    fun clearFriendSay() {
+        _friendSay.value = emptyMap()
+    }
+
+    private val _friendScene = MutableStateFlow(FriendScene())
+    val friendScene: StateFlow<FriendScene> = _friendScene.asStateFlow()
+
+    fun scene(change: (FriendScene) -> FriendScene) {
+        _friendScene.update(change)
+    }
+
+    /** All the friends, their diaries and postcards. */
+    private val _friends = MutableStateFlow(FriendsData())
+    val friends: StateFlow<FriendsData> = _friends.asStateFlow()
+
+    fun setFriends(d: FriendsData) {
+        _friends.value = d
+    }
+
+    /** Room items a friend moved (Decor name to sideways shift, in room units). */
+    private val _roomShift = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val roomShift: StateFlow<Map<String, Float>> = _roomShift.asStateFlow()
+
+    fun setRoomShift(m: Map<String, Float>) {
+        _roomShift.value = m
+    }
+
+    /** The friends' own album (every visit gets a picture, unlike the one-a-day album). */
+    private val _friendAlbum = MutableStateFlow<List<AlbumShot>>(emptyList())
+    val friendAlbum: StateFlow<List<AlbumShot>> = _friendAlbum.asStateFlow()
+
+    fun setFriendAlbum(list: List<AlbumShot>) {
+        _friendAlbum.value = list
     }
 
     /** A new phone on the Wi-Fi: offer guest mode (its name, or "" for unnamed). Null: nothing to ask. */
