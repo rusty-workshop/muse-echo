@@ -420,6 +420,19 @@ object GadgetState {
         _sounds.tryEmit(sound)
     }
 
+    /**
+     * A short forced look from the settings page's blob playground: [kind] is accessory, prop,
+     * color, weather, holiday or state, shown until [untilMs] without changing any setting.
+     */
+    data class BlobPreview(val kind: String, val value: String, val untilMs: Long)
+
+    private val _preview = MutableStateFlow<BlobPreview?>(null)
+    val preview: StateFlow<BlobPreview?> = _preview.asStateFlow()
+
+    fun preview(kind: String, value: String, ms: Long) {
+        _preview.value = BlobPreview(kind, value, System.currentTimeMillis() + ms)
+    }
+
     /** Screen-cleaning mode: touches are ignored until this time. */
     private val _cleaningUntil = MutableStateFlow(0L)
     val cleaningUntil: StateFlow<Long> = _cleaningUntil.asStateFlow()

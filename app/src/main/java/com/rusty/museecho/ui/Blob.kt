@@ -125,6 +125,8 @@ internal fun Blob(
     val specialDays by GadgetState.specialDays.collectAsState()
     val replyText by GadgetState.reply.collectAsState()
     val turnActive by GadgetState.turnActive.collectAsState()
+    val previewNow by GadgetState.preview.collectAsState()
+    val previewing = rememberUpdatedState(previewNow)
     val leaveBy by GadgetState.leaveBy.collectAsState()
     val work by GadgetState.assignments.collectAsState()
     val guest = if (mini) false else rememberGuest()
@@ -163,6 +165,7 @@ internal fun Blob(
             val antsy = timerSoon.value?.let { it - now in 1..60_000 } == true
             // Full frame rate only while something is actually moving fast.
             val fast = isNewYearMidnight(Calendar.getInstance()) || s || reacting || musicOn.value || antsy ||
+                (previewing.value?.let { it.untilMs > now } == true) ||
                 tk == Talk.LISTENING || tk == Talk.SENDING || tk == Talk.WAITING || thinking.value > 0.02f
             val frameMs = when {
                 fast -> 0L
@@ -357,12 +360,16 @@ internal fun Blob(
             val pixelMood = moodSet?.takeIf { it.untilMs > nowMs }?.mood
             val upLate = nowMs - GadgetState.lastTouch < 10 * 60_000L || talk != Talk.IDLE || speaking || nowMs - litAtMs < 10 * 60_000L
             val lightsOut = roomDark == true && (hour >= 20 || hour < 5)
-            val playingMusic = nowPlaying != null
+            // The settings page's playground forcing a look for a few seconds.
+            val pv = previewNow?.takeIf { it.untilMs > nowMs && !mini }
+            fun forced(kind: String) = pv?.takeIf { it.kind == kind }?.value
+            val forcedState = forced("state")
+            val playingMusic = nowPlaying != null || forcedState == "MUSIC"
             val newYear = isNewYearMidnight(cal)
             var mood = when {
                 moodOverride != null -> moodOverride
                 pixelMood != null -> pixelMood
-                tucked -> Mood.SLEEPY
+                tucked || forcedState == "TUCKED_IN" || forcedState == "SLEEP" -> Mood.SLEEPY
                 newYear -> Mood.HAPPY
                 quiet && !upLate -> Mood.SLEEPY
                 quiet -> Mood.DROWSY
@@ -392,9 +399,11 @@ internal fun Blob(
                 else -> Palette.muted
             }
             if (serverDown && talk == Talk.IDLE && !speaking) tint = lerp(tint, Palette.coral, 0.55f)
+            forced("color")?.let { name -> com.rusty.museecho.gadget.BlobStyles.parseColor(name)?.let { tint = Color(it) } }
 
             val evening = hour >= 17
-            val accessory = style.takeIf { it.active(nowMs) }?.accessory
+            val accessory = forced("accessory")?.let { v -> Accessory.entries.firstOrNull { it.name == v } }
+                ?: style.takeIf { it.active(nowMs) }?.accessory
                 ?: autoAccessory(cal, weather, playingMusic, tvPlaying && evening)
 
             // -- How it moves ------------------------------------------------------------
@@ -487,7 +496,8 @@ internal fun Blob(
                 if (timerKey != null && sm.timerKey != null) sm.flipAt = t
                 sm.timerKey = timerKey
             }
-            val sand = runningTimer?.let { ((it.dueAtMs - nowMs).toFloat() / it.durationMs.coerceAtLeast(1)).coerceIn(0f, 1f) } ?: 0f
+            val sand = runningTimer?.let { ((it.dueAtMs - nowMs).toFloat() / it.durationMs.coerceAtLeast(1)).coerceIn(0f, 1f) }
+                ?: if (forcedState == "HOURGLASS") 1f - (pv!!.untilMs - nowMs).let { 1f - it / 5_000f }.coerceIn(0f, 1f) else 0f
             val flipP = ((t - sm.flipAt) / 0.7f).coerceIn(0f, 1f)
 
             // Getting ready: in the hour before the day's first timed event, it fidgets and checks the clock.
@@ -500,7 +510,9 @@ internal fun Blob(
 
             // What it's holding: what the brief is about right now, a tearing calendar, Pixel's prop,
             // the weather alert, today's reminders, tomorrow's bag, or tomorrow's weather.
-            val prop = presenting
+            val prop = forced("prop")?.let { v -> HeldItem.entries.firstOrNull { it.name == v } }
+                ?: (if (forcedState == "HOURGLASS") HeldItem.HOURGLASS else null)
+                ?: presenting
                 ?: (if (react == Reaction.TEAR_PAGE) HeldItem.CALENDAR else null)
                 ?: held?.takeIf { it.untilMs > nowMs }?.item
                 ?: (if (runningTimer != null) HeldItem.HOURGLASS else null)
@@ -555,10 +567,16 @@ internal fun Blob(
 
             // -- Behind the body: weather and the alert glow ---------------------------------
             if (!mini) {
-                drawWeather(weather?.summary, body, r, t)
-                drawHoliday(cal, body, r, t, weather?.summary)
+                val weatherNow = when (forced("weather")) {
+                    null -> weather?.summary
+                    "HEAVY_RAIN" -> "Heavy rain"
+                    "THUNDERSTORMS" -> "Thunderstorms"
+                    else -> forced("weather")!!.lowercase()
+                }
+                drawWeather(weatherNow, body, r, t)
+                drawHoliday(forced("holiday")?.let(::holidayCalendar) ?: cal, body, r, t, weatherNow)
             }
-            if (alertGlow && !mini) {
+            if ((alertGlow || forcedState == "ALERT_GLOW") && !mini) {
                 val a = 0.22f + 0.18f * sin(t * 3f)
                 drawCircle(Brush.radialGradient(listOf(Color.Transparent, Palette.amber.copy(alpha = a), Color.Transparent), body, r * 1.05f), r * 1.05f, body)
             }
@@ -592,7 +610,7 @@ internal fun Blob(
                 val look = Offset(sm.lookX, sm.lookY)
                 if (moodF < 1f) drawFace(faceAt, r, sm.prevMood, look, lid, voice, munch, react, p, t, eyeInk.copy(alpha = 0.88f * (1 - moodF)))
                 drawFace(faceAt, r, mood, look, lid, voice, munch, react, p, t, eyeInk.copy(alpha = 0.88f * moodF))
-                if (tucked || react == Reaction.TUCK_IN) drawBlanket(core, r, if (react == Reaction.TUCK_IN) p else 1f, t)
+                if (tucked || react == Reaction.TUCK_IN || forcedState == "TUCKED_IN") drawBlanket(core, r, if (react == Reaction.TUCK_IN) p else 1f, t)
                 popIn(accF, core) { sm.accessory?.let { drawAccessory(it, core, r, t) } }
                 if (accF < 1f) popIn(1f - accF, core) { sm.prevAccessory?.let { drawAccessory(it, core, r, t) } }
                 if (!mini) {
@@ -601,14 +619,14 @@ internal fun Blob(
                     if (propF < 1f) popIn(1f - propF, hand) { sm.prevProp?.let { drawHeld(it, core, r, t, sand, flipP) } }
                     if (react == Reaction.TEAR_PAGE) drawTornPage(hand, r, p)
                 }
-                if (museBusy && talk == Talk.IDLE && !mini) drawGear(core + Offset(r * 0.52f, -r * 0.46f), r * 0.09f, t * 1.5f)
+                if ((museBusy || forcedState == "BUSY_GEAR") && talk == Talk.IDLE && !mini) drawGear(core + Offset(r * 0.52f, -r * 0.46f), r * 0.09f, t * 1.5f)
                 if (mood == Mood.SLEEPY && react == null && !mini) drawDream(core, r, t, weather, dreamPhoto)
                 if (react == Reaction.COVER_EARS) drawEarCovers(core, r, p, tint)
                 // Ears perk up while it listens, and pop up the moment it hears the wake word.
-                val earsTarget = if (talk == Talk.LISTENING || System.currentTimeMillis() - GadgetState.earsAt < 2_500) 1f else 0f
+                val earsTarget = if (talk == Talk.LISTENING || System.currentTimeMillis() - GadgetState.earsAt < 2_500 || forcedState == "EARS") 1f else 0f
                 sm.ears += (earsTarget - sm.ears) * ease(if (earsTarget > sm.ears) 14f else 6f)
                 if (sm.ears > 0.02f) drawEars(core, r, sm.ears, tint, t)
-                if (muted && !mini) drawMuted(core + Offset(-r * 0.5f, -r * 0.42f), r * 0.07f)
+                if ((muted || forcedState == "MUTED") && !mini) drawMuted(core + Offset(-r * 0.5f, -r * 0.42f), r * 0.07f)
             }
 
             // -- In front: confetti --------------------------------------------------------
@@ -620,7 +638,7 @@ internal fun Blob(
                 // Only for questions asked here, not messages Pixel sends on its own.
                 val streaming = turnActive && talk == Talk.REPLIED && !speaking && replyText.isNotBlank() && t - sm.replyAt < 4f
                 val waiting = turnActive && (talk == Talk.SENDING || talk == Talk.WAITING)
-                val thinkTarget = if (waiting || streaming) 1f else 0f
+                val thinkTarget = if (waiting || streaming || forcedState == "THINKING") 1f else 0f
                 sm.think += (thinkTarget - sm.think) * ease(8f)
                 thinking.value = sm.think
                 if (sm.think > 0.02f) {
@@ -1616,5 +1634,16 @@ private fun DrawScope.drawHourglass(a: Offset, r: Float, sand: Float, flip: Floa
             val peak = a.y + h - h * 0.8f * pile
             drawPath(Path().apply { moveTo(a.x - w * 0.95f, a.y + h); lineTo(a.x + w * 0.95f, a.y + h); lineTo(a.x, peak); close() }, sandColor)
         }
+    }
+}
+
+/** A calendar date that makes drawHoliday show [name] (for the playground). */
+private fun holidayCalendar(name: String): Calendar? = Calendar.getInstance().apply {
+    when (name) {
+        "FIREWORKS" -> { set(Calendar.MONTH, Calendar.JANUARY); set(Calendar.DAY_OF_MONTH, 1); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 5) }
+        "DECEMBER_SNOW" -> { set(Calendar.MONTH, Calendar.DECEMBER); set(Calendar.DAY_OF_MONTH, 10); set(Calendar.HOUR_OF_DAY, 12) }
+        "VALENTINE_HEARTS" -> { set(Calendar.MONTH, Calendar.FEBRUARY); set(Calendar.DAY_OF_MONTH, 14); set(Calendar.HOUR_OF_DAY, 12) }
+        "HALLOWEEN_BATS" -> { set(Calendar.MONTH, Calendar.OCTOBER); set(Calendar.DAY_OF_MONTH, 31); set(Calendar.HOUR_OF_DAY, 20) }
+        else -> return null
     }
 }

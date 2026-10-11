@@ -52,6 +52,7 @@ class Chores(
     private val travel = Travel(context)
     private val prefs = context.getSharedPreferences("museecho", Context.MODE_PRIVATE)
     private val startedAt = System.currentTimeMillis()
+    private val PREVIEW_MS = 5_000L
 
     fun start() {
         scope.launch { heartbeat() }
@@ -118,6 +119,11 @@ class Chores(
                         GadgetState.react(Reaction.HOP)
                         GadgetState.say("⏱ ${made.label}, from your watch", 8)
                         postState()
+                    }
+                    "blob" -> {
+                        val kind = (item["kind"] as? JsonPrimitive)?.contentOrNull ?: continue
+                        val value = (item["value"] as? JsonPrimitive)?.contentOrNull ?: continue
+                        playground(kind, value)
                     }
                     "settings" -> {
                         val changes = item["changes"] as? kotlinx.serialization.json.JsonObject ?: continue
@@ -390,11 +396,37 @@ class Chores(
                 put("frame_clock", buildJsonArray { com.rusty.museecho.ui.FrameClock.entries.forEach { add(JsonPrimitive(it.name)) } })
                 put("wake_sensitivity", buildJsonArray { WakeWord.Sensitivity.entries.forEach { add(JsonPrimitive(it.name)) } })
             })
+            // Everything the blob playground can show.
+            put("blob", buildJsonObject {
+                fun list(vararg names: String) = buildJsonArray { names.forEach { add(JsonPrimitive(it)) } }
+                put("reaction", buildJsonArray { Reaction.entries.forEach { add(JsonPrimitive(it.name)) } })
+                put("mood", buildJsonArray { Mood.entries.forEach { add(JsonPrimitive(it.name)) } })
+                put("accessory", buildJsonArray { Accessory.entries.filter { it != Accessory.NONE }.forEach { add(JsonPrimitive(it.name)) } })
+                put("prop", buildJsonArray { HeldItem.entries.filter { it != HeldItem.NONE }.forEach { add(JsonPrimitive(it.name)) } })
+                put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
+                put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
+                put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
+                put("state", list("EARS", "THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE"))
+            })
             put("version", BuildConfig.VERSION_NAME)
         })
     }
 
     var quickActionsNow: () -> List<com.rusty.museecho.integrations.QuickAction> = { emptyList() }
+
+    /** The blob playground on the settings page: anything the blob can do, for about five seconds. */
+    private fun playground(kind: String, value: String) {
+        GadgetState.lastTouch = System.currentTimeMillis()
+        GadgetState.setAsleep(false)
+        GadgetState.showFrame(false)
+        when (kind) {
+            "reaction" -> Reaction.entries.firstOrNull { it.name == value }?.let { GadgetState.react(it) }
+            "mood" -> Mood.entries.firstOrNull { it.name == value }?.let { GadgetState.setMood(it, 5) }
+            "state" -> if (value == "BUBBLE") GadgetState.say("Hi there! 👋 This is a speech bubble.", 5)
+                else GadgetState.preview(kind, value, PREVIEW_MS)
+            else -> GadgetState.preview(kind, value, PREVIEW_MS)
+        }
+    }
 
     // -- What's new -------------------------------------------------------------------------
 
