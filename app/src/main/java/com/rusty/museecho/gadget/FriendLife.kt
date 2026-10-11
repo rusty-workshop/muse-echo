@@ -272,8 +272,8 @@ class FriendLife(
         val v = FriendVisit(act, now, now + len, f.color, ids)
         prefs.edit().putLong("friend_last", now).apply()
         GadgetState.log("friend visiting: ${f.shownName} ($act)")
-        // On the clock page, the blob mentions who's over (they're on the Blob page).
-        if (GadgetState.idlePage.value != 8 && !isQuiet()) GadgetState.say("${f.shownName} came over! 👯", 8)
+        // Somewhere else (another page), the blob mentions who's over when you come back.
+        if (GadgetState.idlePage.value !in setOf(0, 8) && !isQuiet()) GadgetState.say("${f.shownName} came over! 👯", 8)
         val reunion = missing
         missing = false
         job = scope.launch {

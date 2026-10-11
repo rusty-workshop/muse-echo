@@ -375,6 +375,8 @@ private fun IdleFace(actions: UiActions) {
     val chipsShowing by GadgetState.blobCards.collectAsState()
     val thingNow by GadgetState.dailyThing.collectAsState()
     Box(Modifier.fillMaxSize()) {
+    // Its room, behind it here as well as on the Blob page.
+    BlobRoom(blobCenter, blobHalf, Modifier.fillMaxSize())
     Row(
         Modifier.fillMaxSize()
             .pointerInput(Unit) {
@@ -501,6 +503,8 @@ private fun IdleFace(actions: UiActions) {
         }
         if (hasNote) NoteCard(note, actions)
     }
+    // Visiting friends show up here too.
+    FriendLayer(blobCenter, blobHalf, actions)
     }
 }
 

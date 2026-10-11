@@ -224,10 +224,16 @@ class BlobLife(
 
     val friendAlbum = BlobAlbum(java.io.File(context.filesDir, "album_friends"), perDay = false, keep = 150)
 
-    /** A friend moment for the friends' album: the whole room, if the Blob page is on screen. */
+    /** A friend moment for the friends' album: the room, if the clock or the Blob page is on screen. */
     suspend fun friendSnapshot(caption: String): Boolean {
-        if (GadgetState.idlePage.value != 8) return false
-        val rect = GadgetState.blobBounds[ROOM_BOUNDS] ?: return false
+        val rect = when (GadgetState.idlePage.value) {
+            8 -> GadgetState.blobBounds[ROOM_BOUNDS]
+            // On the clock: around the blob, wide enough on the right for the friend.
+            0 -> GadgetState.blobBounds[0]?.let { b ->
+                android.graphics.Rect(b.left - b.width() / 3, b.top - b.height() / 5, b.right + b.width() * 9 / 10, b.bottom + b.height() / 4)
+            }
+            else -> null
+        } ?: return false
         val jpeg = grab(rect, 640, around = false) ?: return false
         GadgetState.setFriendAlbum(friendAlbum.add(jpeg, caption))
         GadgetState.log("friend album: $caption")
