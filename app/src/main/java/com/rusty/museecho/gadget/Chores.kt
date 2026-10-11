@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.FlowPreview::class)
+
 package com.rusty.museecho.gadget
 
 import android.content.Context
@@ -18,6 +20,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
@@ -57,6 +60,18 @@ class Chores(
     fun start() {
         scope.launch { heartbeat() }
         scope.launch { timers.items.collect { postState() } }
+        // The blob's look for the watch: whenever it changes (settled for a moment), and once a minute.
+        scope.launch {
+            kotlinx.coroutines.flow.merge(GadgetState.mood, GadgetState.bubble, GadgetState.held, GadgetState.style,
+                GadgetState.friend, GadgetState.quiet, GadgetState.tuckedIn, GadgetState.talk)
+                .debounce(1_500).collect { postState() }
+        }
+        scope.launch {
+            while (true) {
+                delay(60_000)
+                postState()
+            }
+        }
         scope.launch { inbox() }
         scope.launch { backups() }
         scope.launch { photoSync() }
@@ -101,7 +116,30 @@ class Chores(
             put("ringing", GadgetState.ringing.value)
             put("quiet", GadgetState.quiet.value)
             put("at_ms", now)
+            put("blob", blobState(now))
         })
+    }
+
+    /** Roughly how the blob looks right now, for the watch (it draws its own little copy). */
+    private fun blobState(now: Long) = buildJsonObject {
+        val pixel = GadgetState.mood.value?.takeIf { it.untilMs > now }?.mood
+        val mood = when {
+            pixel != null -> pixel
+            GadgetState.tuckedIn.value || GadgetState.asleep.value -> Mood.SLEEPY
+            GadgetState.quiet.value -> Mood.DROWSY
+            GadgetState.talk.value == Talk.LISTENING -> Mood.CURIOUS
+            GadgetState.server.value?.overall == "down" -> Mood.WORRIED
+            GadgetState.nowPlaying.value != null || GadgetState.laptopStatus.value?.playing == true -> Mood.HAPPY
+            else -> Mood.NEUTRAL
+        }
+        put("mood", mood.name.lowercase())
+        GadgetState.style.value.takeIf { it.active(now) }?.let { st ->
+            st.color?.let { put("color", "#%06X".format(it and 0xFFFFFF)) }
+            st.accessory?.takeIf { it != Accessory.NONE }?.let { put("accessory", it.name.lowercase()) }
+        }
+        GadgetState.bubble.value?.takeIf { it.untilMs > now }?.let { put("bubble", it.text) }
+        GadgetState.held.value?.takeIf { it.untilMs > now }?.let { h -> put("holding", h.item.name.lowercase()); if (h.text.isNotEmpty()) put("label", h.text) }
+        GadgetState.friend.value?.let { put("friend", it.activity) }
     }
 
     // -- The watch's inbox ------------------------------------------------------------------
@@ -135,6 +173,17 @@ class Chores(
                         val changes = item["changes"] as? kotlinx.serialization.json.JsonObject ?: continue
                         applySettings(changes)
                         postSettings()
+                    }
+                    "poke" -> {
+                        // A tap on the watch: the blob hops and says hi (a little chirp, not overnight).
+                        GadgetState.log("poked from the watch")
+                        DayLog.poked()
+                        GadgetState.react(if (Math.random() < 0.5) Reaction.HOP else Reaction.WINK)
+                        if (!isQuiet()) {
+                            GadgetState.chirp(BlobSound.TAP)
+                            GadgetState.say("👋 Hi from your wrist!", 6)
+                        }
+                        postState()
                     }
                     "ask" -> (item["what"] as? JsonPrimitive)?.contentOrNull?.let { askNow(it) }
                     "announce" -> {
@@ -395,6 +444,9 @@ class Chores(
             put("background", p.background)
             put("room_sense", p.roomSense)
             put("blob_room", p.blobRoom)
+            put("page_order", buildJsonArray { com.rusty.museecho.ui.HomePage.ordered(p.pageOrder).forEach { add(JsonPrimitive(it.name)) } })
+            put("pages_hidden", buildJsonArray { p.pagesHidden.forEach { add(JsonPrimitive(it)) } })
+            put("page_labels", buildJsonObject { com.rusty.museecho.ui.HomePage.entries.forEach { put(it.name, it.label) } })
             put("blob_friend", p.blobFriend)
             put("laptop_break", p.laptopBreak)
             put("warm_evenings", p.warmEvenings)

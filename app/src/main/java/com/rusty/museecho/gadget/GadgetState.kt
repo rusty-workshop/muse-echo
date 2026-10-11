@@ -518,6 +518,28 @@ object GadgetState {
         _room.value = items
     }
 
+    /** The swipe pages' order (HomePage names) and the hidden ones. */
+    private val _pageOrder = MutableStateFlow<List<String>>(emptyList())
+    val pageOrder: StateFlow<List<String>> = _pageOrder.asStateFlow()
+    private val _pagesHidden = MutableStateFlow<Set<String>>(emptySet())
+    val pagesHidden: StateFlow<Set<String>> = _pagesHidden.asStateFlow()
+
+    fun setPages(order: List<String>, hidden: Set<String>) {
+        _pageOrder.value = order
+        _pagesHidden.value = hidden
+    }
+
+    /** The blob's photo album (oldest first). */
+    private val _album = MutableStateFlow<List<AlbumShot>>(emptyList())
+    val album: StateFlow<List<AlbumShot>> = _album.asStateFlow()
+
+    fun setAlbum(list: List<AlbumShot>) {
+        _album.value = list
+    }
+
+    /** Where the full-size blob is on screen, in window pixels, per page (0 clock, 8 Blob page). */
+    val blobBounds = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Rect>()
+
     /** The blob's friend, while it's visiting. */
     private val _friend = MutableStateFlow<FriendVisit?>(null)
     val friend: StateFlow<FriendVisit?> = _friend.asStateFlow()

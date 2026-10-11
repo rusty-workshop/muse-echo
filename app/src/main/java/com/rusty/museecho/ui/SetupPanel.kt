@@ -525,6 +525,10 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     Body("The laptop sends these with tools/desktop-sync in the muse-echo repo (install.sh there).", Palette.muted)
                 }
 
+                SectionTitle("Pages")
+                Body("The pages you swipe to from the clock. ↑ ↓ to reorder; switch one off to hide it.", Palette.muted)
+                PagesEditor()
+
                 SectionTitle("Home and room")
                 var roomSense by remember { mutableStateOf(prefs.roomSense) }
                 var diaryOn by remember { mutableStateOf(prefs.diary) }
@@ -754,6 +758,32 @@ private fun FrameClockPicker(actions: UiActions) {
                 Text(style.label, color = Palette.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
                 Text(style.blurb, color = Palette.muted, fontSize = 11.sp, maxLines = 2)
             }
+        }
+    }
+}
+
+
+/** Reorder and hide the swipe pages (the clock always stays first). */
+@Composable
+private fun PagesEditor() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val orderNames by GadgetState.pageOrder.collectAsState()
+    val hidden by GadgetState.pagesHidden.collectAsState()
+    val order = HomePage.ordered(orderNames)
+    fun save(newOrder: List<HomePage>, newHidden: Set<String>) {
+        val p = com.rusty.museecho.gadget.Prefs(ctx)
+        p.pageOrder = newOrder.map { it.name }
+        p.pagesHidden = newHidden
+        GadgetState.setPages(p.pageOrder, p.pagesHidden)
+    }
+    order.forEachIndexed { i, pg ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("${i + 1}.", color = Palette.muted, fontSize = 14.sp, modifier = Modifier.width(26.dp))
+            Body(pg.label, if (pg.name in hidden) Palette.muted else Palette.ink)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { save(order.toMutableList().apply { add(i - 1, removeAt(i)) }, hidden) }, enabled = i > 0) { Text("↑") }
+            TextButton(onClick = { save(order.toMutableList().apply { add(i + 1, removeAt(i)) }, hidden) }, enabled = i < order.size - 1) { Text("↓") }
+            Switch(checked = pg.name !in hidden, onCheckedChange = { on -> save(order, if (on) hidden - pg.name else hidden + pg.name) })
         }
     }
 }

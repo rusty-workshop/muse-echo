@@ -69,6 +69,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toAndroidRect
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
@@ -176,6 +178,7 @@ interface UiActions {
     suspend fun laptopShortcuts(): List<Pair<String, String>>
     suspend fun laptopShortcut(key: String): String
     suspend fun restartContainer(name: String): Pair<Boolean, String>
+    fun albumFile(shot: com.rusty.museecho.gadget.AlbumShot): java.io.File?
     suspend fun spotifySearch(q: String): Pair<List<com.rusty.museecho.integrations.SpotifyItem>, String?>
     suspend fun spotifyQueue(): Pair<com.rusty.museecho.integrations.SpotifyItem?, List<com.rusty.museecho.integrations.SpotifyItem>>?
     suspend fun spotify(uri: String, queue: Boolean): Pair<Boolean, String>
@@ -372,7 +375,6 @@ private fun IdleFace(actions: UiActions) {
     val chipsShowing by GadgetState.blobCards.collectAsState()
     val thingNow by GadgetState.dailyThing.collectAsState()
     Box(Modifier.fillMaxSize()) {
-    BlobRoom(blobCenter, blobHalf, Modifier.fillMaxSize())
     Row(
         Modifier.fillMaxSize()
             .pointerInput(Unit) {
@@ -449,6 +451,7 @@ private fun IdleFace(actions: UiActions) {
         Box(Modifier.size(if (hasNote) 170.dp else 220.dp).onGloballyPositioned {
             blobCoords = it
             blobHalf = it.size.width / 2f
+            GadgetState.blobBounds[0] = it.boundsInWindow().toAndroidRect()
             // Measured against the whole page (the row's outer bounds), padding included.
             rowCoords?.takeIf { r -> r.isAttached && it.isAttached }?.let { r ->
                 blobCenter = r.localPositionOf(it, Offset(it.size.width / 2f, it.size.height / 2f))
@@ -498,7 +501,6 @@ private fun IdleFace(actions: UiActions) {
         }
         if (hasNote) NoteCard(note, actions)
     }
-    FriendLayer(blobCenter, if (hasNote) 70.dp else 86.dp, actions)
     }
 }
 
@@ -551,18 +553,21 @@ private fun AlertBanner() {
 private fun IdlePages(actions: UiActions) {
     // Guest mode leaves out the agenda page.
     val guest = rememberGuest()
-    val diaryOn by GadgetState.diaryOn.collectAsState()
-    // Page ids: 0 clock, 1 agenda, 3 forecast, 6 diary, 4 TV remote, 5 laptop, 7 Spotify, 2 homelab (TV / laptop only when
-    // set up; guest mode leaves out the agenda, the diary and the laptop).
+    val order by GadgetState.pageOrder.collectAsState()
+    val hidden by GadgetState.pagesHidden.collectAsState()
+    // The clock first, then the other pages in the chosen order, minus hidden ones and ones that
+    // aren't set up (TV, laptop). Guest mode leaves out the schedule and the laptop pages.
     val pages = buildList {
         add(0)
-        if (!guest) add(1)
-        add(3)
-        if (!guest && diaryOn) add(6)
-        if (actions.tvAvailable()) add(4)
-        if (!guest && actions.laptopAvailable()) add(5)
-        if (!guest && actions.laptopAvailable()) add(7)
-        add(2)
+        HomePage.ordered(order).forEach { pg ->
+            val ok = pg.name !in hidden && when (pg) {
+                HomePage.AGENDA -> !guest
+                HomePage.TV -> actions.tvAvailable()
+                HomePage.LAPTOP, HomePage.SPOTIFY -> !guest && actions.laptopAvailable()
+                else -> true
+            }
+            if (ok) add(pg.id)
+        }
     }
     val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { pages.size })
     LaunchedEffect(pager.currentPage, guest) { GadgetState.setIdlePage(pages.getOrElse(pager.currentPage) { 0 }) }
@@ -598,15 +603,21 @@ private fun IdlePages(actions: UiActions) {
         }
     }
     androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        when (pages.getOrElse(page) { 0 }) {
+        when (val id = pages.getOrElse(page) { 0 }) {
             0 -> IdleFace(actions)
             1 -> AgendaPage(actions)
-            3 -> ForecastPage(actions)
-            6 -> DiaryPage()
-            4 -> TvRemotePage(actions)
-            5 -> LaptopPage(actions)
-            7 -> SpotifyPage(actions)
-            else -> HomelabPage(actions)
+            8 -> BlobPage(actions)
+            else -> Box(Modifier.fillMaxSize()) {
+                when (id) {
+                    3 -> ForecastPage(actions)
+                    4 -> TvRemotePage(actions)
+                    5 -> LaptopPage(actions)
+                    7 -> SpotifyPage(actions)
+                    else -> HomelabPage(actions)
+                }
+                // The blob keeps you company here too: a little copy, same mood, peeking at the page.
+                PageBlob(Modifier.align(Alignment.BottomEnd).padding(end = 128.dp, bottom = 14.dp), actions)
+            }
         }
     }
 }

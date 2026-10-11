@@ -146,6 +146,7 @@ class GadgetService : Service() {
         diary = Diary(java.io.File(filesDir, "diary.json"))
         GadgetState.setDiary(diary.load())
         GadgetState.setDiaryOn(Prefs(this).diary)
+        GadgetState.setPages(Prefs(this).pageOrder, Prefs(this).pagesHidden)
         Prefs(this).dailyThingJson?.let { j ->
             runCatching { kotlinx.serialization.json.Json.decodeFromString(DailyThing.serializer(), j) }.getOrNull()
                 ?.takeIf { Prefs(this).dailyThing }?.let(GadgetState::setDailyThing)
@@ -1005,6 +1006,14 @@ class GadgetService : Service() {
         str("night_scene")?.let { v -> p.nightScene = v; GadgetState.setNightScene(v); done += "night_scene" }
         str("theme")?.let { v -> p.theme = v; GadgetState.setTheme(v); done += "theme" }
         str("background")?.let { v -> p.background = v; GadgetState.setBackground(v); done += "background" }
+        (changes["page_order"] as? kotlinx.serialization.json.JsonArray)?.let { arr ->
+            p.pageOrder = arr.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+            GadgetState.setPages(p.pageOrder, p.pagesHidden); done += "page_order"
+        }
+        (changes["pages_hidden"] as? kotlinx.serialization.json.JsonArray)?.let { arr ->
+            p.pagesHidden = arr.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.toSet()
+            GadgetState.setPages(p.pageOrder, p.pagesHidden); done += "pages_hidden"
+        }
         bool("blob_room")?.let { v -> p.blobRoom = v; life.loadRoom(); done += "blob_room" }
         bool("blob_friend")?.let { v -> p.blobFriend = v; if (!v) life.endVisit(); done += "blob_friend" }
         bool("laptop_break")?.let { v -> p.laptopBreak = v; done += "laptop_break" }
@@ -2034,6 +2043,14 @@ class Prefs(context: Context) {
         set(v) = prefs.edit().putString("background", v).apply()
 
     /** Lights off at night: go to sleep; lights on in the morning: wake up. */
+    var pageOrder: List<String>
+        get() = prefs.getString("page_order", "")!!.split(',').filter { it.isNotEmpty() }
+        set(v) = prefs.edit().putString("page_order", v.joinToString(",")).apply()
+
+    var pagesHidden: Set<String>
+        get() = prefs.getString("pages_hidden", "")!!.split(',').filter { it.isNotEmpty() }.toSet()
+        set(v) = prefs.edit().putString("pages_hidden", v.joinToString(",")).apply()
+
     var blobRoom: Boolean
         get() = prefs.getBoolean("blob_room", true)
         set(v) = prefs.edit().putBoolean("blob_room", v).apply()

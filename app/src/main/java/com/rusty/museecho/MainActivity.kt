@@ -376,6 +376,9 @@ class MainActivity : ComponentActivity() {
         override suspend fun restartContainer(name: String) =
             GadgetService.instance?.hub?.restartContainer(name) ?: (false to "the service isn't running")
 
+        override fun albumFile(shot: com.rusty.museecho.gadget.AlbumShot) =
+            GadgetService.instance?.life?.album?.file(shot)?.takeIf { it.isFile }
+
         override suspend fun spotifySearch(q: String) =
             GadgetService.instance?.laptop?.spotifySearch(q) ?: (emptyList<com.rusty.museecho.integrations.SpotifyItem>() to "the service isn't running")
         override suspend fun spotifyQueue() = GadgetService.instance?.laptop?.spotifyQueue()
@@ -482,6 +485,21 @@ class MainActivity : ComponentActivity() {
         private var current: java.lang.ref.WeakReference<MainActivity>? = null
 
         /** A JPEG of what's on screen right now (for the laptop's live view), or null if the app isn't showing. */
+        /** The whole window as a bitmap (null when the app isn't on screen). */
+        suspend fun captureBitmap(): android.graphics.Bitmap? {
+            val activity = current?.get()?.takeIf { visible } ?: return null
+            return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                activity.runOnUiThread {
+                    val view = activity.window.decorView
+                    if (view.width <= 0 || view.height <= 0) { cont.resume(null) {}; return@runOnUiThread }
+                    val bmp = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+                    android.view.PixelCopy.request(activity.window, bmp, { result ->
+                        cont.resume(if (result == android.view.PixelCopy.SUCCESS) bmp else null) {}
+                    }, android.os.Handler(android.os.Looper.getMainLooper()))
+                }
+            }
+        }
+
         suspend fun capture(): ByteArray? {
             val activity = current?.get()?.takeIf { visible } ?: return null
             return kotlinx.coroutines.suspendCancellableCoroutine { cont ->

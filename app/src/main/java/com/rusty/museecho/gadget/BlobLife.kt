@@ -107,9 +107,12 @@ class BlobLife(
     private val framePhotos: () -> Int,
 ) {
     private val prefs = context.getSharedPreferences("museecho", Context.MODE_PRIVATE)
+    val album = BlobAlbum(java.io.File(context.filesDir, "album"))
 
     fun start() {
         loadRoom()
+        GadgetState.setAlbum(album.load())
+        scope.launch { albumLoop() }
         GadgetState.setWeekRecap(prefs.getString("week_recap", null)?.let { it to prefs.getLong("week_recap_ms", 0L) })
         scope.launch { roomLoop() }
         scope.launch { friendLoop() }
@@ -142,6 +145,7 @@ class BlobLife(
         if (Prefs(context).blobRoom && !isQuiet() && !GadgetState.asleep.value) {
             GadgetState.react(Reaction.HOP)
             GadgetState.say("New for my room: ${d.label}! ${d.emoji}", 20)
+            snapshotSoon("Showing off ${d.label} ${d.emoji}", 1_500)
         }
     }
 
@@ -199,6 +203,7 @@ class BlobLife(
                     "chat" -> {
                         val talk = LifeMath.FRIEND_CHATS.random()
                         GadgetState.react(Reaction.WAVE)
+                        snapshotSoon("Hanging out with a friend 👯", 3_000)
                         for ((mine, line) in talk) {
                             if (mine) GadgetState.say(line, 4) else GadgetState.setFriendSay(line)
                             delay(4_200)
@@ -254,6 +259,71 @@ class BlobLife(
             if (System.currentTimeMillis() - prefs.getLong("friend_last", 0L) < 3 * 3_600_000L) continue
             if (System.currentTimeMillis() - GadgetState.lastTouch < 60_000) continue
             if (Math.random() < 0.35) visit()
+        }
+    }
+
+    // -- Photo album -----------------------------------------------------------------------------
+
+    private fun snapshotSoon(caption: String, afterMs: Long) {
+        scope.launch {
+            delay(afterMs)
+            snapshot(caption)
+        }
+    }
+
+    /**
+     * Today's album picture, if there isn't one yet: the blob as it is on screen right now (on the
+     * clock or the Blob page, with nothing else in front of it). Returns whether it took one.
+     */
+    suspend fun snapshot(caption: String, force: Boolean = false): Boolean {
+        if (!force && album.hasToday()) return false
+        val page = GadgetState.idlePage.value
+        val rect = GadgetState.blobBounds[page]?.takeIf { page == 0 || page == 8 } ?: return false
+        if (!com.rusty.museecho.MainActivity.visible || GadgetState.screen.value !is Screen.Idle ||
+            GadgetState.frameShowing.value || GadgetState.asleep.value || GadgetState.timePad.value) return false
+        val full = com.rusty.museecho.MainActivity.captureBitmap() ?: return false
+        val jpeg = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            // A bit around the blob too (its bubble, what it holds), square, at most 480 px.
+            val grow = rect.width() / 4
+            val r = android.graphics.Rect(rect.left - grow, rect.top - grow, rect.right + grow, rect.bottom + grow / 2)
+            r.intersect(0, 0, full.width, full.height)
+            if (r.width() < 40 || r.height() < 40) return@withContext null
+            val crop = android.graphics.Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height())
+            val scale = (480f / maxOf(crop.width, crop.height)).coerceAtMost(1f)
+            val out = android.graphics.Bitmap.createScaledBitmap(crop, (crop.width * scale).toInt(), (crop.height * scale).toInt(), true)
+            java.io.ByteArrayOutputStream().also { out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+        } ?: return false
+        GadgetState.setAlbum(album.add(jpeg, caption))
+        GadgetState.log("album: $caption")
+        DayLog.mark("photo", caption)
+        scope.launch { hub.postAlbum(java.time.LocalDate.now().toString(), caption, jpeg) }
+        return true
+    }
+
+    /** Other cute moments, and a plain one in the afternoon if nothing better came along. */
+    private suspend fun albumLoop() {
+        scope.launch {
+            GadgetState.reaction.collect { r ->
+                if (r?.reaction == Reaction.CELEBRATE) snapshotSoon("Party time! 🎉", 1_200)
+            }
+        }
+        scope.launch {
+            GadgetState.style.collect { st ->
+                val acc = st.accessory?.takeIf { st.active(System.currentTimeMillis()) && it != Accessory.NONE } ?: return@collect
+                snapshotSoon("Trying on ${acc.name.lowercase().replace('_', ' ')}", 2_000)
+            }
+        }
+        while (true) {
+            delay(10 * 60_000L)
+            val h = hour()
+            if (h in 13..20 && !album.hasToday() && idle() && !isQuiet()) {
+                val caption = when (GadgetState.mood.value?.mood) {
+                    Mood.HAPPY -> "A happy afternoon ☀️"
+                    Mood.SLEEPY, Mood.DROWSY -> "A sleepy afternoon 😴"
+                    else -> listOf("Just hanging out", "Chilling at home 🏠", "Another day on the shelf").random()
+                }
+                snapshot(caption)
+            }
         }
     }
 

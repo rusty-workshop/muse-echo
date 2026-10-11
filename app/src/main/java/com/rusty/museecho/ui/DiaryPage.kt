@@ -34,16 +34,15 @@ import androidx.compose.ui.unit.sp
 import com.rusty.museecho.gadget.DayWriting
 import com.rusty.museecho.gadget.GadgetState
 
-/** The blob's diary: one entry a night, written by Pixel; flip back through past days. */
+/** The blob's diary (a tab on the Blob page): one entry a night, written by Pixel; flip back through past days. */
 @Composable
-internal fun DiaryPage() {
+internal fun DiaryContent(modifier: Modifier) {
     val entries by GadgetState.diary.collectAsState()
     // Index from the newest (0) backwards.
     var back by remember { mutableIntStateOf(0) }
     LaunchedEffect(entries.size) { back = 0 }
-    Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = 64.dp, bottom = 84.dp)) {
+    Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Blob's diary", color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
             if (entries.size > 1) {
                 Arrow("◀", enabled = back < entries.size - 1) { back++ }
@@ -62,10 +61,9 @@ internal fun DiaryPage() {
         }.getOrDefault(e.date)
         Text("Dear diary · $date", color = Palette.muted, fontSize = 14.sp, fontStyle = FontStyle.Italic,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
-        // Ends above the round mic button in the bottom-right corner.
-        Box(Modifier.fillMaxWidth().weight(1f).padding(end = 60.dp).background(Palette.card.copy(alpha = 0.7f), RoundedCornerShape(18.dp))) {
-            Text(e.text, color = Palette.ink, fontSize = 18.sp, lineHeight = 26.sp,
-                modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp))
+        Box(Modifier.fillMaxWidth().weight(1f).background(Palette.card.copy(alpha = 0.7f), RoundedCornerShape(18.dp))) {
+            Text(e.text, color = Palette.ink, fontSize = 16.sp, lineHeight = 23.sp,
+                modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp))
         }
     }
 }

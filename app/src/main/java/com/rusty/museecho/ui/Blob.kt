@@ -97,6 +97,11 @@ internal fun Blob(
     moodOverride: Mood? = null,
     /** A colour of its own (the visiting friend). */
     tintOverride: Color? = null,
+    /**
+     * A full-size copy elsewhere (the Blob page): it looks and moves the same, but leaves the
+     * routines (antics, check-ins, yawns, cards) to the one on the clock, so nothing happens twice.
+     */
+    follower: Boolean = false,
 ) {
     val quiet by GadgetState.quiet.collectAsState()
     val speaking by GadgetState.speaking.collectAsState()
@@ -206,7 +211,7 @@ internal fun Blob(
     // Quiet hours start with a yawn and end with a stretch and a look at the day ahead.
     var wasQuiet by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(quiet) {
-        if (mini) return@LaunchedEffect
+        if (mini || follower) return@LaunchedEffect
         val before = wasQuiet
         wasQuiet = quiet
         if (before == false && quiet) GadgetState.react(Reaction.YAWN)
@@ -231,7 +236,7 @@ internal fun Blob(
 
     // A tap on the blob itself: a quick check-in on the day.
     LaunchedEffect(tapAtMs) {
-        if (mini) return@LaunchedEffect
+        if (mini || follower) return@LaunchedEffect
         val at = tapAt ?: return@LaunchedEffect
         if (sizePx <= 0f || System.currentTimeMillis() - tapAtMs > 1_000) return@LaunchedEffect
         val c = Offset(sizePx / 2, sizePx / 2)
@@ -246,7 +251,7 @@ internal fun Blob(
     // The server coming back is worth a little cheer.
     var lastOverall by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(server?.overall) {
-        if (mini) return@LaunchedEffect
+        if (mini || follower) return@LaunchedEffect
         val before = lastOverall
         lastOverall = server?.overall
         if (before == "down" && server?.overall == "up") {
@@ -259,7 +264,7 @@ internal fun Blob(
     // Lights coming on in the morning: it stretches awake.
     var wasDark by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(roomDark) {
-        if (mini) return@LaunchedEffect
+        if (mini || follower) return@LaunchedEffect
         val before = wasDark
         wasDark = roomDark
         if (before == true && roomDark == false && Calendar.getInstance().get(Calendar.HOUR_OF_DAY) in 5..11) {
@@ -270,7 +275,7 @@ internal fun Blob(
 
     // Nobody's talked to it in hours: it tries to get some attention.
     LaunchedEffect(Unit) {
-        if (mini) return@LaunchedEffect
+        if (mini || follower) return@LaunchedEffect
         while (true) {
             val base = (40f - 30f * GadgetState.blobEnergy.value) * 60_000f
             delay((base + Math.random() * base).toLong())
@@ -294,7 +299,7 @@ internal fun Blob(
             val cal = Calendar.getInstance()
             val midnight = cal.get(Calendar.MONTH) == Calendar.JANUARY && cal.get(Calendar.DAY_OF_MONTH) == 1 &&
                 cal.get(Calendar.HOUR_OF_DAY) == 0 && cal.get(Calendar.MINUTE) < 2
-            if (midnight && !cheered && !mini) {
+            if (midnight && !cheered && !mini && !follower) {
                 cheered = true
                 GadgetState.react(Reaction.CELEBRATE)
                 GadgetState.say("Happy New Year! 🎆", 600)
@@ -305,7 +310,7 @@ internal fun Blob(
     val soonEvent = remember(agenda, tick) { upcomingEvent(agenda, tick) }
     val nudged = remember { mutableSetOf<String>() }
     LaunchedEffect(soonEvent) {
-        if (mini) return@LaunchedEffect
+        if (mini || follower) return@LaunchedEffect
         val (title, mins) = soonEvent ?: return@LaunchedEffect
         if (mins in 9..10 && nudged.add("$title@10")) GadgetState.react(Reaction.NUDGE)
         if (mins == 0 && nudged.add("$title@0")) {
@@ -316,7 +321,7 @@ internal fun Blob(
 
     // Idle antics: every 3 to 60 minutes depending on its energy, if nobody's around and nothing's going on.
     LaunchedEffect(Unit) {
-        if (mini) return@LaunchedEffect
+        if (mini || follower) return@LaunchedEffect
         val antics = listOf(Reaction.HICCUP, Reaction.STRETCH, Reaction.PEEK, Reaction.WANDER, Reaction.HOP, Reaction.YAWN)
         while (true) {
             val base = (40f - 37f * GadgetState.blobEnergy.value) * 60_000f
@@ -764,7 +769,7 @@ internal fun Blob(
         if (cards.size > 3) cards.subList(3, cards.size).clear()
         // Shown by the home screen just above the quick-action buttons, so neither hides the other.
         val published = cards.map { (text, color) -> text to color.toArgb().toLong() }
-        LaunchedEffect(published, mini) { if (!mini) GadgetState.setBlobCards(published) }
+        LaunchedEffect(published, mini) { if (!mini && !follower) GadgetState.setBlobCards(published) }
     }
 }
 

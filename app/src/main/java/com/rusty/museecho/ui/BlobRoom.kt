@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,18 +46,25 @@ import kotlin.math.sin
 internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier) {
     val items by GadgetState.room.collectAsState()
     val quiet by GadgetState.quiet.collectAsState()
+    val weatherNow by GadgetState.weather.collectAsState()
     if (items.isEmpty() || blob == Offset.Unspecified) return
-    // Once a minute is plenty for the sky and the lamp.
+    val sky = remember(weatherNow) { WindowWeather.of(weatherNow?.summary) }
+    val month0 = java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)
+    val autumn = month0 in 8..10
+    // Rain, snow, a storm or falling leaves move ~10 times a second; otherwise once a minute
+    // is plenty for the sky and the lamp.
+    val moving = (sky != WindowWeather.NONE || autumn) && Decor.WINDOW.name in items && !quiet
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(moving) {
         while (true) {
-            kotlinx.coroutines.delay(60_000)
+            kotlinx.coroutines.delay(if (moving) 100 else 60_000)
             now = System.currentTimeMillis()
         }
     }
-    val cal = remember(now) { java.util.Calendar.getInstance().apply { timeInMillis = now } }
+    val cal = remember(now / 60_000) { java.util.Calendar.getInstance().apply { timeInMillis = now } }
     val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
     val month = cal.get(java.util.Calendar.MONTH)
+    val t = (now % 3_600_000L) / 1000f
     Canvas(modifier) {
         val has = { d: Decor -> d.name in items }
         val u = radius / 110f // one "dp" of the blob's 220 dp box
@@ -72,7 +80,7 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         drawLine(Brush.horizontalGradient(listOf(Color.Transparent, Palette.ink.copy(alpha = 0.07f * dim), Color.Transparent), cx - floorW, cx + floorW),
             Offset(cx - floorW, floor), Offset(cx + floorW, floor), 1.5f * u)
 
-        if (has(Decor.WINDOW)) drawWindow(Offset(cx - 122 * u, blob.y - 112 * u), u * 0.85f, hour, dim)
+        if (has(Decor.WINDOW)) drawWindow(Offset(cx - 122 * u, blob.y - 112 * u), u * 0.85f, hour, dim, sky, autumn, t)
         if (has(Decor.STAR_POSTER)) drawStarPoster(Offset(cx + 62 * u, blob.y - 118 * u), u, dim)
         if (has(Decor.MOVIE_POSTER)) drawMoviePoster(Offset(cx + 74 * u, blob.y - 76 * u), u, dim)
         if (has(Decor.PHOTO_FRAME)) {
@@ -82,7 +90,10 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         if (has(Decor.FAIRY_LIGHTS)) drawFairyLights(blob.y - 130 * u, cx + 130 * u, u, now, dim)
         if (has(Decor.RUG)) drawOval(Palette.violet.copy(alpha = 0.16f * dim), Offset(cx - 88 * u, floor - 6 * u), Size(176 * u, 26 * u))
         if (has(Decor.BOOKSHELF)) drawShelf(Offset(cx - 160 * u, floor), u, dim, trophy = has(Decor.TROPHY), globe = has(Decor.SNOW_GLOBE) && month in listOf(11, 0, 1))
-        if (has(Decor.PLANT)) drawPlant(Offset(cx - 118 * u, floor), u, dim)
+        if (has(Decor.PLANT)) drawPlant(Offset(cx - 118 * u, floor), u, dim, flowers = month in 2..4)
+        // The seasons: a little leaf pile in autumn, a tiny tree in December.
+        if (month in 8..10) drawLeafPile(Offset(cx - 92 * u, floor), u, dim)
+        if (month == java.util.Calendar.DECEMBER) drawTinyTree(Offset(cx + 90 * u, floor), u, dim, now)
         if (has(Decor.RECORD_PLAYER)) {
             drawRoundRect(Palette.card.copy(alpha = 0.9f * dim), Offset(cx - 98 * u, floor - 14 * u), Size(30 * u, 14 * u), CornerRadius(2 * u))
             drawOval(Color(0xFF151218).copy(alpha = 0.9f * dim), Offset(cx - 95 * u, floor - 18 * u), Size(24 * u, 7 * u))
@@ -98,27 +109,84 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
     }
 }
 
-private fun DrawScope.drawWindow(at: Offset, u: Float, hour: Int, dim: Float) {
+/** What the room's window shows of the real weather. */
+internal enum class WindowWeather {
+    NONE, RAIN, STORM, SNOW, FOG;
+
+    companion object {
+        fun of(summary: String?): WindowWeather {
+            val s = summary.orEmpty().lowercase()
+            return when {
+                "thunder" in s -> STORM
+                "snow" in s -> SNOW
+                "rain" in s || "drizzle" in s || "shower" in s -> RAIN
+                "fog" in s || "mist" in s -> FOG
+                else -> NONE
+            }
+        }
+    }
+}
+
+private fun DrawScope.drawWindow(at: Offset, u: Float, hour: Int, dim: Float, sky: WindowWeather, autumn: Boolean, t: Float) {
     val w = 58 * u
     val h = 52 * u
-    val sky = when (hour) {
-        in 7..16 -> listOf(Color(0xFF6FA8DC), Color(0xFFB4D7F0))
-        in 17..19 -> listOf(Color(0xFFE07A5F), Color(0xFFF2CC8F))
-        5, 6 -> listOf(Color(0xFF9A8FC8), Color(0xFFF2B5A0))
-        else -> listOf(Color(0xFF0B1030), Color(0xFF1B2050))
+    drawWindowSky(at, u, hour, dim, sky)
+    // Outside: the weather, and leaves drifting past in autumn, kept inside the glass.
+    clipRect(at.x, at.y, at.x + w, at.y + h) {
+        when (sky) {
+            WindowWeather.RAIN, WindowWeather.STORM -> for (i in 0 until 9) {
+                val x = at.x + ((i * 0.618f * 97f) % 1f) * w
+                val y = at.y + ((t * (60f + i * 7f) * u / 10f + i * 23f * u) % (h + 10 * u)) - 5 * u
+                drawLine(Color(0xFFBFE6F5).copy(alpha = 0.45f * dim), Offset(x, y), Offset(x - 1.5f * u, y + 6 * u), 1.2f * u)
+            }
+            WindowWeather.SNOW -> for (i in 0 until 10) {
+                val x = at.x + ((i * 0.618f * 89f) % 1f) * w + sin(t * 0.9f + i) * 3 * u
+                val y = at.y + ((t * (12f + i % 3 * 4f) * u + i * 19f * u) % (h + 6 * u)) - 3 * u
+                drawCircle(Color.White.copy(alpha = 0.6f * dim), 1.4f * u, Offset(x, y))
+            }
+            WindowWeather.FOG -> drawRect(Color.White.copy(alpha = 0.16f * dim), at, Size(w, h))
+            WindowWeather.NONE -> {}
+        }
+        if (autumn && sky != WindowWeather.SNOW) for (i in 0 until 3) {
+            val fall = (t * (7f + i * 3f) * u + i * 31f * u) % (h + 12 * u) - 6 * u
+            val x = at.x + w * (0.2f + 0.3f * i) + sin(t * 1.3f + i * 2f) * 6 * u
+            drawOval(listOf(Color(0xFFE07A3A), Color(0xFFD9A441), Color(0xFFB5523A))[i].copy(alpha = 0.6f * dim),
+                Offset(x, at.y + fall), Size(4 * u, 2.5f * u))
+        }
     }
-    drawRect(Brush.verticalGradient(sky.map { it.copy(alpha = 0.32f * dim) }, at.y, at.y + h), at, Size(w, h))
-    if (hour >= 20 || hour < 5) {
-        drawCircle(Color.White.copy(alpha = 0.4f * dim), 1.6f * u, at + Offset(14 * u, 12 * u))
-        drawCircle(Color.White.copy(alpha = 0.3f * dim), 1.2f * u, at + Offset(40 * u, 22 * u))
-        drawCircle(Color(0xFFF3EAC2).copy(alpha = 0.4f * dim), 6 * u, at + Offset(44 * u, 12 * u))
-    } else if (hour in 7..16) {
-        drawCircle(Color(0xFFFFE08A).copy(alpha = 0.4f * dim), 6 * u, at + Offset(42 * u, 14 * u))
+    // A storm now and then lights the whole window up.
+    if (sky == WindowWeather.STORM && (t % 9f) < 0.15f) drawRect(Color.White.copy(alpha = 0.5f * dim), at, Size(w, h))
+    // Rain on the glass: a few drops that sit and slowly slide.
+    if (sky == WindowWeather.RAIN || sky == WindowWeather.STORM) for (i in 0 until 4) {
+        val x = at.x + w * (0.15f + 0.22f * i)
+        val y = at.y + ((t * 2f * u + i * 13f * u) % h)
+        drawCircle(Color(0xFFBFE6F5).copy(alpha = 0.35f * dim), 1.6f * u, Offset(x, y))
     }
     val frame = Palette.ink.copy(alpha = 0.16f * dim)
     drawRect(frame, at, Size(w, h), style = Stroke(3 * u))
     drawLine(frame, at + Offset(w / 2, 0f), at + Offset(w / 2, h), 2 * u)
     drawLine(frame, at + Offset(0f, h / 2), at + Offset(w, h / 2), 2 * u)
+}
+
+private fun DrawScope.drawWindowSky(at: Offset, u: Float, hour: Int, dim: Float, sky: WindowWeather) {
+    val w = 58 * u
+    val h = 52 * u
+    val colors = when (hour) {
+        in 7..16 -> if (sky == WindowWeather.NONE) listOf(Color(0xFF6FA8DC), Color(0xFFB4D7F0)) else listOf(Color(0xFF7D8796), Color(0xFFA9B1BD))
+        in 17..19 -> listOf(Color(0xFFE07A5F), Color(0xFFF2CC8F))
+        5, 6 -> listOf(Color(0xFF9A8FC8), Color(0xFFF2B5A0))
+        else -> listOf(Color(0xFF0B1030), Color(0xFF1B2050))
+    }
+    drawRect(Brush.verticalGradient(colors.map { it.copy(alpha = 0.32f * dim) }, at.y, at.y + h), at, Size(w, h))
+    if ((hour >= 20 || hour < 5) && sky == WindowWeather.NONE) {
+        drawCircle(Color.White.copy(alpha = 0.4f * dim), 1.6f * u, at + Offset(14 * u, 12 * u))
+        drawCircle(Color.White.copy(alpha = 0.3f * dim), 1.2f * u, at + Offset(40 * u, 22 * u))
+        drawCircle(Color(0xFFF3EAC2).copy(alpha = 0.4f * dim), 6 * u, at + Offset(44 * u, 12 * u))
+    } else if (hour in 7..16) {
+        // The sun only when the weather lets it through.
+        if (sky == WindowWeather.NONE) drawCircle(Color(0xFFFFE08A).copy(alpha = 0.4f * dim), 6 * u, at + Offset(42 * u, 14 * u))
+        else drawRect(Color(0xFF8A94A6).copy(alpha = 0.25f * dim), at, Size(w, h))
+    }
 }
 
 private fun DrawScope.drawStarPoster(at: Offset, u: Float, dim: Float) {
@@ -172,7 +240,27 @@ private fun DrawScope.drawShelf(at: Offset, u: Float, dim: Float, trophy: Boolea
     }
 }
 
-private fun DrawScope.drawPlant(at: Offset, u: Float, dim: Float) {
+private fun DrawScope.drawLeafPile(at: Offset, u: Float, dim: Float) {
+    val c = listOf(Color(0xFFE07A3A), Color(0xFFD9A441), Color(0xFFB5523A))
+    for (i in 0 until 6) drawOval(c[i % 3].copy(alpha = 0.45f * dim), Offset(at.x - 10 * u + i * 4 * u, at.y - 4 * u - (i % 2) * 2 * u), Size(6 * u, 3.5f * u))
+}
+
+private fun DrawScope.drawTinyTree(at: Offset, u: Float, dim: Float, now: Long) {
+    val green = Color(0xFF3E8E5E).copy(alpha = 0.6f * dim)
+    for (i in 0 until 3) {
+        val w = (22 - i * 6) * u
+        val y = at.y - 8 * u - i * 10 * u
+        drawPath(Path().apply { moveTo(at.x - w / 2, y); lineTo(at.x + w / 2, y); lineTo(at.x, y - 14 * u); close() }, green)
+    }
+    drawRect(Color(0xFF7A5536).copy(alpha = 0.6f * dim), Offset(at.x - 2 * u, at.y - 8 * u), Size(4 * u, 8 * u))
+    val blink = (now / 800L) % 2 == 0L
+    listOf(-6f to -12f, 5f to -16f, -3f to -24f, 4f to -30f).forEachIndexed { i, (x, y) ->
+        drawCircle((if ((i % 2 == 0) == blink) Color(0xFFFFC266) else Color(0xFFFF7A8A)).copy(alpha = 0.8f * dim), 1.5f * u, at + Offset(x * u, y * u))
+    }
+    drawCircle(Color(0xFFFFE08A).copy(alpha = 0.8f * dim), 2.2f * u, at + Offset(0f, -46 * u))
+}
+
+private fun DrawScope.drawPlant(at: Offset, u: Float, dim: Float, flowers: Boolean = false) {
     drawPath(Path().apply {
         moveTo(at.x - 9 * u, at.y - 18 * u); lineTo(at.x + 9 * u, at.y - 18 * u); lineTo(at.x + 6 * u, at.y); lineTo(at.x - 6 * u, at.y); close()
     }, Color(0xFFC0714A).copy(alpha = 0.5f * dim))
@@ -182,6 +270,8 @@ private fun DrawScope.drawPlant(at: Offset, u: Float, dim: Float) {
         val len = (26 + (i % 2) * 8) * u
         val tip = Offset(at.x + (kotlin.math.cos(rad) * len).toFloat(), at.y - 18 * u + (kotlin.math.sin(rad) * len).toFloat())
         drawLine(leaf, Offset(at.x, at.y - 18 * u), tip, 5 * u, StrokeCap.Round)
+        // Spring: little flowers on the tips.
+        if (flowers && i % 2 == 0) drawCircle(Color(0xFFFF9EC7).copy(alpha = 0.7f * dim), 3.2f * u, tip)
     }
 }
 

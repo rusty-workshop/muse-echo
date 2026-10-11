@@ -157,6 +157,14 @@ class Hub(private val context: Context) {
     /** The diary, things of the day and today's timeline, for the settings page. */
     suspend fun postJournal(j: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/journal", j.toString()).first == 200 }
 
+    /** Today's album picture, for the settings page. */
+    suspend fun postAlbum(date: String, caption: String, jpeg: ByteArray): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = "http://$host/echo/album?date=$date&caption=" + java.net.URLEncoder.encode(caption, "UTF-8")
+            http.newCall(Request.Builder().url(url).post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
     suspend fun presence(): Presence? = withContext(Dispatchers.IO) {
         get("/presence")?.let { runCatching { json.decodeFromString(Presence.serializer(), it) }.getOrNull() }
     }
