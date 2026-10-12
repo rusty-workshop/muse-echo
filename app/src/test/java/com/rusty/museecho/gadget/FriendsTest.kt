@@ -141,4 +141,31 @@ CHAPTER: Puff | Pebble made it to the top! 🎉"""
         val b = "OO XX    ".toCharArray()
         assertEquals(2, FriendsBrain.puffMove(b, java.util.Random(1)))
     }
+
+    @Test
+    fun outfitsSuitTheWeather() {
+        val rnd = java.util.Random(1)
+        assertEquals("SCARF", FriendsBrain.pickOutfit(listOf("SCARF", "BOW"), 45, "Cloudy", false, rnd))
+        assertEquals("SUNGLASSES", FriendsBrain.pickOutfit(listOf("SUNGLASSES", "BOW"), 92, "Clear sky", false, rnd))
+        assertEquals("PARTY_HAT", FriendsBrain.pickOutfit(listOf("PARTY_HAT", "SCARF"), 40, "Snow", true, rnd))
+    }
+
+    @Test
+    fun practiceHasDiminishingReturns() {
+        assertEquals(9, FriendsBrain.practiced(0, 0))
+        assertEquals(7, FriendsBrain.practiced(0, 1))
+        assertEquals(1, FriendsBrain.practiced(0, 5))
+        assertEquals(100, FriendsBrain.practiced(98, 0))
+    }
+
+    @Test
+    fun gazetteParses() {
+        val g = FriendsBrain.parseGazette("""HEADLINE: Snail Wins Race!
+ARTICLE: Miso's big day | Miso the snail crossed the rug.
+ARTICLE: Market news | Glitter sold out.
+WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
+        assertEquals("Snail Wins Race!", g.headline)
+        assertEquals(2, g.articles.size)
+        assertEquals("Cloudy with a chance of cookies", g.weather)
+    }
 }

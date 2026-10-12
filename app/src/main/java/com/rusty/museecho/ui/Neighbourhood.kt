@@ -65,6 +65,7 @@ internal fun NeighbourhoodPage(actions: UiActions) {
         }
     }
     var note by remember { mutableStateOf("") }
+    var inside by remember { mutableStateOf<String?>(null) }
     val hour = java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.HOUR_OF_DAY)
     val visiting = visit?.friendIds.orEmpty().toSet()
     val unread = data.letters.filter { !it.read && !it.fromBlob }
@@ -118,7 +119,7 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                 Text("Neighbourhood", color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
                 if (note.isNotEmpty()) Text("   $note", color = Palette.teal, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text("Tap a house to invite that friend over.", color = Palette.muted, fontSize = 13.sp)
+            Text("Tap a house to look inside.", color = Palette.muted, fontSize = 13.sp)
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.Bottom) {
@@ -137,18 +138,19 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                     val bday = FriendsBrain.isBirthday(f, today)
                     val status = if (bday) "🎂 birthday!" else where.label + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
                     House(f.shownName, f.color, f.p.scale, where, if (marketOn && where == Where.HOME) "selling ${FriendsBrain.marketGoods(f)}" else status,
-                        hour, decor = decor, balloons = bday, stall = marketOn && where == Where.HOME) {
-                        note = when (where) {
-                            Where.VISITING -> "${f.shownName} is already over! 👯"
-                            Where.AWAY -> "${f.shownName} is away on a trip ✈️"
-                            Where.ASLEEP -> "Shh, ${f.shownName} is asleep 😴"
-                            else -> GadgetService.instance?.life?.visit(null, null, f.name)?.let { r ->
-                                if (r == "already visiting") "Someone's already over: try in a bit" else "Invited ${f.shownName}! 🚶"
-                            } ?: "Not ready yet"
-                        }
-                    }
+                        hour, decor = decor, balloons = bday, stall = marketOn && where == Where.HOME) { inside = f.id }
                 }
             }
+        }
+        // Looking inside a friend's house.
+        data.friends.firstOrNull { it.id == inside }?.let { f ->
+            val where = FriendsBrain.whereabouts(f, visiting, now, hour)
+            HouseInside(f, where, hour, actions, onInvite = {
+                note = GadgetService.instance?.life?.visit(null, null, f.name)?.let { r ->
+                    if (r == "already visiting") "Someone's already over: try in a bit" else "Invited ${f.shownName}! 🚶"
+                } ?: "Not ready yet"
+                inside = null
+            }, onClose = { inside = null })
         }
     }
 }
@@ -271,4 +273,82 @@ private fun DrawScope.drawMarketStall() {
     for (i in 0 until 5) drawRect(if (i % 2 == 0) Color(0xFFFF7A8A) else Color.White, Offset(x + i * w / 5, top), Size(w / 5, 7f))
     drawRect(Color(0xFF8A5A3C), Offset(x, size.height - 12f), Size(w, 6f))
     for (sx in listOf(x + 2f, x + w - 4f)) drawLine(Color(0xFF8A5A3C), Offset(sx, top), Offset(sx, size.height - 6f), 2f)
+}
+
+
+/** Inside a friend's house: its own little room, and the friend if it's in. */
+@Composable
+private fun HouseInside(f: Friend, where: Where, hour: Int, actions: UiActions, onInvite: () -> Unit, onClose: () -> Unit) {
+    val c = Color(f.color)
+    // Above the quick-action buttons (they stay on screen along the bottom).
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onClose).padding(top = 58.dp), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.width(560.dp).height(262.dp).background(lerp(c, Color(0xFF14101C), 0.82f), RoundedCornerShape(20.dp))
+            .clickable(enabled = false) {}.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${f.shownName}'s house", color = c, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(where.label, color = Palette.muted, fontSize = 13.sp)
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp)) {
+                Canvas(Modifier.fillMaxSize()) { drawInterior(f, c, hour) }
+                if (where == Where.HOME || where == Where.ASLEEP) Blob(Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp).height((70 * f.p.scale).dp).width((70 * f.p.scale).dp),
+                    actions, mini = true, moodOverride = if (where == Where.ASLEEP) com.rusty.museecho.gadget.Mood.SLEEPY else com.rusty.museecho.gadget.Mood.HAPPY,
+                    tintOverride = c, ownStyle = false)
+                else Text(when (where) { Where.VISITING -> "Out visiting ${GadgetState.blobCalled()}!"; Where.AWAY -> "Away on a trip ✈️"; else -> "Nobody home right now" },
+                    color = Palette.muted, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (where == Where.HOME || where == Where.OUT) Text("Invite over 🚶", color = Palette.night, fontSize = 15.sp,
+                    modifier = Modifier.background(c, RoundedCornerShape(50)).clickable(onClick = onInvite).padding(horizontal = 16.dp, vertical = 8.dp))
+                Text("Close", color = Palette.ink, fontSize = 15.sp,
+                    modifier = Modifier.background(Palette.card, RoundedCornerShape(50)).clickable(onClick = onClose).padding(horizontal = 16.dp, vertical = 8.dp))
+            }
+        }
+    }
+}
+
+/** Each personality's room: Pip's trampoline, Moss's pebble shelf, Doze's huge bed, Glimmer's disco ball, Pebble's hammock. */
+private fun DrawScope.drawInterior(f: Friend, c: Color, hour: Int) {
+    val w = size.width
+    val h = size.height
+    val floor = h * 0.86f
+    drawRect(lerp(c, Color(0xFF1B1526), 0.7f), Offset(0f, 0f), Size(w, floor))
+    drawRect(lerp(c, Color(0xFF0E0B14), 0.6f), Offset(0f, floor), Size(w, h - floor))
+    // A window with the time of day.
+    val sky = if (hour in 7..17) Color(0xFF8CC3E8) else if (hour in 18..19) Color(0xFFE8A07A) else Color(0xFF1B2050)
+    drawRoundRect(sky.copy(alpha = 0.8f), Offset(w * 0.06f, h * 0.12f), Size(w * 0.14f, h * 0.3f), CornerRadius(6f))
+    when (f.p) {
+        com.rusty.museecho.gadget.Personality.BOUNCY -> {
+            drawOval(Color(0xFF2E8C85), Offset(w * 0.62f, floor - h * 0.1f), Size(w * 0.26f, h * 0.08f))
+            for (x in listOf(0.64f, 0.85f)) drawLine(Color(0xFF8A8A8A), Offset(w * x, floor - h * 0.06f), Offset(w * x, floor), 4f)
+            listOf(Color(0xFFFF7A8A), Color(0xFFFFC266)).forEachIndexed { i, col -> drawRect(col.copy(alpha = 0.7f), Offset(w * (0.3f + i * 0.12f), h * 0.12f), Size(w * 0.08f, h * 0.22f)) }
+        }
+        com.rusty.museecho.gadget.Personality.SHY -> {
+            drawRect(Color(0xFF7A5536), Offset(w * 0.66f, h * 0.3f), Size(w * 0.24f, 6f))
+            for (i in 0 until 6) drawOval(listOf(Color(0xFF9A9A9A), Color(0xFFB8AFA0), Color(0xFF7F8A8F))[i % 3], Offset(w * (0.67f + i * 0.037f), h * 0.3f - 12f), Size(18f, 12f))
+            drawOval(Color(0xFFC79BFF).copy(alpha = 0.6f), Offset(w * 0.12f, floor - h * 0.12f), Size(w * 0.2f, h * 0.12f))
+        }
+        com.rusty.museecho.gadget.Personality.SLEEPY -> {
+            drawRoundRect(Color(0xFFE9E4F5), Offset(w * 0.58f, floor - h * 0.22f), Size(w * 0.36f, h * 0.22f), CornerRadius(14f))
+            drawRoundRect(Color(0xFF6E7BCF), Offset(w * 0.58f, floor - h * 0.14f), Size(w * 0.36f, h * 0.14f), CornerRadius(10f))
+            drawOval(Color.White, Offset(w * 0.6f, floor - h * 0.26f), Size(w * 0.1f, h * 0.08f))
+        }
+        com.rusty.museecho.gadget.Personality.SPARKLY -> {
+            val ball = Offset(w * 0.5f, h * 0.16f)
+            drawLine(Color.Gray, Offset(ball.x, 0f), ball, 2f)
+            drawCircle(Color(0xFFD0D6E0), h * 0.07f, ball)
+            for (i in 0 until 8) drawCircle(listOf(Color(0xFFFF9EC7), Color(0xFF9AB8FF), Color(0xFFFFE08A))[i % 3].copy(alpha = 0.6f), 4f,
+                Offset(w * (0.2f + i * 0.09f), h * (0.35f + (i % 3) * 0.12f)))
+            drawRoundRect(Color(0xFFBFE6F5).copy(alpha = 0.5f), Offset(w * 0.8f, h * 0.2f), Size(w * 0.1f, h * 0.45f), CornerRadius(8f))
+        }
+        com.rusty.museecho.gadget.Personality.TINY -> {
+            val a = Offset(w * 0.62f, h * 0.38f); val b = Offset(w * 0.9f, h * 0.38f)
+            drawLine(Color(0xFF7A5536), Offset(a.x, 0f), a, 2f); drawLine(Color(0xFF7A5536), Offset(b.x, 0f), b, 2f)
+            drawArc(Color(0xFFFFC266), 0f, 180f, false, Offset(a.x, a.y - h * 0.1f), Size(b.x - a.x, h * 0.2f), style = androidx.compose.ui.graphics.drawscope.Stroke(6f))
+            for (i in 0 until 5) drawLine(Color(0xFF7A5536), Offset(w * 0.3f, floor - i * h * 0.12f), Offset(w * 0.36f, floor - i * h * 0.12f), 3f)
+            drawLine(Color(0xFF7A5536), Offset(w * 0.3f, floor), Offset(w * 0.3f, floor - h * 0.5f), 3f)
+            drawLine(Color(0xFF7A5536), Offset(w * 0.36f, floor), Offset(w * 0.36f, floor - h * 0.5f), 3f)
+        }
+    }
+    // Its trophies on a little shelf.
+    for (i in 0 until f.trophies.coerceAtMost(5)) drawCircle(Color(0xFFFFC266), 6f, Offset(w * (0.25f + i * 0.04f), h * 0.08f))
 }

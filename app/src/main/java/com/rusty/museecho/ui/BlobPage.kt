@@ -98,14 +98,20 @@ internal fun BlobPage(actions: UiActions) {
                 Tab("📰", tab == "comics") { tab = "comics" }
                 Spacer(Modifier.width(6.dp))
                 Tab("🎮", tab == "play") { tab = "play" }
+                Spacer(Modifier.width(6.dp))
+                Tab("👗", tab == "wardrobe") { tab = "wardrobe" }
+                Spacer(Modifier.width(6.dp))
+                Tab("🗞️", tab == "gazette") { tab = "gazette" }
             }
             Spacer(Modifier.height(8.dp))
             when {
-                tab == "diary" && diaryOn && !guest -> DiaryContent(Modifier.fillMaxSize())
+                tab == "diary" && diaryOn && !guest -> DiaryOrDreams(Modifier.fillMaxSize())
                 tab == "friends" -> FriendsContent(actions, Modifier.fillMaxSize())
                 tab == "mail" -> MailContent(Modifier.fillMaxSize())
                 tab == "comics" -> ComicsContent(actions, Modifier.fillMaxSize())
                 tab == "play" -> PlayContent(Modifier.fillMaxSize())
+                tab == "wardrobe" -> WardrobeContent(Modifier.fillMaxSize())
+                tab == "gazette" -> GazetteContent(Modifier.fillMaxSize())
                 else -> AlbumContent(actions, Modifier.fillMaxSize())
             }
         }
@@ -446,11 +452,14 @@ private fun PlayContent(modifier: Modifier) {
             Tab("Tic-tac-toe", game == "ttt") { game = "ttt"; result = "" }
             Spacer(Modifier.width(6.dp))
             Tab("Rock-paper-scissors", game == "rps") { game = "rps"; result = "" }
+            Spacer(Modifier.width(6.dp))
+            Tab("Tricks", game == "tricks") { game = "tricks"; result = "" }
             Spacer(Modifier.weight(1f))
             Text("You ${score.first} · $name ${score.second} · draws ${score.third}", color = Palette.muted, fontSize = 12.sp)
         }
         Spacer(Modifier.height(8.dp))
-        if (game == "ttt") Row(verticalAlignment = Alignment.CenterVertically) {
+        if (game == "tricks") TricksContent()
+        else if (game == "ttt") Row(verticalAlignment = Alignment.CenterVertically) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (r in 0 until 3) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     for (c in 0 until 3) {
@@ -498,5 +507,122 @@ private fun PlayContent(modifier: Modifier) {
                     color = Palette.ink, fontSize = 16.sp, modifier = Modifier.padding(top = 10.dp))
             }
         }
+    }
+}
+
+
+/** The Diary tab: the evening diary, or last nights' dreams. */
+@Composable
+private fun DiaryOrDreams(modifier: Modifier) {
+    var dreams by remember { mutableStateOf(false) }
+    Column(modifier) {
+        Row(Modifier.padding(bottom = 4.dp)) {
+            Tab("📔 Diary", !dreams) { dreams = false }
+            Spacer(Modifier.width(6.dp))
+            Tab("💭 Dreams", dreams) { dreams = true }
+        }
+        if (!dreams) DiaryContent(Modifier.fillMaxSize())
+        else {
+            val data by GadgetState.friends.collectAsState()
+            val list = data.dreams.reversed()
+            if (list.isEmpty()) Text("No dreams written down yet: each morning, last night's dream goes here.", color = Palette.muted, fontSize = 15.sp)
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(list.size) { i ->
+                    val d = list[i]
+                    Column(Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Color(0xFF1B2050).copy(alpha = 0.7f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+                        Text("💭 ${d.date}", color = Palette.muted, fontSize = 12.sp)
+                        Text(d.text, color = Palette.ink, fontSize = 15.sp, lineHeight = 21.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Puff's outfits: tap one to wear it today (or nothing). */
+@Composable
+private fun WardrobeContent(modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    val today = java.time.LocalDate.now().toString()
+    val wearing = data.outfit.takeIf { it.startsWith(today) }?.substringAfter('|')
+    val emoji = mapOf("PARTY_HAT" to "🎉", "SANTA_HAT" to "🎅", "WITCH_HAT" to "🧙", "SUNGLASSES" to "😎", "SCARF" to "🧣",
+        "HEADPHONES" to "🎧", "CROWN" to "👑", "BOW" to "🎀", "FLOWER" to "🌸", "POPCORN" to "🍿")
+    Column(modifier) {
+        Text("${GadgetState.blobName.collectAsState().value.ifBlank { "Puff" }} picks an outfit each morning for the weather and its mood. Tap one to choose for it today.",
+            color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            (data.wardrobe + "NONE").forEach { name ->
+                val on = (wearing ?: "NONE") == name
+                Column(Modifier.width(84.dp).background(if (on) Palette.amber.copy(alpha = 0.3f) else Palette.card, RoundedCornerShape(12.dp))
+                    .clickable { GadgetService.instance?.life?.friends?.wearToday(name.takeIf { it != "NONE" }) }.padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (name == "NONE") "🫥" else emoji[name] ?: "✨", fontSize = 28.sp)
+                    Text(if (name == "NONE") "Nothing" else name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() },
+                        color = Palette.ink, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Text("New outfits come from gifts, market day and holidays.", color = Palette.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+/** The Play tab's tricks: pick one, practise a few times a day, and it gets better over the days. */
+@Composable
+private fun TricksContent() {
+    val data by GadgetState.friends.collectAsState()
+    val today = java.time.LocalDate.now().toString()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        com.rusty.museecho.gadget.FriendsBrain.TRICKS.forEach { (key, label) ->
+            val skill = data.tricks[key] ?: 0
+            val goes = data.practice["$today|$key"] ?: 0
+            Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(12.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(label.replaceFirstChar { it.uppercase() }, color = Palette.ink, fontSize = 14.sp)
+                    Text("${com.rusty.museecho.gadget.FriendsBrain.trickLevel(skill)} · $skill/100 · practised $goes× today", color = Palette.muted, fontSize = 11.sp)
+                    Box(Modifier.fillMaxWidth().padding(top = 3.dp).height(4.dp).background(Palette.night, RoundedCornerShape(50))) {
+                        Box(Modifier.fillMaxWidth(skill.coerceIn(2, 100) / 100f).height(4.dp).background(Palette.teal, RoundedCornerShape(50)))
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Tab("Practise", false) { GadgetService.instance?.life?.friends?.practise(key) }
+                Spacer(Modifier.width(4.dp))
+                if (skill > 0) Tab("Show me", false) {
+                    GadgetService.instance?.scopeLaunch { GadgetService.instance?.life?.friends?.perform(key, skill) }
+                }
+            }
+        }
+    }
+}
+
+/** The Sunday paper, newest first; flip back through older editions. */
+@Composable
+private fun GazetteContent(modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    var back by remember { mutableStateOf(0) }
+    val g = data.gazettes.getOrNull(data.gazettes.size - 1 - back)
+    if (g == null) {
+        Text("The Blob Gazette comes out on Sunday evenings.", color = Palette.muted, fontSize = 15.sp, modifier = modifier)
+        return
+    }
+    val paper = androidx.compose.ui.graphics.Color(0xFFF2EADA)
+    val ink = androidx.compose.ui.graphics.Color(0xFF2A2420)
+    Column(modifier.background(paper, RoundedCornerShape(6.dp)).padding(12.dp).verticalScroll(rememberScrollState())) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("THE BLOB GAZETTE", color = ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                modifier = Modifier.weight(1f))
+            Text(g.date, color = ink.copy(alpha = 0.6f), fontSize = 11.sp)
+            Spacer(Modifier.width(6.dp))
+            Text("◀", color = ink, fontSize = 16.sp, modifier = Modifier.clickable { if (back < data.gazettes.size - 1) back++ }.padding(4.dp))
+            Text("▶", color = ink, fontSize = 16.sp, modifier = Modifier.clickable { if (back > 0) back-- }.padding(4.dp))
+        }
+        Box(Modifier.fillMaxWidth().height(2.dp).background(ink))
+        Text(g.headline, color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+            lineHeight = 24.sp, modifier = Modifier.padding(vertical = 6.dp))
+        g.articles.forEach { a ->
+            Text(a.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif)
+            Text(a.text, color = ink.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 18.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                modifier = Modifier.padding(bottom = 6.dp))
+        }
+        if (g.weather.isNotEmpty()) Text("☁️ Weather: ${g.weather}", color = ink.copy(alpha = 0.7f), fontSize = 12.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
     }
 }

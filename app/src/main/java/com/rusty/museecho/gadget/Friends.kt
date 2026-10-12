@@ -82,6 +82,18 @@ data class Pet(val kind: String, val name: String = "", val bornMs: Long = 0, va
     val label get() = when (kind) { "snail" -> "snail"; "sprout" -> "sprout"; else -> "goldfish" }
 }
 
+/** What Puff dreamed overnight, written up in the morning. */
+@Serializable
+data class Dream(val date: String, val text: String)
+
+/** One story in the Sunday paper. */
+@Serializable
+data class Article(val title: String, val text: String)
+
+/** "The Blob Gazette": the week in the neighbourhood, every Sunday. */
+@Serializable
+data class Gazette(val date: String, val headline: String, val articles: List<Article>, val weather: String = "")
+
 /** The evening comic strip about the blob's day (three panels, written by Pixel). */
 @Serializable
 data class Comic(val date: String, val title: String, val panels: List<Panel>)
@@ -107,6 +119,14 @@ data class FriendsData(
     val pet: Pet? = null,
     /** A friend Puff cheered up, who should write to say thanks (its id). */
     val owesThanks: String? = null,
+    val dreams: List<Dream> = emptyList(),
+    val gazettes: List<Gazette> = emptyList(),
+    /** Outfits Puff owns (Accessory names), and what it's wearing today ("date|NAME"). */
+    val wardrobe: List<String> = listOf("FLOWER", "BOW"),
+    val outfit: String = "",
+    /** Tricks Puff is learning: name to skill 0..100, and practice counts per day ("date|trick" to n). */
+    val tricks: Map<String, Int> = emptyMap(),
+    val practice: Map<String, Int> = emptyMap(),
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -300,6 +320,46 @@ object FriendsBrain {
         val stage = when { grown < 2 -> 0; grown < 5 -> 1; grown < 9 -> 2; else -> 3 }
         // Flowers only in the growing season (March to October); otherwise just leaves.
         return if (stage == 3 && month !in 3..10) 2 else stage
+    }
+
+    val TRICKS = listOf("spin" to "a spin 🌀", "juggle" to "juggling 🤹", "backflip" to "a backflip 🤸", "playdead" to "playing dead 💤", "wave" to "a fancy wave 👋")
+
+    /** One practice: skill goes up, less with every go the same day (about five good goes a day). */
+    fun practiced(skill: Int, todaysGoes: Int): Int = (skill + maxOf(1, 9 - todaysGoes * 2)).coerceAtMost(100)
+
+    fun trickLevel(skill: Int) = when { skill >= 90 -> "perfect"; skill >= 60 -> "good"; skill >= 30 -> "getting there"; else -> "wobbly" }
+
+    /** The outfit Puff picks for the day from what it owns: the weather first, then a special day, then its mood. */
+    fun pickOutfit(owned: List<String>, tempF: Int?, summary: String, specialDay: Boolean, rnd: java.util.Random): String? {
+        fun has(a: String) = a in owned
+        val s = summary.lowercase()
+        return when {
+            specialDay && has("PARTY_HAT") -> "PARTY_HAT"
+            tempF != null && tempF <= 55 && has("SCARF") -> "SCARF"
+            tempF != null && tempF >= 85 && ("clear" in s || "sun" in s || "partly" in s) && has("SUNGLASSES") -> "SUNGLASSES"
+            else -> owned.filter { it !in setOf("SCARF", "SUNGLASSES", "POPCORN", "HEADPHONES") }.randomOrNull()?.takeIf { rnd.nextInt(4) > 0 }
+        }
+    }
+
+    fun dreamPrompt(blobName: String, facts: List<String>): String =
+        "Write what $blobName, the little blob on my Echo Show, dreamed about last night: 2 or 3 short, whimsical, dreamy sentences " +
+            "in its own voice (\"I dreamed...\"), mixing up these real things from its day:\n" + facts.joinToString("\n") { "- $it" } +
+            "\nReply with only the dream: no title, no commands, and don't change anything on any device."
+
+    fun gazettePrompt(blobName: String, facts: List<String>): String =
+        "Write this week's edition of \"The Blob Gazette\", a tiny cute newspaper about $blobName (the blob on my Echo Show), its friends " +
+            "and their neighbourhood, from these real things that happened this week:\n" + facts.joinToString("\n") { "- $it" } +
+            "\nReply in exactly this format and nothing else (no commands, don't change any device):\nHEADLINE: the front-page headline\n" +
+            "ARTICLE: a short title | two or three sentences\n(three ARTICLE lines)\nWEATHER: a one-line, silly weather report for next week"
+
+    fun parseGazette(reply: String, date: String): Gazette? {
+        val headline = Regex("""(?im)^\W*headline\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"') ?: return null
+        val articles = Regex("""(?im)^\W*article(?:\s*\d)?\W*:\s*(.+)$""").findAll(reply).mapNotNull { m ->
+            val parts = m.groupValues[1].split("|", limit = 2).map { it.trim().trim('*', '"') }
+            if (parts.size == 2 && parts[1].isNotEmpty()) Article(parts[0].take(60), parts[1].take(500)) else null
+        }.take(4).toList()
+        val weather = Regex("""(?im)^\W*weather\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim().orEmpty()
+        return if (articles.size >= 2) Gazette(date, headline.take(80), articles, weather.take(160)) else null
     }
 
     fun activityLabel(a: String) = when (a) {

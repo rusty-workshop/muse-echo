@@ -36,6 +36,8 @@ class FriendLife(
         scope.launch { replyLoop() }
         scope.launch { comicLoop() }
         scope.launch { storyLoop() }
+        scope.launch { morningLoop() }
+        scope.launch { gazetteLoop() }
         scope.launch { gardenLoop() }
         if (store.data.pet == null) store.update { it.copy(pet = Pet(FriendsBrain.PET_KINDS.random(), bornMs = System.currentTimeMillis())) }
         scope.launch { namingLoop() }
@@ -539,6 +541,17 @@ class FriendLife(
         while (System.currentTimeMillis() < v.untilMs - 6_000) {
             delay((18 + rnd.nextInt(20)) * 1_000L)
             if (System.currentTimeMillis() >= v.untilMs - 6_000) break
+            // Showing off a trick it's good at, now and then.
+            store.data.tricks.filter { it.value >= 60 }.keys.randomOrNull()?.takeIf { rnd.nextInt(5) == 0 }?.let { trick ->
+                GadgetState.say("Watch this! 😎", 3)
+                delay(1_500)
+                perform(trick, store.data.tricks[trick] ?: 0)
+                delay(3_000)
+                GadgetState.setFriendSay(listOf("Wow!! 👏", "How did you do that?! 😮", "Teach me! 🤩").random(), f.id)
+                delay(3_000)
+                GadgetState.clearFriendSay()
+                continue
+            }
             val pet = store.data.pet?.takeIf { it.name.isNotBlank() }
             val (mine, line) = if (pet != null && rnd.nextInt(6) == 0) false to "How's ${pet.name} doing? 🥰" else HANG_LINES.random()
             if (mine) GadgetState.say(line, 5) else GadgetState.setFriendSay(line, (if (second != null && rnd.nextBoolean()) second else f).id)
@@ -1053,6 +1066,7 @@ class FriendLife(
         GadgetState.react(Reaction.CELEBRATE)
         val what = when (kind) {
             "hat" -> Accessory.entries.firstOrNull { it.name.equals(value, true) }?.let { a ->
+                addOutfit(a.name)
                 GadgetState.setStyle(GadgetState.style.value.copy(accessory = a, untilMs = System.currentTimeMillis() + 86_400_000L))
                 BlobStyles.save(context, GadgetState.style.value)
                 "a ${a.name.lowercase().replace('_', ' ')}"
@@ -1075,6 +1089,145 @@ class FriendLife(
         DayLog.event("got a gift from Rusty: $what" + if (note.isNotBlank()) " (note: \"$note\")" else "", "gift")
     }
 
+    // -- Wardrobe --------------------------------------------------------------------------------
+
+    fun addOutfit(name: String) {
+        if (name in store.data.wardrobe || Accessory.entries.none { it.name == name }) return
+        store.update { it.copy(wardrobe = it.wardrobe + name) }
+        DayLog.event("got ${name.lowercase().replace('_', ' ')} for its wardrobe", "wardrobe")
+    }
+
+    /** Wear [name] for the rest of today (from the Wardrobe tab, or Puff's own morning pick). */
+    fun wearToday(name: String?, announce: Boolean = true) {
+        val today = java.time.LocalDate.now()
+        val endOfDay = today.plusDays(1).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val acc = name?.let { n -> Accessory.entries.firstOrNull { it.name == n } } ?: Accessory.NONE
+        GadgetState.setStyle(GadgetState.style.value.copy(accessory = if (acc == Accessory.NONE) null else acc, untilMs = endOfDay))
+        BlobStyles.save(context, GadgetState.style.value)
+        store.update { it.copy(outfit = "$today|${acc.name}") }
+        if (announce && acc != Accessory.NONE && !isQuiet()) {
+            GadgetState.react(Reaction.HOP)
+            GadgetState.say("Today's outfit: ${acc.name.lowercase().replace('_', ' ')}! ✨", 8)
+        }
+    }
+
+    // -- Mornings: outfit and last night's dream ---------------------------------------------------
+
+    private suspend fun morningLoop() {
+        delay(2 * 60_000L)
+        while (true) {
+            val today = java.time.LocalDate.now()
+            val h = life.hour()
+            if (!isQuiet() && h in 6..11) {
+                // Holiday outfits join the wardrobe on their day.
+                when {
+                    today.monthValue == 12 && today.dayOfMonth <= 26 -> addOutfit("SANTA_HAT")
+                    today.monthValue == 10 && today.dayOfMonth >= 24 -> addOutfit("WITCH_HAT")
+                    (today.monthValue == 1 && today.dayOfMonth == 1) || (today.monthValue == 7 && today.dayOfMonth == 4) -> addOutfit("PARTY_HAT")
+                }
+                if (!store.data.outfit.startsWith(today.toString())) {
+                    val style = GadgetState.style.value
+                    if (style.accessory != null && style.active(System.currentTimeMillis())) {
+                        // Already wearing something (a gift, or Pixel's choice): that's today's outfit.
+                        store.update { it.copy(outfit = "$today|${style.accessory.name}") }
+                    } else {
+                        val w = GadgetState.weather.value
+                        val special = GadgetState.specialDays.value.any { runCatching { java.time.LocalDate.parse(it.date.take(10)) == today }.getOrDefault(false) }
+                        wearToday(FriendsBrain.pickOutfit(store.data.wardrobe, w?.tempF, w?.summary.orEmpty(), special, rnd))
+                    }
+                }
+                if (store.data.dreams.none { it.date == today.toString() }) dreamNow()
+            }
+            delay(15 * 60_000L)
+        }
+    }
+
+    suspend fun dreamNow(): Boolean {
+        val today = java.time.LocalDate.now().toString()
+        val y = DayLog.yesterday
+        val facts = (y.events.takeLast(8) + listOfNotNull(
+            store.data.story?.takeIf { it.at > 0 }?.let { "the story \"${it.title}\"" },
+            store.data.pet?.takeIf { it.name.isNotBlank() }?.let { "its pet ${it.label} ${it.name}" },
+        )).ifEmpty { listOf("a quiet, cozy day") }
+        val text = quietAsk(FriendsBrain.dreamPrompt(GadgetState.blobCalled(), facts)) ?: return false
+        store.update { it.copy(dreams = (it.dreams + Dream(today, text.take(600))).takeLast(60)) }
+        GadgetState.log("dream written")
+        if (!isQuiet()) GadgetState.say("💭 " + text.substringBefore('.').take(110) + "…", 15)
+        return true
+    }
+
+    // -- Tricks ----------------------------------------------------------------------------------
+
+    /** One practice of [trick] (the Play tab): skill goes up, and Puff tries it. Returns the new skill. */
+    fun practise(trick: String): Int {
+        val today = java.time.LocalDate.now().toString()
+        val key = "$today|$trick"
+        val goes = store.data.practice[key] ?: 0
+        val skill = FriendsBrain.practiced(store.data.tricks[trick] ?: 0, goes)
+        store.update { d -> d.copy(tricks = d.tricks + (trick to skill), practice = d.practice.filterKeys { it.startsWith(today) } + (key to goes + 1)) }
+        scope.launch { perform(trick, skill) }
+        if (skill >= 90 && (store.data.tricks[trick] ?: 0) < 90) DayLog.event("mastered ${FriendsBrain.TRICKS.toMap()[trick] ?: trick}", "trick")
+        return skill
+    }
+
+    /** Puff does the trick: the better it knows it, the likelier it lands. */
+    suspend fun perform(trick: String, skill: Int) {
+        val lands = rnd.nextInt(100) < skill + 10
+        when (trick) {
+            "spin" -> GadgetState.react(if (lands) Reaction.WANDER else Reaction.DIZZY)
+            "juggle" -> {
+                GadgetState.hold(HeldItem.BALLOON, "", 1)
+                repeat(3) { GadgetState.react(Reaction.HOP); delay(Reaction.HOP.ms) }
+                if (!lands) GadgetState.hold(HeldItem.NONE, "", 0)
+            }
+            "backflip" -> GadgetState.react(if (lands) Reaction.STRETCH else Reaction.STARTLE).also { GadgetState.react(Reaction.HOP) }
+            "playdead" -> { GadgetState.setMood(if (lands) Mood.SLEEPY else Mood.WINK, 4) }
+            else -> GadgetState.react(Reaction.WAVE)
+        }
+        delay(1_500)
+        if (lands) {
+            if (skill >= 90) GadgetState.react(Reaction.CELEBRATE)
+            GadgetState.say(if (skill >= 90) "Ta-da! ✨ Perfect!" else "Did it! 😄", 4)
+        } else GadgetState.say(listOf("Oops! 😅", "Wobbly… 🙃", "Almost! 🤏").random(), 4)
+    }
+
+    // -- The Sunday paper --------------------------------------------------------------------------
+
+    private suspend fun gazetteLoop() {
+        delay(4 * 60_000L)
+        while (true) {
+            val now = java.time.LocalDateTime.now()
+            val today = now.toLocalDate().toString()
+            if (now.dayOfWeek == java.time.DayOfWeek.SUNDAY && now.hour >= 17 && store.data.gazettes.none { it.date == today }) gazetteNow()
+            delay(30 * 60_000L)
+        }
+    }
+
+    suspend fun gazetteNow(): Boolean {
+        val d = store.data
+        val weekAgo = java.time.LocalDate.now().minusDays(7).toString()
+        val name = { id: String -> d.friends.firstOrNull { it.id == id }?.shownName ?: "a friend" }
+        val facts = buildList {
+            d.happenings.filter { it.date >= weekAgo }.forEach { add(it.text) }
+            d.letters.filter { it.date >= weekAgo }.forEach { add(if (it.fromBlob) "${GadgetState.blobCalled()} wrote to ${name(it.friendId)}" else "${name(it.friendId)} sent a letter") }
+            d.comics.filter { it.date >= weekAgo }.forEach { add("comic: ${it.title}") }
+            d.story?.let { add("the adventure \"${it.title}\" is at chapter ${it.at} of ${it.chapters.size}") }
+            d.pastStories.lastOrNull()?.let { add("the last adventure was \"$it\"") }
+            d.friends.filter { it.trophies > 0 }.forEach { add("${it.name} has ${it.trophies} talent show trophies") }
+            d.pet?.takeIf { it.name.isNotBlank() }?.let { add("${GadgetState.blobCalled()}'s pet ${it.label} ${it.name} is ${(System.currentTimeMillis() - it.bornMs) / 86_400_000L} days old") }
+            addAll(DayLog.today().events.takeLast(5))
+        }.ifEmpty { listOf("a quiet week in the neighbourhood") }
+        val g = quietAsk(FriendsBrain.gazettePrompt(GadgetState.blobCalled(), facts))
+            ?.let { FriendsBrain.parseGazette(it, java.time.LocalDate.now().toString()) } ?: return false
+        store.update { it.copy(gazettes = (it.gazettes + g).takeLast(30)) }
+        GadgetState.log("gazette: ${g.headline}")
+        if (!isQuiet()) {
+            GadgetState.hold(HeldItem.NOTE, "🗞️ ${g.headline.take(36)}", 30)
+            GadgetState.say("Extra! Extra! The Blob Gazette is out! 🗞️", 10)
+        }
+        return true
+    }
+
     // -- Special visits ---------------------------------------------------------------------------
 
     private suspend fun birthday(f: Friend, second: Friend?, v: FriendVisit): String {
@@ -1090,6 +1243,7 @@ class FriendLife(
         untilEnd(v)
         GadgetState.scene { it.copy(party = false) }
         remember(f, "my birthday party")
+        addOutfit("PARTY_HAT")
         return "${f.shownName}'s birthday party"
     }
 
@@ -1120,8 +1274,15 @@ class FriendLife(
             life.unlock(buy, " from market day", quietly = true)
             buy.label
         } else {
-            blob("I'll take some ${FriendsBrain.marketGoods(f).substringBefore(' ')}! 😄", 3_000)
-            FriendsBrain.marketGoods(f).substringBeforeLast(' ')
+            val hat = listOf("CROWN", "SCARF", "SUNGLASSES", "PARTY_HAT", "FLOWER", "BOW").firstOrNull { it !in store.data.wardrobe }
+            if (hat != null) {
+                blob("Ooh, a ${hat.lowercase().replace('_', ' ')}! For my wardrobe! 👗", 3_000)
+                addOutfit(hat)
+                "a ${hat.lowercase().replace('_', ' ')}"
+            } else {
+                blob("I'll take some ${FriendsBrain.marketGoods(f).substringBefore(' ')}! 😄", 3_000)
+                FriendsBrain.marketGoods(f).substringBeforeLast(' ')
+            }
         }
         untilEnd(v)
         GadgetState.scene { it.copy(market = false) }
