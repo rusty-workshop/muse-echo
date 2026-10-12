@@ -204,6 +204,13 @@ object GadgetState {
     @Volatile
     var lastTouch = System.currentTimeMillis()
 
+    /**
+     * Last time a person actually used the Echo (a touch, or talking to it). Unlike [lastTouch],
+     * messages arriving don't count, so background asks to Pixel still find a quiet moment.
+     */
+    @Volatile
+    var lastHuman = System.currentTimeMillis()
+
     /** A timer or alarm is ringing (the ring screen must stay bright). */
     private val _ringing = MutableStateFlow(false)
     val ringing: StateFlow<Boolean> = _ringing.asStateFlow()

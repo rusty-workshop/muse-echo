@@ -244,7 +244,19 @@ internal fun Blob(
         if (sizePx <= 0f || System.currentTimeMillis() - tapAtMs > 1_000) return@LaunchedEffect
         val c = Offset(sizePx / 2, sizePx / 2)
         val d = at - c
-        if (sqrt(d.x * d.x + d.y * d.y) < sizePx * 0.32f) {
+        // The note it holds (bottom left) when it's today's reminders.
+        val r0 = sizePx / 2
+        val noteAt = Offset(sizePx / 2 - r0 * 0.44f, sizePx / 2 + r0 * 0.36f)
+        val onNote = (at - noteAt).getDistance() < r0 * 0.22f
+        val dist = sqrt(d.x * d.x + d.y * d.y)
+        if (sm.prop == HeldItem.NOTE && sm.noteIsReminders && (onNote || dist < sizePx * 0.32f)) {
+            GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.TAP)
+            GadgetState.react(Reaction.HOP)
+            val day = GadgetState.reminders.value
+            GadgetState.show(com.rusty.museecho.gadget.Screen.Text("📝 Today's reminders", day.items.joinToString("\n") { r ->
+                (if (r.time.isNotBlank()) "${r.time}  " else "• ") + r.text
+            }))
+        } else if (dist < sizePx * 0.32f) {
             GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.TAP)
             com.rusty.museecho.gadget.DayLog.poked()
             checkIn(weather, agenda, server, morning = false, seconds = 12)
@@ -354,7 +366,8 @@ internal fun Blob(
     // Things that change by the minute, worked out once a minute rather than every frame.
     val firstToday = remember(agenda, tick) { firstEventMinutes(agenda) }
     val hasTomorrow = remember(agenda, tick) { tomorrowEvents(agenda).isNotEmpty() }
-    val remindersToday = remember(reminderDay, tick) { reminderDay.date == java.time.LocalDate.now().toString() && reminderDay.items.isNotEmpty() }
+    // Only while one of today's reminders is still to come (or has no time); not once they've all passed.
+    val remindersToday = remember(reminderDay, tick) { nextReminder(reminderDay, tick) != null }
     val wetAlert = remember(alerts) { alerts.any { a -> listOf("flood", "rain", "storm", "hurricane", "wind", "tornado").any { it in a.event.lowercase() } } }
     val severeAlert = remember(alerts) { alerts.any { it.severity.equals("Severe", true) || it.severity.equals("Extreme", true) } }
     val forecast = remember(weather) { forecastProp(weather) }
@@ -542,6 +555,7 @@ internal fun Blob(
 
             // What it's holding: what the brief is about right now, a tearing calendar, Pixel's prop,
             // the weather alert, today's reminders, tomorrow's bag, or tomorrow's weather.
+            sm.noteIsReminders = false
             val prop = forced("prop")?.let { v -> HeldItem.entries.firstOrNull { it.name == v } }
                 ?: (if (forcedState == "HOURGLASS") HeldItem.HOURGLASS else null)
                 ?: presenting
@@ -549,7 +563,7 @@ internal fun Blob(
                 ?: held?.takeIf { it.untilMs > nowMs }?.item
                 ?: (if (runningTimer != null) HeldItem.HOURGLASS else null)
                 ?: (if (wetAlert) HeldItem.UMBRELLA else null)
-                ?: (if (remindersToday && !guest) HeldItem.NOTE else null)
+                ?: (if (remindersToday && !guest) HeldItem.NOTE.also { sm.noteIsReminders = true } else null)
                 ?: (if (hour >= 18 && !quiet && hasTomorrow && !guest) HeldItem.BAG else null)
                 ?: if (hour >= 18 && !quiet) forecast else null
             val wobble = if (react == Reaction.DIZZY) sin(p * TAU * 3) * 10f * (1 - p) else 0f
@@ -647,8 +661,8 @@ internal fun Blob(
                 if (accF < 1f) popIn(1f - accF, core) { sm.prevAccessory?.let { drawAccessory(it, core, r, t) } }
                 if (!mini) {
                     val hand = core + Offset(-r * 0.44f, r * 0.36f)
-                    popIn(propF, hand) { sm.prop?.let { drawHeld(it, core, r, t, sand, flipP) } }
-                    if (propF < 1f) popIn(1f - propF, hand) { sm.prevProp?.let { drawHeld(it, core, r, t, sand, flipP) } }
+                    popIn(propF, hand) { sm.prop?.let { drawHeld(it, core, r, t, sand, flipP, tint) } }
+                    if (propF < 1f) popIn(1f - propF, hand) { sm.prevProp?.let { drawHeld(it, core, r, t, sand, flipP, tint) } }
                     if (react == Reaction.TEAR_PAGE) drawTornPage(hand, r, p)
                 }
                 if ((museBusy || forcedState == "BUSY_GEAR") && talk == Talk.IDLE && !mini) drawGear(core + Offset(r * 0.52f, -r * 0.46f), r * 0.09f, t * 1.5f)
@@ -1197,7 +1211,7 @@ private val tape = Color(0xFFE8C99B)
 private val frosting = Color(0xFFFFB3DE)
 
 /** A prop held at the blob's lower left (blob.hold, or the evening forecast hint). */
-private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float, sand: Float = 0f, flip: Float = 1f) {
+private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float, sand: Float = 0f, flip: Float = 1f, tint: Color = Palette.violet) {
     val a = core + Offset(-r * 0.44f, r * 0.36f)
     when (item) {
         HeldItem.NONE -> {}
@@ -1294,9 +1308,17 @@ private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float,
             drawRect(Palette.coral, Offset(a.x - r * 0.11f, a.y - r * 0.1f), Size(r * 0.22f, r * 0.06f))
             for (i in 0..2) for (j in 0..1) drawCircle(Palette.night.copy(alpha = 0.5f), r * 0.012f, a + Offset(-r * 0.06f + i * r * 0.06f, r * 0.0f + j * r * 0.05f))
         }
-        HeldItem.NOTE -> rotate(-8f + sin(t * 1.2f) * 2f, a) {
-            drawRect(Color(0xFFFFE680), Offset(a.x - r * 0.11f, a.y - r * 0.11f), Size(r * 0.22f, r * 0.22f))
-            for (i in 0..2) drawLine(Palette.night.copy(alpha = 0.35f), Offset(a.x - r * 0.07f, a.y - r * 0.05f + i * r * 0.05f), Offset(a.x + r * 0.07f, a.y - r * 0.05f + i * r * 0.05f), r * 0.012f)
+        HeldItem.NOTE -> {
+            // A little notepad held up in its "hand": tilted, a soft shadow, a spiral on top, and
+            // the hand itself over the bottom corner.
+            rotate(-14f + sin(t * 1.2f) * 3f, a) {
+                drawRoundRect(Color.Black.copy(alpha = 0.25f), Offset(a.x - r * 0.1f, a.y - r * 0.1f), Size(r * 0.24f, r * 0.27f), CornerRadius(r * 0.02f))
+                drawRoundRect(Color(0xFFFFE680), Offset(a.x - r * 0.12f, a.y - r * 0.13f), Size(r * 0.24f, r * 0.27f), CornerRadius(r * 0.02f))
+                for (i in 0..3) drawCircle(Palette.night.copy(alpha = 0.5f), r * 0.012f, Offset(a.x - r * 0.08f + i * r * 0.053f, a.y - r * 0.13f))
+                for (i in 0..2) drawLine(Palette.night.copy(alpha = 0.35f), Offset(a.x - r * 0.08f, a.y - r * 0.06f + i * r * 0.055f),
+                    Offset(a.x + r * 0.08f, a.y - r * 0.06f + i * r * 0.055f), r * 0.012f)
+            }
+            drawCircle(tint, r * 0.065f, a + Offset(r * 0.09f, r * 0.12f))
         }
         HeldItem.SERVER -> {
             for (i in 0..2) {
@@ -1585,6 +1607,8 @@ private class Smooth {
     var accessoryAt = -10f
     var prop: HeldItem? = null
     var prevProp: HeldItem? = null
+    /** The note it holds is today's reminders (tap it for the list), not some other note. */
+    var noteIsReminders = false
     var propAt = -10f
     var replyLen = 0
     var replyAt = -10f

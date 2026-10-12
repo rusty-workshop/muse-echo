@@ -610,7 +610,10 @@ class GadgetService : Service() {
         turnJob?.cancel()
         // Background asks (diary, thing of the day) give way to anything real.
         quietJob?.cancel()
-        if (label == null) DayLog.talked()
+        if (label == null) {
+            DayLog.talked()
+            GadgetState.lastHuman = System.currentTimeMillis()
+        }
         turnJob = scope.launch {
             // Muse unreachable: answer what the Echo can on its own (not for preset requests).
             // Also straight away when the internet itself is down (rather than waiting to time out).
@@ -1317,7 +1320,7 @@ class GadgetService : Service() {
         val calm = kotlinx.coroutines.withTimeoutOrNull(20 * 60_000L) {
             while (!(GadgetState.link.value == Link.CONNECTED && chat.feedOpen && turnJob?.isActive != true && quietJob?.isActive != true &&
                     (GadgetState.talk.value == Talk.IDLE || GadgetState.talk.value == Talk.REPLIED) && !GadgetState.speaking.value &&
-                    (!waitForCalm || System.currentTimeMillis() - GadgetState.lastTouch > 3 * 60_000L))
+                    (!waitForCalm || System.currentTimeMillis() - GadgetState.lastHuman > 3 * 60_000L))
             ) delay(if (waitForCalm) 15_000 else 2_000)
             true
         } ?: return null

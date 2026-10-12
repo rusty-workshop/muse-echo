@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
         if (ev.action == android.view.MotionEvent.ACTION_DOWN) {
             val away = System.currentTimeMillis() - GadgetState.lastTouch
             GadgetState.lastTouch = System.currentTimeMillis()
+            GadgetState.lastHuman = System.currentTimeMillis()
             GadgetState.setAlertGlow(false)
             // Back after a while: the blob waves hello.
             if (away > 30 * 60_000L && !GadgetState.quiet.value) {
