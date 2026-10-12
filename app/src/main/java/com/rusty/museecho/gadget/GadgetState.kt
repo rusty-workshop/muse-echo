@@ -56,6 +56,9 @@ data class FriendScene(
     val popcorn: Boolean = false,
     val party: Boolean = false,
     val pillow: Boolean = false,
+    /** Halloween costumes (witch hats) and snowballs instead of a ball. */
+    val costume: Boolean = false,
+    val snow: Boolean = false,
     /** Hide and seek: the room item the friend is behind (a Decor name). */
     val hidingAt: String? = null,
     val hug: Boolean = false,
@@ -568,6 +571,29 @@ object GadgetState {
 
     /** Where the full-size blob is on screen, in window pixels, per page (0 clock, 8 Blob page). */
     val blobBounds = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Rect>()
+
+    /** The main blob's own name (Pixel picks it; changeable in Setup). Empty until named. */
+    private val _blobName = MutableStateFlow("")
+    val blobName: StateFlow<String> = _blobName.asStateFlow()
+
+    fun setBlobName(n: String) {
+        _blobName.value = n
+    }
+
+    /** The blob's name, or "the blob" until it has one. */
+    fun blobCalled(): String = _blobName.value.ifBlank { "the blob" }
+
+    /** A talent show's vote: who performed (ids to names), until when. Null: no vote on. */
+    private val _vote = MutableStateFlow<Pair<List<Pair<String, String>>, Long>?>(null)
+    val vote: StateFlow<Pair<List<Pair<String, String>>, Long>?> = _vote.asStateFlow()
+
+    fun setVote(v: Pair<List<Pair<String, String>>, Long>?) {
+        _vote.value = v
+    }
+
+    /** Who was voted for (a friend id), once someone taps. */
+    @Volatile
+    var voted: String? = null
 
     /** The blob's friend, while it's visiting. */
     private val _friend = MutableStateFlow<FriendVisit?>(null)

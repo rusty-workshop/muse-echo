@@ -102,8 +102,8 @@ object DayLog {
 
 /** The prompts and parsing for the diary and the thing of the day (pure, so it's unit-tested). */
 object DayWriting {
-    fun diaryPrompt(f: DayFacts, weather: String?): String = buildString {
-        append("Write tonight's diary entry for the little blob that lives on my Echo Show's screen, in its own voice ")
+    fun diaryPrompt(f: DayFacts, weather: String?, name: String = ""): String = buildString {
+        append("Write tonight's diary entry for ${if (name.isNotBlank()) "$name, " else ""}the little blob that lives on my Echo Show's screen, in its own voice ")
         append("(first person, 3 to 5 short sentences, cute and a little silly, no emoji spam). Base it on these real things from today:\n")
         weather?.let { append("- weather: $it\n") }
         append("- I talked to it ${f.talks} time(s)\n")

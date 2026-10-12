@@ -67,7 +67,17 @@ internal fun NeighbourhoodPage(actions: UiActions) {
     var note by remember { mutableStateOf("") }
     val hour = java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.HOUR_OF_DAY)
     val visiting = visit?.friendIds.orEmpty().toSet()
-    val unread = data.letters.filter { !it.read }
+    val unread = data.letters.filter { !it.read && !it.fromBlob }
+    val blobName by GadgetState.blobName.collectAsState()
+    val weather by GadgetState.weather.collectAsState()
+    val today = java.time.LocalDate.now()
+    // The street dresses up for the season.
+    val decor = when {
+        today.monthValue == 10 && today.dayOfMonth >= 20 -> StreetDecor.HALLOWEEN
+        weather?.summary?.lowercase()?.contains("snow") == true || today.monthValue == 12 || (today.monthValue in 1..2 && (weather?.tempF ?: 99) <= 45) -> StreetDecor.WINTER
+        today.monthValue in 6..8 -> StreetDecor.SUMMER
+        else -> StreetDecor.NONE
+    }
 
     Box(Modifier.fillMaxSize()) {
         // The sky for the time of day, faintly behind the street.
@@ -85,6 +95,18 @@ internal fun NeighbourhoodPage(actions: UiActions) {
             // The road along the bottom of the houses.
             val road = size.height - 112.dp.toPx()
             drawRect(Color(0xFF2A2433).copy(alpha = 0.8f), Offset(0f, road), Size(size.width, 14.dp.toPx()))
+            // Summer: bunting strung across the street.
+            if (decor == StreetDecor.SUMMER) {
+                val y = road - 150.dp.toPx()
+                val flags = listOf(Color(0xFFFF7A8A), Color(0xFFFFC266), Color(0xFF45D3C7), Color(0xFF8B6CFF))
+                val step = 28.dp.toPx()
+                for (i in 0 until (size.width / step).toInt()) {
+                    val x = i * step
+                    val sag = kotlin.math.sin((x / size.width) * Math.PI.toFloat()) * 10.dp.toPx()
+                    drawPath(Path().apply { moveTo(x, y + sag); lineTo(x + step * 0.8f, y + sag); lineTo(x + step * 0.4f, y + sag + 14.dp.toPx()); close() },
+                        flags[i % flags.size].copy(alpha = 0.7f))
+                }
+            }
             for (x in 0 until (size.width / 40.dp.toPx()).toInt() + 1) {
                 drawRect(Color(0xFFFFE08A).copy(alpha = 0.3f), Offset(x * 40.dp.toPx() + 8.dp.toPx(), road + 6.dp.toPx()), Size(18.dp.toPx(), 2.dp.toPx()))
             }
@@ -99,8 +121,8 @@ internal fun NeighbourhoodPage(actions: UiActions) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.Bottom) {
                 // The blob's own house, with its mailbox: tap to read the newest unread letter.
-                House("The blob", Palette.violet.toArgb().toLong() and 0xFFFFFFFFL, 1.15f, Where.HOME, if (unread.isNotEmpty()) "📬 ${unread.size} new letter${if (unread.size == 1) "" else "s"}" else "home",
-                    hour, mailbox = true, mailFlag = unread.isNotEmpty()) {
+                House(blobName.ifBlank { "The blob" }, Palette.violet.toArgb().toLong() and 0xFFFFFFFFL, 1.15f, Where.HOME, if (unread.isNotEmpty()) "📬 ${unread.size} new letter${if (unread.size == 1) "" else "s"}" else "home",
+                    hour, mailbox = true, mailFlag = unread.isNotEmpty(), decor = decor) {
                     val l = unread.lastOrNull()
                     if (l == null) note = "No new letters" else {
                         val from = data.friends.firstOrNull { it.id == l.friendId }?.shownName ?: "a friend"
@@ -110,7 +132,9 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                 }
                 data.friends.forEach { f ->
                     val where = FriendsBrain.whereabouts(f, visiting, now, hour)
-                    House(f.shownName, f.color, f.p.scale, where, where.label, hour) {
+                    val bday = FriendsBrain.isBirthday(f, today)
+                    val status = if (bday) "🎂 birthday!" else where.label + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
+                    House(f.shownName, f.color, f.p.scale, where, status, hour, decor = decor, balloons = bday) {
                         note = when (where) {
                             Where.VISITING -> "${f.shownName} is already over! 👯"
                             Where.AWAY -> "${f.shownName} is away on a trip ✈️"
@@ -128,10 +152,12 @@ internal fun NeighbourhoodPage(actions: UiActions) {
 
 /** One house: walls in the owner's colour, a roof, a door and a window that tells you if they're in. */
 @Composable
-private fun House(name: String, color: Long, scale: Float, where: Where, status: String, hour: Int, mailbox: Boolean = false, mailFlag: Boolean = false, onTap: () -> Unit) {
+private fun House(name: String, color: Long, scale: Float, where: Where, status: String, hour: Int, mailbox: Boolean = false, mailFlag: Boolean = false,
+                  decor: StreetDecor = StreetDecor.NONE, balloons: Boolean = false, onTap: () -> Unit) {
     Column(Modifier.width(104.dp).clickable(onClick = onTap), horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(Modifier.width(96.dp).height((70 + 30 * scale).dp)) {
             drawHouse(Color(color), where, hour, mailbox, mailFlag)
+            drawDecor(decor, balloons)
         }
         Text(name, color = Color(color), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(status, color = Palette.muted, fontSize = 11.sp, maxLines = 1, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
@@ -181,4 +207,36 @@ private fun DrawScope.drawHouse(c: Color, where: Where, hour: Int, mailbox: Bool
     drawLine(Color(0xFF6E5A4A), mb + Offset(0f, wallH * 0.2f), Offset(mb.x, size.height), 3f)
     drawRoundRect(Color(0xFF8C9AA8), mb + Offset(-8f, 0f), Size(16f, 11f), CornerRadius(5f))
     if (mailFlag) drawRect(Color(0xFFFF4D5E), mb + Offset(6f, -8f), Size(3f, 9f))
+}
+
+
+internal enum class StreetDecor { NONE, HALLOWEEN, WINTER, SUMMER }
+
+/** Seasonal touches on a house: a pumpkin by the door, snow on the roof; balloons on a birthday. */
+private fun DrawScope.drawDecor(decor: StreetDecor, balloons: Boolean) {
+    val w = size.width * 0.78f
+    val wallH = size.height * 0.52f
+    val left = (size.width - w) / 2
+    val top = size.height - wallH
+    when (decor) {
+        StreetDecor.HALLOWEEN -> {
+            val p = Offset(left + w * 0.5f, size.height - 6f)
+            drawOval(Color(0xFFE88A3A), Offset(p.x - 8f, p.y - 9f), Size(16f, 11f))
+            drawLine(Color(0xFF5FBF7F), p + Offset(0f, -9f), p + Offset(1.5f, -13f), 2f)
+            drawCircle(Color(0xFFFFE08A).copy(alpha = 0.8f), 1.5f, p + Offset(-3f, -5f))
+            drawCircle(Color(0xFFFFE08A).copy(alpha = 0.8f), 1.5f, p + Offset(3f, -5f))
+        }
+        StreetDecor.WINTER -> drawPath(Path().apply {
+            moveTo(left - w * 0.08f, top + 2f); lineTo(size.width / 2, top - size.height * 0.36f); lineTo(left + w * 1.08f, top + 2f)
+            lineTo(left + w * 0.95f, top - 2f); lineTo(size.width / 2, top - size.height * 0.30f); lineTo(left + w * 0.05f, top - 2f); close()
+        }, Color.White.copy(alpha = 0.85f))
+        else -> {}
+    }
+    if (balloons) {
+        val anchor = Offset(left + w * 0.95f, top + 4f)
+        listOf(Color(0xFFFF7A8A) to Offset(-6f, -38f), Color(0xFFFFC266) to Offset(6f, -46f), Color(0xFF45D3C7) to Offset(14f, -34f)).forEach { (c, o) ->
+            drawLine(Color.White.copy(alpha = 0.5f), anchor, anchor + o + Offset(0f, 8f), 1f)
+            drawOval(c, Offset(anchor.x + o.x - 6f, anchor.y + o.y - 8f), Size(12f, 16f))
+        }
+    }
 }

@@ -342,6 +342,7 @@ fun MuseEchoApp(actions: UiActions) {
             val padOpen by GadgetState.timePad.collectAsState()
             TimePad(padOpen, actions) { GadgetState.setTimePad(false) }
             VisitorPrompt(actions)
+            TalentVote()
             // Warm evenings: a faint orange wash from around sunset to sunrise (touches pass through).
             val warmth by GadgetState.warmth.collectAsState()
             val warmNow by androidx.compose.animation.core.animateFloatAsState(warmth, tween(4000), label = "warm")
@@ -1640,5 +1641,25 @@ private fun VisitorPrompt(actions: UiActions) {
             }) { Text("Guest mode") }
         },
         dismissButton = { androidx.compose.material3.TextButton(onClick = { GadgetState.setVisitorPrompt(null) }) { Text("No thanks") } },
+    )
+}
+
+
+/** The talent show's vote: tap who was best (it goes away after a minute and a half). */
+@Composable
+private fun TalentVote() {
+    val v by GadgetState.vote.collectAsState()
+    val (acts, _) = v ?: return
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { GadgetState.setVote(null) },
+        title = { Text("🎭 Who was best?") },
+        text = { Text("Tap your favourite act.") },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                acts.forEach { (id, name) ->
+                    androidx.compose.material3.TextButton(onClick = { GadgetState.voted = id; GadgetState.setVote(null) }) { Text(name) }
+                }
+            }
+        },
     )
 }

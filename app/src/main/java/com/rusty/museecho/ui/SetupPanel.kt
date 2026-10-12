@@ -530,6 +530,18 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 PagesEditor()
 
                 SectionTitle("Home and room")
+                val currentName by GadgetState.blobName.collectAsState()
+                var nameField by remember(currentName) { mutableStateOf(currentName) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = nameField, onValueChange = { nameField = it.take(16) }, singleLine = true,
+                        label = { Text("The blob's name") }, modifier = Modifier.width(220.dp))
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        prefs.blobName = nameField
+                        GadgetState.setBlobName(prefs.blobName)
+                    }, enabled = nameField.trim() != currentName) { Text("Save") }
+                }
+                if (currentName.isBlank()) Body("${GadgetState.museName.value} will pick one soon if you leave it empty.", Palette.muted)
                 var roomSense by remember { mutableStateOf(prefs.roomSense) }
                 var diaryOn by remember { mutableStateOf(prefs.diary) }
                 var thingOn by remember { mutableStateOf(prefs.dailyThing) }

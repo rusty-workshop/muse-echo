@@ -33,6 +33,10 @@ data class Friend(
     val memories: List<String> = emptyList(),
     /** Last time it sent a postcard (once per absence). */
     val postcardMs: Long = 0,
+    /** Its birthday, "MM-dd" (a party at the blob's that day). */
+    val birthday: String = "",
+    /** Talent shows won. */
+    val trophies: Int = 0,
 ) {
     val p get() = Personality.entries.firstOrNull { it.name == personality } ?: Personality.BOUNCY
     val shownName get() = name.ifBlank { "New friend" }
@@ -49,7 +53,18 @@ data class Happening(val date: String, val ids: List<String>, val text: String, 
 
 /** A letter from a friend, written by Pixel in its voice; kept in the blob's mailbox. */
 @Serializable
-data class Letter(val friendId: String, val date: String, val text: String, val atMs: Long, val read: Boolean = false)
+data class Letter(val friendId: String, val date: String, val text: String, val atMs: Long, val read: Boolean = false,
+    /** The blob's own reply, sent to [friendId] (rather than a letter from them). */
+    val fromBlob: Boolean = false)
+
+/** One panel of the daily comic: who's in it, how they look, where, and what's said. */
+@Serializable
+data class Panel(val who: List<String>, val mood: String = "happy", val prop: String = "", val place: String = "room",
+    val speech: String = "", val caption: String = "")
+
+/** The evening comic strip about the blob's day (three panels, written by Pixel). */
+@Serializable
+data class Comic(val date: String, val title: String, val panels: List<Panel>)
 
 /** A postcard from a friend who's been away a while (pinned on the room's wall). */
 @Serializable
@@ -66,6 +81,7 @@ data class FriendsData(
     val bonds: Map<String, Int> = emptyMap(),
     val happenings: List<Happening> = emptyList(),
     val letters: List<Letter> = emptyList(),
+    val comics: List<Comic> = emptyList(),
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -101,7 +117,8 @@ object FriendsBrain {
 
     /** Everything a visit can be. */
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
-        "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble")
+        "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
+        "birthday", "trickortreat", "snowball", "blockparty", "talentshow")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -123,12 +140,75 @@ object FriendsBrain {
 
     private fun rndOf(s: String) = s.length % 2
 
-    fun letterPrompt(f: Friend, others: List<Friend>, recent: List<String>): String =
+    fun letterPrompt(f: Friend, others: List<Friend>, recent: List<String>, blobName: String = "Blob", lastReply: String? = null): String =
         "Write a short letter (3 to 5 sentences, cute and in character) from ${f.name}, a ${f.p.label} little blob " +
-            "(${f.p.blurb}; ${f.bio}), to its friend the blob who lives on my Echo Show. " +
+            "(${f.p.blurb}; ${f.bio}), to its friend $blobName, the blob who lives on my Echo Show. " +
             (if (others.isNotEmpty()) "Its other friends are ${others.joinToString { it.name }}. " else "") +
             (if (recent.isNotEmpty()) "Things that happened lately: ${recent.joinToString("; ")}. " else "") +
-            "Start with \"Dear Blob,\" and sign it from ${f.name}. Reply with only the letter: no commands, and don't change anything on any device."
+            (lastReply?.let { "$blobName's last letter to ${f.name} said: \"$it\" so answer it. " } ?: "") +
+            "Start with \"Dear $blobName,\" and sign it from ${f.name}. Reply with only the letter: no commands, and don't change anything on any device."
+
+    fun replyPrompt(blobName: String, f: Friend, letter: String): String =
+        "You are $blobName, the little blob that lives on my Echo Show (your on-screen face). Your friend ${f.name} " +
+            "(a ${f.p.label} blob; ${f.bio}) sent you this letter:\n\"$letter\"\n" +
+            "Write a short, warm reply (3 to 4 sentences, cute, in your own voice) answering what it said. " +
+            "Start with \"Dear ${f.name},\" and sign it from $blobName. Reply with only the letter: no commands, and don't change anything on any device."
+
+    fun blobNamePrompt(friends: List<Friend>): String =
+        "The little animated blob on my Echo Show (your on-screen face, the one with the room and the friends" +
+            (if (friends.isNotEmpty()) " ${friends.joinToString { it.name }}" else "") +
+            ") needs a name of its own. Pick a short, cute one-word name that's different from its friends' names and from your own. " +
+            "Reply in exactly this format and nothing else (no commands, don't change any device):\nNAME: the name"
+
+    fun parseBlobName(reply: String): String? =
+        Regex("""(?im)^\W*name\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"', ' ', '.', '!')
+            ?.split(Regex("\\s+"))?.firstOrNull()?.takeIf { it.length in 2..16 }?.replaceFirstChar { it.uppercase() }
+
+    /** A birthday for a new friend: any day of the year ("MM-dd"). */
+    fun randomBirthday(rnd: java.util.Random): String {
+        val d = java.time.LocalDate.of(2026, 1, 1).plusDays(rnd.nextInt(365).toLong())
+        return "%02d-%02d".format(d.monthValue, d.dayOfMonth)
+    }
+
+    fun isBirthday(f: Friend, date: java.time.LocalDate) = f.birthday == "%02d-%02d".format(date.monthValue, date.dayOfMonth)
+
+    /** What each personality does at the talent show (a few lines, in order). */
+    fun talentAct(f: Friend): List<String> = when (f.p) {
+        Personality.BOUNCY -> listOf("🎤 For my act… a bouncy song!", "♪ Boing boing, la la la ♪", "♪ BOING! ♪ 🎉")
+        Personality.SHY -> listOf("…um. I'll do a magic trick. 🪄", "*pulls a pebble out of a hat*", "Ta-da… ☺️")
+        Personality.SLEEPY -> listOf("My talent is… *yawn*…", "…sleeping on cue. 😴", "Zzz… (nailed it)")
+        Personality.SPARKLY -> listOf("Prepare to be DAZZLED! ✨", "*twirls in a cloud of glitter* 💫", "Thank you, thank you! 👑")
+        Personality.TINY -> listOf("Watch this!! 💪", "*does a tiny backflip*", "I stuck the landing!! 🏅")
+    }
+
+    val COMIC_MOODS = setOf("happy", "sleepy", "surprised", "sad", "curious", "wink", "worried", "neutral")
+    val COMIC_PROPS = setOf("", "umbrella", "coffee", "letter", "gift", "cake", "star", "heart", "note", "hourglass", "balloon", "package", "sunglasses")
+    val COMIC_PLACES = setOf("room", "window", "neighbourhood", "night", "outside")
+
+    fun comicPrompt(blobName: String, facts: List<String>, friends: List<Friend>): String =
+        "Write tonight's 3-panel comic strip about $blobName, the little blob on my Echo Show, based on these real things from today:\n" +
+            facts.joinToString("\n") { "- $it" } + "\n" +
+            (if (friends.isNotEmpty()) "Its friends (who can appear): ${friends.joinToString { "${it.name} (${it.p.label})" }}.\n" else "") +
+            "Make it a tiny story with a punchline in panel 3. Reply in exactly this format and nothing else (no commands, don't change any device):\n" +
+            "TITLE: a short title\n" +
+            "PANEL: who | mood | prop | place | speech | caption\n(three PANEL lines)\n" +
+            "who = $blobName and/or up to two friend names, comma separated; mood = one of ${COMIC_MOODS.joinToString()}; " +
+            "prop = one of ${COMIC_PROPS.filter { it.isNotEmpty() }.joinToString()} or none; place = one of ${COMIC_PLACES.joinToString()}; " +
+            "speech = what the first one says (under 60 characters); caption = a narrator line (under 40 characters, may be empty)."
+
+    fun parseComic(reply: String, date: String): Comic? {
+        val title = Regex("""(?im)^\W*title\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"') ?: "Today"
+        val panels = Regex("""(?im)^\W*panel(?:\s*\d)?\W*:\s*(.+)$""").findAll(reply).mapNotNull { m ->
+            val parts = m.groupValues[1].split("|").map { it.trim().trim('*', '"') }
+            if (parts.size < 5) return@mapNotNull null
+            val who = parts[0].split(",").map { it.trim() }.filter { it.isNotEmpty() }.take(3)
+            if (who.isEmpty()) return@mapNotNull null
+            Panel(who, parts[1].lowercase().takeIf { it in COMIC_MOODS } ?: "happy",
+                parts[2].lowercase().takeIf { it in COMIC_PROPS } ?: "", parts[3].lowercase().takeIf { it in COMIC_PLACES } ?: "room",
+                parts[4].take(80), parts.getOrNull(5).orEmpty().take(60))
+        }.take(3).toList()
+        return if (panels.size == 3) Comic(date, title.take(50), panels) else null
+    }
 
     enum class Where(val label: String) { HOME("home"), OUT("out and about"), AWAY("away on a trip"), VISITING("visiting the blob"), ASLEEP("asleep") }
 
@@ -156,6 +236,11 @@ object FriendsBrain {
         "redecorate" -> "redecorating"
         "squabble" -> "a silly squabble"
         "sleepover" -> "a sleepover"
+        "birthday" -> "a birthday party"
+        "trickortreat" -> "trick-or-treating"
+        "snowball" -> "a snowball fight"
+        "blockparty" -> "the block party"
+        "talentshow" -> "a talent show"
         "nap" -> "a nap"
         else -> a
     }

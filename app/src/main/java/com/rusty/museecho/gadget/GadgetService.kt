@@ -147,6 +147,7 @@ class GadgetService : Service() {
         GadgetState.setDiary(diary.load())
         GadgetState.setDiaryOn(Prefs(this).diary)
         GadgetState.setPages(Prefs(this).pageOrder, Prefs(this).pagesHidden)
+        GadgetState.setBlobName(Prefs(this).blobName)
         Prefs(this).dailyThingJson?.let { j ->
             runCatching { kotlinx.serialization.json.Json.decodeFromString(DailyThing.serializer(), j) }.getOrNull()
                 ?.takeIf { Prefs(this).dailyThing }?.let(GadgetState::setDailyThing)
@@ -1017,6 +1018,7 @@ class GadgetService : Service() {
             p.pagesHidden = arr.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.toSet()
             GadgetState.setPages(p.pageOrder, p.pagesHidden); done += "pages_hidden"
         }
+        str("blob_name")?.let { v -> p.blobName = v; GadgetState.setBlobName(p.blobName); done += "blob_name" }
         bool("blob_room")?.let { v -> p.blobRoom = v; life.loadRoom(); done += "blob_room" }
         bool("blob_friend")?.let { v -> p.blobFriend = v; if (!v) life.endVisit(); done += "blob_friend" }
         bool("laptop_break")?.let { v -> p.laptopBreak = v; done += "laptop_break" }
@@ -1372,7 +1374,7 @@ class GadgetService : Service() {
     suspend fun diaryNow(waitForCalm: Boolean): Boolean {
         val today = java.time.LocalDate.now().toString()
         val w = GadgetState.weather.value?.let { "${it.summary}, high ${it.highF}° low ${it.lowF}°" }
-        val text = quietAskImpl(DayWriting.diaryPrompt(DayLog.today(), w), waitForCalm) ?: return false
+        val text = quietAskImpl(DayWriting.diaryPrompt(DayLog.today(), w, GadgetState.blobName.value), waitForCalm) ?: return false
         if (java.time.LocalDate.now().toString() != today) return false
         GadgetState.setDiary(diary.add(DiaryEntry(today, text.take(1500), System.currentTimeMillis())))
         GadgetState.log("diary written")
@@ -2059,6 +2061,15 @@ class Prefs(context: Context) {
     var pagesHidden: Set<String>
         get() = prefs.getString("pages_hidden", "")!!.split(',').filter { it.isNotEmpty() }.toSet()
         set(v) = prefs.edit().putString("pages_hidden", v.joinToString(",")).apply()
+
+    var blobName: String
+        get() = prefs.getString("blob_name", "") ?: ""
+        set(v) = prefs.edit().putString("blob_name", v.trim().take(16)).apply()
+
+    /** The blob's own birthday ("MM-dd"): the day the Muse Echo first came alive. */
+    var blobBirthday: String
+        get() = prefs.getString("blob_birthday", null) ?: "10-05"
+        set(v) = prefs.edit().putString("blob_birthday", v).apply()
 
     var blobRoom: Boolean
         get() = prefs.getBoolean("blob_room", true)

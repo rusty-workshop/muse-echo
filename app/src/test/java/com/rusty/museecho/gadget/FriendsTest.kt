@@ -78,4 +78,32 @@ class FriendsTest {
         assertTrue(FriendsBrain.hangoutLine(moss, pip, "built a pillow fort").startsWith("…Pip and I built a pillow fort"))
         assertTrue(FriendsBrain.hangoutLine(pip, moss, "had a picnic").contains("Moss and I had a picnic"))
     }
+
+    @Test
+    fun comicsParse() {
+        val reply = """TITLE: The Great Sock Hunt
+PANEL: Bean, Moss | curious | none | room | Where did Moss go? | Morning
+PANEL: Moss | surprised | gift | outside | Found you a sock! |
+PANEL: Bean, Moss | happy | heart | room | Best gift ever. | The end"""
+        val c = FriendsBrain.parseComic(reply, "2026-10-12")!!
+        assertEquals("The Great Sock Hunt", c.title)
+        assertEquals(listOf("Bean", "Moss"), c.panels[0].who)
+        assertEquals("", c.panels[0].prop)
+        assertEquals("gift", c.panels[1].prop)
+        assertEquals("outside", c.panels[1].place)
+        assertNull(FriendsBrain.parseComic("TITLE: x\nPANEL: a | happy | none | room | hi", "d"))
+    }
+
+    @Test
+    fun blobNames() {
+        assertEquals("Bean", FriendsBrain.parseBlobName("NAME: bean!"))
+        assertNull(FriendsBrain.parseBlobName("How about Bean?"))
+    }
+
+    @Test
+    fun birthdays() {
+        val b = FriendsBrain.randomBirthday(java.util.Random(3))
+        assertTrue(Regex("\\d{2}-\\d{2}").matches(b))
+        assertTrue(FriendsBrain.isBirthday(Friend("a", birthday = "10-12"), java.time.LocalDate.of(2026, 10, 12)))
+    }
 }

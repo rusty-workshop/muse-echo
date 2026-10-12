@@ -459,6 +459,7 @@ class Chores(
             put("theme", p.theme)
             put("background", p.background)
             put("room_sense", p.roomSense)
+            put("blob_name", p.blobName)
             put("blob_room", p.blobRoom)
             put("page_order", buildJsonArray { com.rusty.museecho.ui.HomePage.ordered(p.pageOrder).forEach { add(JsonPrimitive(it.name)) } })
             put("pages_hidden", buildJsonArray { p.pagesHidden.forEach { add(JsonPrimitive(it)) } })
@@ -521,7 +522,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES + listOf("letter", "hangout")).forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES + listOf("letter", "reply", "hangout", "comic")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("EARS", "THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -562,6 +563,10 @@ class Chores(
                     fl.store.data.friends.filter { it.name.isNotBlank() }.maxByOrNull { it.closeness }?.let { f -> scope.launch { fl.writeLetter(f) } }
                 }
                 "HANGOUT" -> GadgetService.instance?.life?.friends?.hangoutNow()?.let { GadgetState.log("friends hung out: $it") }
+                "COMIC" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.comicNow() } }
+                "REPLY" -> GadgetService.instance?.life?.friends?.let { fl ->
+                    fl.store.data.letters.lastOrNull { !it.fromBlob }?.let { l -> scope.launch { fl.replyTo(l) } }
+                }
                 else -> GadgetService.instance?.life?.visit(value.lowercase(), if (value.uppercase() == "SLEEPOVER") 2 else 1)
             }
             else -> GadgetState.preview(kind, value, PREVIEW_MS)

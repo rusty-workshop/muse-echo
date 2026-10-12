@@ -110,7 +110,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             val from = if (scene.toFriend) blob + Offset(0f, -30 * dp) else f0 + Offset(0f, -s0 * 0.35f)
             val to = if (scene.toFriend) f0 + Offset(0f, -s0 * 0.35f) else blob + Offset(0f, -30 * dp)
             val pos = from + (to - from) * p + Offset(0f, -60 * dp * sin(p * PI.toFloat()))
-            drawCircle(Color(0xFFFF7A8A), 6 * dp, pos)
+            drawCircle(if (scene.snow) Color.White else Color(0xFFFF7A8A), 6 * dp, pos)
             drawCircle(Color.White.copy(alpha = 0.6f), 2 * dp, pos + Offset(-2 * dp, -2 * dp))
         }
         if (scene.teacups) {
@@ -165,6 +165,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             else -> Mood.HAPPY
         }
         val accessory = when {
+            scene.costume -> Accessory.WITCH_HAT
             scene.party -> Accessory.PARTY_HAT
             scene.popcorn -> Accessory.POPCORN
             f.p == Personality.SPARKLY -> Accessory.CROWN

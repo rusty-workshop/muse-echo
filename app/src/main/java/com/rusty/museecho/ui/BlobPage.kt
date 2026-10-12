@@ -2,6 +2,7 @@ package com.rusty.museecho.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,9 +80,10 @@ internal fun BlobPage(actions: UiActions) {
             FriendLayer(center, half, actions)
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(top = 64.dp, end = 40.dp, bottom = 84.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Blob", color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.width(16.dp))
+            val blobName by GadgetState.blobName.collectAsState()
+            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                Text(blobName.ifBlank { "Blob" }, color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(14.dp))
                 if (diaryOn && !guest) Tab("📔 Diary", tab == "diary") { tab = "diary" }
                 Spacer(Modifier.width(6.dp))
                 Tab("📸 Album", tab == "album") { tab = "album" }
@@ -90,12 +92,15 @@ internal fun BlobPage(actions: UiActions) {
                 Spacer(Modifier.width(6.dp))
                 val unread = GadgetState.friends.collectAsState().value.letters.count { !it.read }
                 Tab(if (unread > 0) "✉️ $unread" else "✉️", tab == "mail") { tab = "mail" }
+                Spacer(Modifier.width(6.dp))
+                Tab("📰", tab == "comics") { tab = "comics" }
             }
             Spacer(Modifier.height(8.dp))
             when {
                 tab == "diary" && diaryOn && !guest -> DiaryContent(Modifier.fillMaxSize())
                 tab == "friends" -> FriendsContent(actions, Modifier.fillMaxSize())
                 tab == "mail" -> MailContent(Modifier.fillMaxSize())
+                tab == "comics" -> ComicsContent(actions, Modifier.fillMaxSize())
                 else -> AlbumContent(actions, Modifier.fillMaxSize())
             }
         }
@@ -237,11 +242,11 @@ private fun MailContent(modifier: Modifier) {
             Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = if (l.read) 0.5f else 0.9f), RoundedCornerShape(12.dp))
                 .clickable {
                     GadgetService.instance?.life?.friends?.markLetterRead(l.atMs)
-                    GadgetState.show(Screen.Text("✉️ From ${f?.shownName ?: "a friend"} · ${l.date}", l.text))
+                    GadgetState.show(Screen.Text((if (l.fromBlob) "📮 To " else "✉️ From ") + "${f?.shownName ?: "a friend"} · ${l.date}", l.text))
                 }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (l.read) "📭" else "📬", fontSize = 20.sp)
+                Text(if (l.fromBlob) "📮" else if (l.read) "📭" else "📬", fontSize = 20.sp)
                 Column(Modifier.padding(start = 10.dp)) {
-                    Text("From ${f?.shownName ?: "a friend"}", color = f?.let { androidx.compose.ui.graphics.Color(it.color) } ?: Palette.ink,
+                    Text((if (l.fromBlob) "To " else "From ") + (f?.shownName ?: "a friend"), color = f?.let { androidx.compose.ui.graphics.Color(it.color) } ?: Palette.ink,
                         fontSize = 15.sp, fontWeight = if (l.read) FontWeight.Normal else FontWeight.SemiBold)
                     Text(l.text.replace("\n", " "), color = Palette.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -252,6 +257,10 @@ private fun MailContent(modifier: Modifier) {
 
 private fun friendLine(f: com.rusty.museecho.gadget.Friend): String = listOfNotNull(
     f.p.label,
+    f.birthday.takeIf { it.length == 5 }?.let { b ->
+        "🎂 " + runCatching { java.time.MonthDay.parse("--$b").format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.US)) }.getOrDefault(b)
+    },
+    f.trophies.takeIf { it > 0 }?.let { "🏆 $it" },
     "${f.visits} visit${if (f.visits == 1) "" else "s"}",
     f.favourite()?.let { "loves ${com.rusty.museecho.gadget.FriendsBrain.activityLabel(it)}" },
     f.lastVisitMs.takeIf { it > 0 }?.let { "last here " + java.text.SimpleDateFormat("EEE h:mm a", java.util.Locale.US).format(java.util.Date(it)) },
@@ -302,4 +311,78 @@ private fun FriendDetail(f: com.rusty.museecho.gadget.Friend, data: com.rusty.mu
             }
         }
     }
+}
+
+
+/** The evening comic strips: three panels a day, drawn with the blob and its friends; flip back through days. */
+@Composable
+private fun ComicsContent(actions: UiActions, modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    val comics = data.comics
+    var back by remember { mutableStateOf(0) }
+    val c = comics.getOrNull(comics.size - 1 - back)
+    if (c == null) {
+        Text("No comics yet. One is drawn every evening after 8 pm.", color = Palette.muted, fontSize = 15.sp, modifier = modifier)
+        return
+    }
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(c.title, color = Palette.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(c.date, color = Palette.muted, fontSize = 12.sp)
+            Spacer(Modifier.width(8.dp))
+            Tab("◀", false) { if (back < comics.size - 1) back++ }
+            Spacer(Modifier.width(4.dp))
+            Tab("▶", false) { if (back > 0) back-- }
+        }
+        Row(Modifier.fillMaxWidth().weight(1f).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            c.panels.forEach { p -> ComicPanel(p, data, actions, Modifier.weight(1f).fillMaxHeight()) }
+        }
+    }
+}
+
+@Composable
+private fun ComicPanel(p: com.rusty.museecho.gadget.Panel, data: com.rusty.museecho.gadget.FriendsData, actions: UiActions, modifier: Modifier) {
+    val blobName by GadgetState.blobName.collectAsState()
+    val bg = when (p.place) {
+        "night" -> listOf(androidx.compose.ui.graphics.Color(0xFF0B1030), androidx.compose.ui.graphics.Color(0xFF1B2050))
+        "outside", "neighbourhood" -> listOf(androidx.compose.ui.graphics.Color(0xFF6FA8DC), androidx.compose.ui.graphics.Color(0xFF7FC88A))
+        "window" -> listOf(androidx.compose.ui.graphics.Color(0xFF3A4A6A), androidx.compose.ui.graphics.Color(0xFF2A2433))
+        else -> listOf(androidx.compose.ui.graphics.Color(0xFF2E2440), androidx.compose.ui.graphics.Color(0xFF231C30))
+    }
+    val mood = when (p.mood) {
+        "sleepy" -> com.rusty.museecho.gadget.Mood.SLEEPY
+        "surprised" -> com.rusty.museecho.gadget.Mood.SURPRISED
+        "sad" -> com.rusty.museecho.gadget.Mood.SAD
+        "curious" -> com.rusty.museecho.gadget.Mood.CURIOUS
+        "wink" -> com.rusty.museecho.gadget.Mood.WINK
+        "worried" -> com.rusty.museecho.gadget.Mood.WORRIED
+        "neutral" -> com.rusty.museecho.gadget.Mood.NEUTRAL
+        else -> com.rusty.museecho.gadget.Mood.HAPPY
+    }
+    Column(modifier.background(androidx.compose.ui.graphics.Brush.verticalGradient(bg), RoundedCornerShape(8.dp))
+        .border(2.dp, Palette.ink.copy(alpha = 0.7f), RoundedCornerShape(8.dp)).padding(6.dp)) {
+        if (p.caption.isNotEmpty()) Text(p.caption, color = Palette.night, fontSize = 10.sp, maxLines = 2,
+            modifier = Modifier.background(androidx.compose.ui.graphics.Color(0xFFFFE680), RoundedCornerShape(3.dp)).padding(horizontal = 4.dp, vertical = 2.dp))
+        if (p.speech.isNotEmpty()) Text(p.speech, color = Palette.night, fontSize = 11.sp, maxLines = 3, lineHeight = 13.sp,
+            modifier = Modifier.padding(top = 4.dp).background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 6.dp, vertical = 3.dp))
+        Spacer(Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
+            p.who.take(3).forEachIndexed { i, who ->
+                val friend = data.friends.firstOrNull { it.name.equals(who, ignoreCase = true) }
+                val isBlob = friend == null
+                Blob(Modifier.size(if (isBlob) 52.dp else (40 * (friend?.p?.scale ?: 1f)).dp), actions, mini = true,
+                    moodOverride = if (i == 0) mood else com.rusty.museecho.gadget.Mood.HAPPY,
+                    gaze = androidx.compose.ui.geometry.Offset(if (i == 0) 0.6f else -0.6f, 0f),
+                    tintOverride = friend?.let { androidx.compose.ui.graphics.Color(it.color) }, ownStyle = isBlob)
+            }
+        }
+        if (p.prop.isNotEmpty()) Text(propEmoji(p.prop), fontSize = 16.sp, modifier = Modifier.align(Alignment.End))
+    }
+}
+
+private fun propEmoji(p: String) = when (p) {
+    "umbrella" -> "☂️"; "coffee" -> "☕"; "letter" -> "✉️"; "gift" -> "🎁"; "cake" -> "🎂"; "star" -> "⭐"; "heart" -> "💛"
+    "note" -> "📝"; "hourglass" -> "⏳"; "balloon" -> "🎈"; "package" -> "📦"; "sunglasses" -> "😎"; else -> ""
 }
