@@ -1,5 +1,6 @@
 package com.rusty.museecho.gadget
 
+import kotlinx.coroutines.flow.debounce
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -1042,9 +1043,17 @@ class GadgetService : Service() {
             GadgetState.setPages(p.pageOrder, p.pagesHidden); done += "pages_hidden"
         }
         num("still_minutes")?.let { v -> setStill(v.toInt()); done += "still_minutes" }
+        num("quiet_minutes")?.let { v ->
+            p.quietUntil = when { v < 0 -> Long.MAX_VALUE; v == 0.0 -> 0L; else -> System.currentTimeMillis() + (v * 60_000).toLong() }
+            GadgetState.setQuiet(isQuietNow())
+            done += "quiet_minutes"
+        }
         str("blob_name")?.let { v -> p.blobName = v; GadgetState.setBlobName(p.blobName); done += "blob_name" }
         bool("blob_room")?.let { v -> p.blobRoom = v; life.loadRoom(); done += "blob_room" }
         bool("blob_friend")?.let { v -> p.blobFriend = v; if (!v) life.endVisit(); done += "blob_friend" }
+        bool("puff_sniffles")?.let { v -> p.puffSniffles = v; if (!v) life.friends.stopSniffles(); done += "puff_sniffles" }
+        bool("puff_away_sleepovers")?.let { v -> p.puffAwaySleepovers = v; done += "puff_away_sleepovers" }
+        bool("puff_house_build")?.let { v -> p.puffHouseBuild = v; done += "puff_house_build" }
         bool("laptop_break")?.let { v -> p.laptopBreak = v; done += "laptop_break" }
         bool("warm_evenings")?.let { v -> p.warmEvenings = v; if (!v) GadgetState.setWarmth(0f); done += "warm_evenings" }
         bool("bedtime_hint")?.let { v -> p.bedtimeHint = v; done += "bedtime_hint" }
@@ -1491,15 +1500,25 @@ class GadgetService : Service() {
 
     // -- The settings page's journal -------------------------------------------------------
 
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
     private suspend fun postJournal() {
         delay(30_000)
+        // Soon after Puff's world changes (a letter, a sticker…) so the phone hears quickly, and every 5 minutes anyway.
+        scope.launch {
+            GadgetState.friends.debounce(20_000).collect {
+                if (System.currentTimeMillis() - lastJournalMs > 60_000) postJournalOnce()
+            }
+        }
         while (true) {
-            postJournalOnce()
+            if (System.currentTimeMillis() - lastJournalMs > 4 * 60_000L) postJournalOnce()
             delay(5 * 60_000L)
         }
     }
 
+    @Volatile private var lastJournalMs = 0L
+
     suspend fun postJournalOnce() {
+        lastJournalMs = System.currentTimeMillis()
         val json = kotlinx.serialization.json.Json
         val things = Prefs(this).thingHistoryJson ?: "[]"
         hub.postJournal(kotlinx.serialization.json.buildJsonObject {
@@ -1510,6 +1529,22 @@ class GadgetService : Service() {
             put("room", kotlinx.serialization.json.JsonArray(GadgetState.room.value.map { kotlinx.serialization.json.JsonPrimitive(it) }))
             GadgetState.weekRecap.value?.let { (text, at) -> put("week_recap", text); put("week_recap_ms", at) }
             put("friends", json.parseToJsonElement(json.encodeToString(FriendsData.serializer(), GadgetState.friends.value.copy(today = emptyMap()))))
+            put("street", life.friends.streetInfo())
+            put("catalog", kotlinx.serialization.json.buildJsonObject {
+                put("stickers", kotlinx.serialization.json.JsonArray(FriendsBrain.STICKERS.map { s ->
+                    kotlinx.serialization.json.buildJsonObject { put("id", s.id); put("emoji", s.emoji); put("title", s.title); put("who", s.who) } }))
+                put("collectibles", kotlinx.serialization.json.JsonArray(FriendsBrain.COLLECTIBLES.map { c ->
+                    kotlinx.serialization.json.buildJsonObject { put("id", c.id); put("emoji", c.emoji); put("name", c.name); put("set", c.set) } }))
+            })
+            put("today_activities", kotlinx.serialization.json.buildJsonObject {
+                val today = java.time.LocalDate.now().toString()
+                GadgetState.friends.value.today.filterKeys { it.startsWith("$today|") }.forEach { (k, v) ->
+                    put(k.substringAfter('|'), kotlinx.serialization.json.JsonArray(v.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                }
+            })
+            put("friend_album", kotlinx.serialization.json.JsonArray(GadgetState.friendAlbum.value.takeLast(60).map { a ->
+                kotlinx.serialization.json.buildJsonObject { put("date", a.date); put("caption", a.caption) }
+            }))
         })
     }
 
@@ -2132,6 +2167,11 @@ class Prefs(context: Context) {
         get() = prefs.getLong("still_until", 0L)
         set(v) = prefs.edit().putLong("still_until", v).apply()
 
+    /** Quiet now, from the phone (epoch ms; Long.MAX_VALUE = until turned off; 0 = off), on top of the nightly hours. */
+    var quietUntil: Long
+        get() = prefs.getLong("quiet_until", 0L)
+        set(v) = prefs.edit().putLong("quiet_until", v).apply()
+
     var blobRoom: Boolean
         get() = prefs.getBoolean("blob_room", true)
         set(v) = prefs.edit().putBoolean("blob_room", v).apply()
@@ -2139,6 +2179,17 @@ class Prefs(context: Context) {
     var blobFriend: Boolean
         get() = prefs.getBoolean("blob_friend", true)
         set(v) = prefs.edit().putBoolean("blob_friend", v).apply()
+
+    /** Puff's world extras that can be switched off: sniffly days, overnight stays at friends', new friends via a week-long house build. */
+    var puffSniffles: Boolean
+        get() = prefs.getBoolean("puff_sniffles", true)
+        set(v) = prefs.edit().putBoolean("puff_sniffles", v).apply()
+    var puffAwaySleepovers: Boolean
+        get() = prefs.getBoolean("puff_away_sleepovers", true)
+        set(v) = prefs.edit().putBoolean("puff_away_sleepovers", v).apply()
+    var puffHouseBuild: Boolean
+        get() = prefs.getBoolean("puff_house_build", true)
+        set(v) = prefs.edit().putBoolean("puff_house_build", v).apply()
 
     /** Break and wind-down nudges from laptop use. */
     var laptopBreak: Boolean

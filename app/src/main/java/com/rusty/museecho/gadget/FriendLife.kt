@@ -1,5 +1,6 @@
 package com.rusty.museecho.gadget
 
+import kotlinx.serialization.json.put
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -90,7 +91,7 @@ class FriendLife(
         val days = (System.currentTimeMillis() - first) / 86_400_000L
         val due = 1 + listOf(5L, 12L, 25L).count { days >= it } + ((days - 25) / 14).coerceAtLeast(0).toInt() +
             prefs.getInt("friends_bonus", 0)
-        if (have.size < due.coerceAtMost(12) && have.all { it.visits > 0 }) startBuilding()
+        if (have.size < due.coerceAtMost(12) && have.all { it.visits > 0 }) { if (Prefs(context).puffHouseBuild) startBuilding() else newFriend() }
     }
 
     /** New friends now (the settings page, Pixel); Pixel names them over the next few minutes. */
@@ -301,7 +302,7 @@ class FriendLife(
                     if (pal != null && rnd.nextFloat() < 0.25f && System.currentTimeMillis() - lastSleepover > 3 * 86_400_000L) {
                         prefs.edit().putLong("sleepover_last", System.currentTimeMillis()).apply()
                         visit("sleepover", null, pal.name)
-                    } else if (pal != null && GadgetState.friend.value == null && GadgetState.trip.value == null && rnd.nextFloat() < 0.12f &&
+                    } else if (pal != null && Prefs(context).puffAwaySleepovers && GadgetState.friend.value == null && GadgetState.trip.value == null && rnd.nextFloat() < 0.12f &&
                         System.currentTimeMillis() - prefs.getLong("away_sleepover_last", 0L) > 5 * 86_400_000L) {
                         sleepOverAt(pal)
                     }
@@ -1840,7 +1841,7 @@ class FriendLife(
                     GadgetState.setSniffles(false, false)
                     if (!isQuiet()) GadgetState.say("I feel all better today! 💪", 10)
                 }
-                if (on() && life.hour() in 7..10 && prefs.getString("sniffle_checked", "") != today.toString()) {
+                if (on() && Prefs(context).puffSniffles && life.hour() in 7..10 && prefs.getString("sniffle_checked", "") != today.toString()) {
                     prefs.edit().putString("sniffle_checked", today.toString()).apply()
                     val since = prefs.getString("sniffle_last", "")!!.let { runCatching { java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(it), today) }.getOrDefault(99L) }
                     if (since >= 14 && rnd.nextInt(12) == 0) startSniffles()
@@ -1864,6 +1865,12 @@ class FriendLife(
                 delay(10 * 60_000L)
             }
         }
+    }
+
+    /** Sniffly days switched off: better straight away. */
+    fun stopSniffles() {
+        prefs.edit().putString("sniffle_day", "").apply()
+        GadgetState.setSniffles(false, false)
     }
 
     /** Rusty tapped Puff on a sniffly day: tucked in under a blanket. */
@@ -2194,6 +2201,63 @@ class FriendLife(
             GadgetState.say("I wrote you a letter, Rusty! It's in my ✉️ mailbox 💌", 12)
         }
         return true
+    }
+
+    // -- For the phone app --------------------------------------------------------------------------
+
+    /** One line about what Puff's up to, for the phone's widget. */
+    fun doingLine(): String {
+        val d = store.data
+        GadgetState.trip.value?.let { t ->
+            val who = d.friends.firstOrNull { it.id == t.friendId }?.shownName ?: "a friend"
+            return if (t.overnight) "Sleeping over at $who's 😴" else "Round at $who's house 🧳"
+        }
+        if (GadgetState.asleep.value || GadgetState.tuckedIn.value) return "Fast asleep 😴"
+        GadgetState.friend.value?.let { v ->
+            val names = v.friendIds.mapNotNull { id -> d.friends.firstOrNull { it.id == id }?.shownName ?: GadgetState.guest.value?.takeIf { it.id == id }?.shownName }
+            val who = when {
+                names.size > 3 -> "everyone"
+                else -> names.joinToString(" & ")
+            }
+            return FriendsBrain.activityLabel(v.activity).replaceFirstChar { it.uppercase() } + if (who.isNotEmpty()) " with $who" else ""
+        }
+        if (GadgetState.sniffles.value) return "Got the sniffles 🤧"
+        return if (isQuiet()) "Winding down for the night 🌙" else "Hanging out at home 🏠"
+    }
+
+    /** Where everyone is on the street, for the phone's Neighbourhood map. */
+    fun streetInfo() = kotlinx.serialization.json.buildJsonObject {
+        val now = System.currentTimeMillis()
+        val visiting = GadgetState.friend.value?.friendIds.orEmpty().toSet()
+        val h = life.hour()
+        put("where", kotlinx.serialization.json.buildJsonObject {
+            store.data.friends.forEach { f ->
+                val w = GadgetState.trip.value?.takeIf { it.friendId == f.id }?.let { FriendsBrain.Where.HOME } ?: FriendsBrain.whereabouts(f, visiting, now, h)
+                put(f.id, w.name)
+            }
+        })
+        FriendsBrain.festival(java.time.LocalDate.now(), h)?.let { put("festival", it.name) }
+            ?: GadgetState.festivalPreview.value?.takeIf { it.second > now }?.let { put("festival", it.first) }
+        GadgetState.friend.value?.let { put("activity", it.activity) }
+        GadgetState.trip.value?.let { put("puff_at", it.friendId) }
+        put("market", java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.SATURDAY && h in 10..15)
+        put("snowman", GadgetState.snowman.value)
+        put("sniffles", GadgetState.sniffles.value)
+        put("hour", h)
+    }
+
+    /** A game Rusty played against Puff on the phone: the shared scoreboard, and Puff's reaction. */
+    fun phoneGame(game: String, outcome: Int) {
+        val key = when (outcome) { 1 -> "play_you"; -1 -> "play_puff"; else -> "play_draw" }
+        prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply()
+        val name = GadgetState.BlobCalled()
+        when (outcome) {
+            1 -> { GadgetState.setMood(Mood.SAD, 6); GadgetState.say("You beat me on your phone! 😤 Rematch?", 8) }
+            -1 -> { GadgetState.react(Reaction.CELEBRATE); GadgetState.say("I won on your phone! 🎉", 8) }
+            else -> { GadgetState.react(Reaction.NOD); GadgetState.say("A draw on your phone! 🤝", 8) }
+        }
+        DayLog.event("played $game with Rusty on the phone (${when (outcome) { 1 -> "Rusty won"; -1 -> "$name won"; else -> "a draw" }})", "game")
+        checkStickers()
     }
 
     // -- Stickers -----------------------------------------------------------------------------------

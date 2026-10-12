@@ -140,7 +140,24 @@ class Chores(
         }
         GadgetState.bubble.value?.takeIf { it.untilMs > now }?.let { put("bubble", it.text) }
         GadgetState.held.value?.takeIf { it.untilMs > now }?.let { h -> put("holding", h.item.name.lowercase()); if (h.text.isNotEmpty()) put("label", h.text) }
+        put("doing", GadgetService.instance?.life?.friends?.doingLine() ?: "")
+        GadgetState.trip.value?.let { t ->
+            put("away_at", GadgetState.friends.value.friends.firstOrNull { it.id == t.friendId }?.shownName ?: "a friend's")
+            put("away_overnight", t.overnight)
+        }
+        if (GadgetState.sniffles.value) put("sniffles", true)
+        if (GadgetState.asleep.value || GadgetState.tuckedIn.value) put("asleep", true)
+        GadgetState.vote.value?.let { (acts, _) ->
+            put("vote", buildJsonArray { acts.forEach { (id, name) -> add(buildJsonObject { put("id", id); put("name", name) }) } })
+        }
         GadgetState.friend.value?.let { v ->
+            put("visitors", buildJsonArray {
+                v.friendIds.forEach { id ->
+                    val f = GadgetState.friends.value.friends.firstOrNull { it.id == id } ?: GadgetState.guest.value?.takeIf { it.id == id } ?: return@forEach
+                    add(buildJsonObject { put("id", f.id); put("name", f.shownName); put("color", "#%06X".format(f.color and 0xFFFFFF)); put("scale", f.scale)
+                        GadgetState.friendSay.value[f.id]?.let { put("says", it) } })
+                }
+            })
             put("friend", v.activity)
             val f = v.friendIds.firstOrNull()?.let { id -> GadgetState.friends.value.friends.firstOrNull { it.id == id } }
             put("friend_id", f?.id ?: "")
@@ -188,14 +205,40 @@ class Chores(
                         postState()
                     } else {
                         // A tap on the watch: the blob hops and says hi (a little chirp, not overnight).
-                        GadgetState.log("poked from the watch")
+                        GadgetState.log("poked from the ${(item["from"] as? JsonPrimitive)?.contentOrNull ?: "watch"}")
                         DayLog.poked()
                         GadgetState.react(if (Math.random() < 0.5) Reaction.HOP else Reaction.WINK)
                         if (!isQuiet()) {
                             GadgetState.chirp(BlobSound.TAP)
-                            GadgetState.say("👋 Hi from your wrist!", 6)
+                            GadgetState.say(if ((item["from"] as? JsonPrimitive)?.contentOrNull == "phone") "👋 Hi from your phone!" else "👋 Hi from your wrist!", 6)
                         }
                         postState()
+                    }
+                    "invite" -> {
+                        val name = (item["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                        val act = (item["activity"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                        val r = GadgetService.instance?.life?.visit(act, null, name)
+                        GadgetState.log("invite from the phone: $r")
+                        postState()
+                    }
+                    "game" -> {
+                        val outcome = (item["outcome"] as? JsonPrimitive)?.intOrNull ?: continue
+                        val game = (item["game"] as? JsonPrimitive)?.contentOrNull ?: "a game"
+                        GadgetService.instance?.life?.friends?.phoneGame(game, outcome)
+                        postState()
+                    }
+                    "vote" -> {
+                        val id = (item["id"] as? JsonPrimitive)?.contentOrNull ?: continue
+                        if (GadgetState.vote.value?.first?.any { it.first == id } == true) {
+                            GadgetState.voted = id
+                            GadgetState.setVote(null)
+                        }
+                    }
+                    "photo" -> {
+                        val id = (item["id"] as? JsonPrimitive)?.contentOrNull?.takeIf { Regex("[0-9a-f]{16}").matches(it) } ?: continue
+                        val dest = (item["dest"] as? JsonPrimitive)?.contentOrNull ?: "frame"
+                        val caption = (item["caption"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        scope.launch { phonePhoto(id, dest, caption) }
                     }
                     "friends_add" -> {
                         val n = (item["count"] as? JsonPrimitive)?.intOrNull ?: 1
@@ -295,6 +338,25 @@ class Chores(
             runCatching { syncPhotos() }.onFailure { GadgetState.log("photo sync failed: ${it.message}") }
             delay(15 * 60_000L)
         }
+    }
+
+    /** A photo sent from Rusty's phone: into the frame's slideshow, or Puff's album. */
+    private suspend fun phonePhoto(id: String, dest: String, caption: String) {
+        val bytes = hub.phonePhoto(id) ?: return GadgetState.log("phone photo $id: couldn't fetch it")
+        if (dest == "album") {
+            GadgetService.instance?.life?.addPhonePhoto(bytes, caption.ifBlank { "From Rusty's phone" })
+            GadgetState.say("Ooh, a photo from Rusty! It's in my album 📸", 8)
+        } else {
+            withContext(Dispatchers.IO) {
+                frame.dir.mkdirs()
+                val f = File(frame.dir, "phone_$id.jpg")
+                val tmp = File(frame.dir, "phone_$id.jpg.part")
+                tmp.writeBytes(bytes)
+                tmp.renameTo(f)
+            }
+            GadgetState.say("A new photo for the slideshow, from your phone 🖼️", 8)
+        }
+        GadgetState.log("photo from the phone → $dest")
     }
 
     /** Mirrors the Latitude's "Echo Photos" folder into the frame as sync_* files; leaves other photos alone. */
@@ -492,6 +554,7 @@ class Chores(
             put("room_sense", p.roomSense)
             put("blob_name", p.blobName)
             put("still_until_ms", if (p.stillUntil == Long.MAX_VALUE) -1L else p.stillUntil)
+            put("quiet_until_ms", if (p.quietUntil == Long.MAX_VALUE) -1L else p.quietUntil)
             put("blob_room", p.blobRoom)
             put("page_order", buildJsonArray { com.rusty.museecho.ui.HomePage.ordered(p.pageOrder).forEach { add(JsonPrimitive(it.name)) } })
             put("pages_hidden", buildJsonArray { p.pagesHidden.forEach { add(JsonPrimitive(it)) } })
@@ -499,6 +562,9 @@ class Chores(
                 com.rusty.museecho.ui.HomePage.entries.forEach { put(it.name, if (it == com.rusty.museecho.ui.HomePage.BLOB) GadgetState.BlobCalled() else it.label) }
             })
             put("blob_friend", p.blobFriend)
+            put("puff_sniffles", p.puffSniffles)
+            put("puff_away_sleepovers", p.puffAwaySleepovers)
+            put("puff_house_build", p.puffHouseBuild)
             put("laptop_break", p.laptopBreak)
             put("warm_evenings", p.warmEvenings)
             put("bedtime_hint", p.bedtimeHint)

@@ -9,7 +9,7 @@ import java.time.LocalTime
  */
 object QuietHours {
     fun isQuiet(prefs: Prefs, now: LocalTime = LocalTime.now()): Boolean =
-        prefs.quietEnabled && inWindow(prefs.quietStart, prefs.quietEnd, now)
+        System.currentTimeMillis() < prefs.quietUntil || (prefs.quietEnabled && inWindow(prefs.quietStart, prefs.quietEnd, now))
 
     fun inWindow(start: String, end: String, now: LocalTime): Boolean {
         val s = parse(start) ?: return false

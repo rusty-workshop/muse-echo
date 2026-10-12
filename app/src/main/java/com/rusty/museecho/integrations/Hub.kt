@@ -165,6 +165,13 @@ class Hub(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    /** A photo Rusty sent from the phone app (echo-hub keeps it until the Echo has fetched it). */
+    suspend fun phonePhoto(id: String): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            http.newCall(Request.Builder().url("http://$host/echo/phone-photo/$id").build()).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
+        }.getOrNull()
+    }
+
     /** Puff's world as a shareable file (no secrets), for the settings page's download. */
     suspend fun postExport(bundle: String): Boolean = withContext(Dispatchers.IO) { post("/echo/export", bundle).first == 200 }
 

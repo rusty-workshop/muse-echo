@@ -263,6 +263,18 @@ class BlobLife(
         return true
     }
 
+    /** A photo from Rusty's phone, into the friends album (scaled down like the snapshots). */
+    fun addPhonePhoto(jpeg: ByteArray, caption: String) {
+        val bmp = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return
+        val scale = 640f / maxOf(bmp.width, bmp.height)
+        val small = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+        val out = java.io.ByteArrayOutputStream()
+        small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+        val bytes = out.toByteArray()
+        GadgetState.setFriendAlbum(friendAlbum.add(bytes, caption))
+        scope.launch { hub.postAlbum(java.time.LocalDate.now().toString(), caption, bytes, kind = "friends") }
+    }
+
     /** Group photo day: everyone, framed (bypasses the half-hour limit). */
     suspend fun groupSnapshot(caption: String): Boolean {
         val rect = when (GadgetState.idlePage.value) {
