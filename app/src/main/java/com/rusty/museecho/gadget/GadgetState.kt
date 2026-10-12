@@ -431,10 +431,6 @@ object GadgetState {
         _turnActive.value = on
     }
 
-    /** When the wake word was last heard (the blob's ears pop up). */
-    @Volatile
-    var earsAt = 0L
-
     /** The homelab page's data, fetched while it's on screen. */
     private val _homelab = MutableStateFlow<com.rusty.museecho.integrations.Homelab?>(null)
     val homelab: StateFlow<com.rusty.museecho.integrations.Homelab?> = _homelab.asStateFlow()

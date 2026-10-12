@@ -669,10 +669,6 @@ internal fun Blob(
                 if ((museBusy || forcedState == "BUSY_GEAR") && talk == Talk.IDLE && !mini) drawGear(core + Offset(r * 0.52f, -r * 0.46f), r * 0.09f, t * 1.5f)
                 if (mood == Mood.SLEEPY && react == null && !mini) drawDream(core, r, t, weather, dreamPhoto, dreamTopics)
                 if (react == Reaction.COVER_EARS) drawEarCovers(core, r, p, tint)
-                // Ears perk up while it listens, and pop up the moment it hears the wake word.
-                val earsTarget = if (talk == Talk.LISTENING || System.currentTimeMillis() - GadgetState.earsAt < 2_500 || forcedState == "EARS") 1f else 0f
-                sm.ears += (earsTarget - sm.ears) * ease(if (earsTarget > sm.ears) 14f else 6f)
-                if (sm.ears > 0.02f) drawEars(core, r, sm.ears, tint, t)
                 if ((muted || forcedState == "MUTED") && !mini) drawMuted(core + Offset(-r * 0.5f, -r * 0.42f), r * 0.07f)
             }
 
@@ -1636,7 +1632,6 @@ private class Smooth {
     var replyLen = 0
     var replyAt = -10f
     var think = 0f
-    var ears = 0f
     var timerKey: String? = null
     var flipAt = -10f
 }
@@ -1727,35 +1722,6 @@ private fun nextReminder(day: com.rusty.museecho.integrations.ReminderDay, nowMs
     val upcoming = day.items.filter { r -> BlobBrain.minutesOfDay(r.time)?.let { it + 5 >= nowMin } ?: true }
     val next = upcoming.minByOrNull { BlobBrain.minutesOfDay(it.time) ?: Int.MAX_VALUE } ?: return null
     return (if (next.time.isNotBlank()) "${next.time} " else "") + next.text
-}
-
-/** Two rounded ears perking up from the top of the head; [up] eases 0..1 (with a little overshoot). */
-private fun DrawScope.drawEars(core: Offset, r: Float, up: Float, tint: Color, t: Float) {
-    val c1 = 1.7f
-    val x = up - 1f
-    val k = (1f + (c1 + 1f) * x * x * x + c1 * x * x).coerceAtLeast(0f)
-    for (side in listOf(-1f, 1f)) {
-        val base = core + Offset(side * r * 0.24f, -r * 0.36f)
-        val twitch = sin(t * 9f + side) * 3f * up
-        rotate(side * (18f + twitch), base) {
-            val h = r * 0.26f * k
-            val w = r * 0.13f
-            val ear = Path().apply {
-                moveTo(base.x - w, base.y + r * 0.04f)
-                quadraticTo(base.x - w * 0.9f, base.y - h * 0.9f, base.x, base.y - h)
-                quadraticTo(base.x + w * 0.9f, base.y - h * 0.9f, base.x + w, base.y + r * 0.04f)
-                close()
-            }
-            drawPath(ear, tint)
-            val inner = Path().apply {
-                moveTo(base.x - w * 0.5f, base.y)
-                quadraticTo(base.x - w * 0.45f, base.y - h * 0.65f, base.x, base.y - h * 0.72f)
-                quadraticTo(base.x + w * 0.45f, base.y - h * 0.65f, base.x + w * 0.5f, base.y)
-                close()
-            }
-            drawPath(inner, Palette.coral.copy(alpha = 0.55f))
-        }
-    }
 }
 
 /** An hourglass: [sand] is the share still to fall (top bulb), and [flip] 0..1 turns it over. */

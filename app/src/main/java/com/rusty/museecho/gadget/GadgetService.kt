@@ -1727,8 +1727,6 @@ class GadgetService : Service() {
             return
         }
         GadgetState.log("wake word heard")
-        // Ears up first, so you can see it heard you before the beep.
-        GadgetState.earsAt = System.currentTimeMillis()
         bringToFront(force = true)
         if (briefPending && Prefs(this).morningBrief && GadgetState.link.value == Link.CONNECTED) {
             briefPending = false
