@@ -226,6 +226,8 @@ class BlobLife(
 
     /** A friend moment for the friends' album: the room, if the clock or the Blob page is on screen. */
     suspend fun friendSnapshot(caption: String): Boolean {
+        // Visits are frequent now: at most one friend picture every half hour.
+        if (System.currentTimeMillis() - prefs.getLong("friend_shot_last", 0L) < 30 * 60_000L) return false
         val rect = when (GadgetState.idlePage.value) {
             8 -> GadgetState.blobBounds[ROOM_BOUNDS]
             // On the clock: around the blob, wide enough on the right for the friend.
@@ -235,6 +237,7 @@ class BlobLife(
             else -> null
         } ?: return false
         val jpeg = grab(rect, 640, around = false) ?: return false
+        prefs.edit().putLong("friend_shot_last", System.currentTimeMillis()).apply()
         GadgetState.setFriendAlbum(friendAlbum.add(jpeg, caption))
         GadgetState.log("friend album: $caption")
         scope.launch { hub.postAlbum(java.time.LocalDate.now().toString(), caption, jpeg, kind = "friends") }

@@ -123,19 +123,60 @@ class FriendLife(
 
     // -- When -------------------------------------------------------------------------------------
 
+    /**
+     * Through the day something's usually going on: a friend over (5–8 minutes, longer for close
+     * friends), then 4–12 minutes of quiet before the next thing; about a quarter of those
+     * turns are Puff doing something on its own instead. Never while someone's using the Echo.
+     */
     private suspend fun visitLoop() {
+        var nextAt = System.currentTimeMillis() + 3 * 60_000L
+        var checks = 0
         while (true) {
-            delay((25 + rnd.nextInt(30)) * 60_000L)
-            maybeNewFriend()
-            if (!on() || isQuiet() || !life.idle() || life.hour() !in 9..21) continue
-            // Closer friends drop by more often.
-            val closest = store.data.friends.maxOfOrNull { it.closeness } ?: 0
-            val gap = (3 * 3_600_000L * (1f - closest / 200f)).toLong()
-            if (System.currentTimeMillis() - prefs.getLong("friend_last", 0L) < gap) continue
-            if (System.currentTimeMillis() - GadgetState.lastTouch < 60_000) continue
-            if (rnd.nextFloat() < 0.35f) visit()
+            delay(30_000)
+            if (++checks % 20 == 0) maybeNewFriend()
+            if (GadgetState.friend.value != null || soloJob?.isActive == true) {
+                // Something's on: the next one comes a little while after it ends.
+                nextAt = System.currentTimeMillis() + (4 + rnd.nextInt(9)) * 60_000L
+                continue
+            }
+            if (System.currentTimeMillis() < nextAt) continue
+            if (isQuiet() || !life.idle() || life.hour() !in 8..21) continue
+            if (System.currentTimeMillis() - GadgetState.lastHuman < 20_000) continue
+            if (on() && rnd.nextFloat() < 0.75f) visit() else solo()
         }
     }
+
+    // -- Puff on its own ---------------------------------------------------------------------------
+
+    private var soloJob: Job? = null
+
+    /** A minute or two of Puff doing something by itself (reading, star jumps, a coffee...). */
+    fun solo(): String {
+        if (soloJob?.isActive == true || GadgetState.friend.value != null) return "busy"
+        val (item, lines) = SOLO.random()
+        val name = GadgetState.blobName.value.ifBlank { "the blob" }
+        soloJob = scope.launch {
+            GadgetState.log("$name on its own: ${lines.first()}")
+            GadgetState.hold(item, "", 2)
+            for ((i, line) in lines.withIndex()) {
+                GadgetState.say(line, 6)
+                GadgetState.react(if (i % 2 == 0) Reaction.HOP else Reaction.NOD)
+                delay(25_000)
+            }
+            GadgetState.hold(HeldItem.NONE, "", 0)
+        }
+        return lines.first()
+    }
+
+    private val SOLO = listOf(
+        HeldItem.NOTE to listOf("Writing in my diary 📝", "Dear diary… 🤔", "There. All written down! ✨"),
+        HeldItem.COFFEE to listOf("Coffee break ☕", "*sip*… ahh.", "Cozy. 😌"),
+        HeldItem.STAR to listOf("Star jumps! ⭐", "One… two… three… 💪", "Phew, that's my workout! 😅"),
+        HeldItem.CAMERA to listOf("Taking photos 📸", "Say cheese! 🧀", "That one's going in the album!"),
+        HeldItem.LETTER to listOf("Rereading old letters 💌", "Hehe, I love this one.", "My friends are the best. 💛"),
+        HeldItem.BALLOON to listOf("Look, a balloon! 🎈", "Don't float away… 🙈", "Got it! 😄"),
+        HeldItem.UMBRELLA to listOf("Practising my umbrella twirl ☂️", "*twirl*", "Ta-da! 🌂"),
+    )
 
     /** What to do, for the moment: music means dancing, the TV in the evening a movie, afternoons tea... */
     private fun pickActivity(f: Friend): String {
@@ -332,12 +373,9 @@ class FriendLife(
         val ids = listOfNotNull(f.id, second?.id)
         val base = when (act) {
             "sleepover" -> 9 * 60
-            "nap" -> 5
-            "movie" -> 8
-            "dance", "tea", "party", "story", "birthday", "blockparty", "talentshow" -> 3
-            "trickortreat" -> 2
-            "tag", "catch" -> 1
-            else -> 2
+            "movie" -> 10
+            "nap" -> 6
+            else -> 5 + rnd.nextInt(4)
         }
         // Closer friends stay longer.
         val len = ((minutes?.coerceIn(1, 600) ?: base) * 60_000L * (if (minutes == null) 1f + f.closeness / 100f else 1f)).toLong()
@@ -391,6 +429,8 @@ class FriendLife(
                     "talentshow" -> talentShow(f, second)
                     else -> squabble(f)
                 }
+                // After the game or whatever it was, they stay and hang out until it's time to go.
+                linger(f, second, v)
                 // Good friends hug goodbye.
                 if (f.closeness >= 30 && act != "squabble") hug(2_000)
                 GadgetState.setFriendSay(if (act == "sleepover") "Thanks for having me! ☀️" else "Bye! 👋", f.id)
@@ -456,6 +496,25 @@ class FriendLife(
 
     private suspend fun untilEnd(v: FriendVisit, leaveMs: Long = 4_500) =
         delay((v.untilMs - System.currentTimeMillis() - leaveMs).coerceAtLeast(0))
+
+    private val HANG_LINES = listOf(
+        false to "This is nice. ☺️", true to "Mm-hm. 😊", false to "What should we do next?", true to "Just hanging out is good.",
+        false to "Your room's so cozy!", true to "Thanks! 🏠", false to "*hums a little tune* ♪", true to "*bobs along* ♪",
+        false to "I like your window.", true to "You can see the weather from it! 🌤️", false to "Hehe. 😄", true to "Hehe! 😆",
+    )
+
+    /** Quiet time together after the activity: the odd line or wiggle every so often, until the visit's up. */
+    private suspend fun linger(f: Friend, second: Friend?, v: FriendVisit) {
+        while (System.currentTimeMillis() < v.untilMs - 6_000) {
+            delay((18 + rnd.nextInt(20)) * 1_000L)
+            if (System.currentTimeMillis() >= v.untilMs - 6_000) break
+            val (mine, line) = HANG_LINES.random()
+            if (mine) GadgetState.say(line, 5) else GadgetState.setFriendSay(line, (if (second != null && rnd.nextBoolean()) second else f).id)
+            if (rnd.nextInt(3) == 0) GadgetState.react(listOf(Reaction.HOP, Reaction.NOD, Reaction.WINK).random())
+            delay(5_000)
+            GadgetState.clearFriendSay()
+        }
+    }
 
     // -- What they do -----------------------------------------------------------------------------
 
