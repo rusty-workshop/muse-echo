@@ -1228,6 +1228,8 @@ class GadgetService : Service() {
     fun quickActionReaction(label: String) {
         val l = label.lowercase()
         when {
+            // (A sleepover invites a friend instead; Pixel does that.)
+            "sleepover" in l -> GadgetState.react(Reaction.HOP)
             "night" in l || "bed" in l || "sleep" in l -> goodnight()
             "movie" in l || "film" in l || "tv" in l -> {
                 // Popcorn for the length of a film (not saved: Pixel's own style comes back after).
