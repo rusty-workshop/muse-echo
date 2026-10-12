@@ -341,9 +341,9 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     actions.setWakeSensitivity(wakeSens)
                 }
                 Body(when (wakeSens) {
-                    com.rusty.museecho.gadget.WakeWord.Sensitivity.LOW -> "Needs a clear, close \"${actions.wakePhrase()}\". Fewest false wake-ups."
-                    com.rusty.museecho.gadget.WakeWord.Sensitivity.MEDIUM -> "Hears you across the room; still needs the whole phrase."
-                    com.rusty.museecho.gadget.WakeWord.Sensitivity.HIGH -> "Hears quiet and distant speech, and the last word alone counts. Most false wake-ups."
+                    com.rusty.museecho.gadget.WakeWord.Sensitivity.LOW -> "Needs a clear, close \"${actions.wakePhrase()}\" it's very sure of. Fewest false wake-ups."
+                    com.rusty.museecho.gadget.WakeWord.Sensitivity.MEDIUM -> "Hears you across the room; needs the whole phrase, clearly. A good default."
+                    com.rusty.museecho.gadget.WakeWord.Sensitivity.HIGH -> "Wakes most easily: quiet and distant speech, and the last word alone. Most false wake-ups."
                 }, Palette.muted)
 
                 SectionTitle("Wake word")

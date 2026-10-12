@@ -230,6 +230,11 @@ class GadgetService : Service() {
             }
         }
         scope.launch { applyVoiceLevel() }
+        // A silent self-check of the wake phrase (synthesized, never played), so the log shows how sure it is.
+        scope.launch {
+            delay(45_000)
+            if (Prefs(this@GadgetService).wakeWordEnabled) testWakePhrase(Prefs(this@GadgetService).wakePhrase)
+        }
         com.rusty.museecho.BootReceiver.scheduleKeepAlive(this)
         wakeWord = WakeWord(
             modelDir = java.io.File(getExternalFilesDir(null), WakeWord.MODEL_DIR_NAME),
@@ -238,6 +243,7 @@ class GadgetService : Service() {
             onStopWord = { scope.launch { onStopWord() } },
             strict = { GadgetState.speaking.value },
             onLoud = ::onLoudNoise,
+            noisy = { GadgetState.tvPlaying.value || GadgetState.nowPlaying.value != null || GadgetState.laptopStatus.value?.playing == true },
         )
         applyWakeWord()
         scope.launch {
@@ -376,9 +382,12 @@ class GadgetService : Service() {
         if (!neural.ready) return@withContext "Pick a neural voice (Voice quality) to run this test"
         val target = phrase.lowercase().split(Regex("[^a-z']+")).filter { it.isNotBlank() }.joinToString(" ")
         val pcm = neural.synthesize16k(target) ?: return@withContext "Couldn't synthesize the phrase"
-        val heard = runCatching { wakeWord.recognise(target, pcm) }.getOrElse { return@withContext "Test failed: ${it.message}" }
-        GadgetState.log("wake phrase test \"$target\": heard \"$heard\"")
-        if (heard.contains(target)) "Recognised \"$target\" ✓" else
+        val (heard, conf) = runCatching { wakeWord.recogniseWithConfidence(target, pcm) }.getOrElse { return@withContext "Test failed: ${it.message}" }
+        val need = Prefs(this@GadgetService).wakeSensitivity.minConf
+        GadgetState.log("wake phrase test \"$target\": heard \"$heard\" (%.0f%% sure, needs %.0f%%)".format(100 * (conf ?: 0.0), 100 * need))
+        if (heard.contains(target) && (conf ?: 0.0) >= need) "Recognised \"$target\" ✓ (%.0f%% sure)".format(100 * (conf ?: 0.0))
+        else if (heard.contains(target)) "Heard it, but only %.0f%% sure (needs %.0f%%): try Balanced or Eager, or say it clearly".format(100 * (conf ?: 0.0), 100 * need)
+        else
             "Heard \"${heard.ifEmpty { "nothing" }}\" instead of \"$target\": a word may not be in the speech model's vocabulary"
     }
 

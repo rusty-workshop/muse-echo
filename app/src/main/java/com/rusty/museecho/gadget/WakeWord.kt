@@ -35,6 +35,8 @@ class WakeWord(
     private val strict: () -> Boolean = { false },
     /** A sudden loud bang (a door slam, a dropped pan): far above the room's usual level. */
     private val onLoud: () -> Unit = {},
+    /** The TV or music is playing: other voices about, so it needs to be surer. */
+    private val noisy: () -> Boolean = { false },
 ) {
     @Volatile
     private var running = false
@@ -58,10 +60,14 @@ class WakeWord(
      * How readily it wakes: the volume gate (RMS floor, and multiple of the
      * room's background) and whether the phrase's last word alone counts.
      */
-    enum class Sensitivity(val label: String, val gateRms: Double, val overFloor: Double, val lastWordAlone: Boolean) {
-        LOW("Low", 180.0, 2.5, false),
-        MEDIUM("Medium", 120.0, 2.0, false),
-        HIGH("High", 90.0, 1.8, true),
+    /**
+     * [minConf]: how sure Vosk must be of every word of the phrase (its per-word confidence) on
+     * a finished utterance. LOW is the strictest; HIGH wakes most easily.
+     */
+    enum class Sensitivity(val label: String, val gateRms: Double, val overFloor: Double, val lastWordAlone: Boolean, val minConf: Double) {
+        LOW("Strict", 180.0, 2.5, false, 0.92),
+        MEDIUM("Balanced", 120.0, 2.0, false, 0.85),
+        HIGH("Eager", 90.0, 1.8, true, 0.76),
     }
 
     @Volatile
@@ -84,9 +90,14 @@ class WakeWord(
             try {
                 LibVosk.setLogLevel(LogLevel.WARNINGS)
                 val m = model ?: Model(modelDir.absolutePath).also { model = it }
-                val entries = listOfNotNull(target, shortTarget, STOP_WORD, "[unk]").distinct()
+                // Everyday words sit alongside the phrase so ordinary speech has somewhere else to
+                // land, instead of being squeezed into the closest thing to the phrase.
+                val entries = (listOfNotNull(target, shortTarget, STOP_WORD) + DISTRACTORS.filter { it !in words } + "[unk]").distinct()
                 val grammar = JsonArray(entries.map { JsonPrimitive(it) }).toString()
-                Recognizer(m, RATE.toFloat(), grammar).use { rec -> listen(rec, target, shortTarget) }
+                Recognizer(m, RATE.toFloat(), grammar).use { rec ->
+                    rec.setWords(true)
+                    listen(rec, target, shortTarget)
+                }
             } catch (e: Throwable) {
                 log("wake word stopped: ${e.message}")
                 running = false
@@ -154,15 +165,24 @@ class WakeWord(
                     continue
                 }
                 preRoll.clear()
-                val final = rec.acceptWaveForm(chunk, n)
-                val text = textOf(if (final) rec.result else rec.partialResult, if (final) "text" else "partial")
-                // "stop" only as a whole, finished utterance, so it isn't picked out of a longer phrase.
-                if (final && text.trim() == STOP_WORD) {
+                // Only finished utterances count (partial results are guesses that change as you speak),
+                // and only when Vosk is sure of every word of the phrase.
+                if (!rec.acceptWaveForm(chunk, n)) continue
+                val json = rec.result
+                val text = textOf(json, "text").trim()
+                // "stop" only as a whole utterance, so it isn't picked out of a longer phrase.
+                if (text == STOP_WORD) {
                     onStopWord()
                     continue
                 }
-                val heard = text.contains(target) ||
-                    (shortTarget != null && !strict() && text.split(' ').any { it == shortTarget })
+                val need = sensitivity.minConf + if (noisy()) 0.05 else 0.0
+                val full = phraseConfidence(json, target.split(' '))
+                // The last word alone (Eager only): must be the whole utterance, and surer still.
+                val alone = if (shortTarget != null && !strict() && text == shortTarget) phraseConfidence(json, listOf(shortTarget)) else null
+                val heard = (full != null && full >= need) || (alone != null && alone >= minOf(0.97, need + 0.12))
+                if (!heard && (full != null || alone != null)) {
+                    log("wake word: heard \"$text\" but only %.0f%% sure; ignored".format(100 * (full ?: alone ?: 0.0)))
+                }
                 if (heard) {
                     rec.reset()
                     // Pause first, so the note recorder gets the microphone straight away.
@@ -180,16 +200,22 @@ class WakeWord(
      * (mono 16 kHz samples, e.g. the phrase synthesized by the neural voice)
      * and returns what it heard with the same grammar the listener uses.
      */
-    fun recognise(phrase: String, pcm16k: ShortArray): String {
-        if (!modelPresent) return "(speech model missing)"
+    fun recognise(phrase: String, pcm16k: ShortArray): String = recogniseWithConfidence(phrase, pcm16k).first
+
+    /** Like the listener (same grammar, distractors included): what it heard, and how sure it was of the phrase. */
+    fun recogniseWithConfidence(phrase: String, pcm16k: ShortArray): Pair<String, Double?> {
+        if (!modelPresent) return "(speech model missing)" to null
         val words = phrase.lowercase().split(Regex("[^a-z']+")).filter { it.isNotBlank() }
         val m = synchronized(this) { model ?: Model(modelDir.absolutePath).also { model = it } }
-        val grammar = JsonArray(listOf(JsonPrimitive(words.joinToString(" ")), JsonPrimitive("[unk]"))).toString()
+        val entries = (listOf(words.joinToString(" "), STOP_WORD) + DISTRACTORS.filter { it !in words } + "[unk]").distinct()
+        val grammar = JsonArray(entries.map { JsonPrimitive(it) }).toString()
         return Recognizer(m, RATE.toFloat(), grammar).use { rec ->
+            rec.setWords(true)
             val bytes = java.nio.ByteBuffer.allocate(pcm16k.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
             pcm16k.forEach { bytes.putShort(it) }
             rec.acceptWaveForm(bytes.array(), bytes.position())
-            textOf(rec.finalResult, "text")
+            val json = rec.finalResult
+            textOf(json, "text") to phraseConfidence(json, words)
         }
     }
 
@@ -257,6 +283,29 @@ class WakeWord(
         const val HOLD_MS = 2_500L
         const val DEFAULT_FLOOR = 60.0
         const val PRE_ROLL_CHUNKS = 8
+
+        /** Common words for the grammar, so speech that isn't the phrase doesn't get forced into it. */
+        val DISTRACTORS = listOf("hey", "hi", "hello", "okay", "yeah", "yes", "no", "the", "a", "and", "it", "is", "that", "this",
+            "what", "you", "i", "to", "so", "play", "say", "day", "they", "may", "pay", "pick", "pickle", "pistol", "pencil",
+            "people", "pixie", "fixed", "nickel", "tickle", "little", "simple", "sell", "seven", "special", "basil", "mixer", "picture")
+
+        /**
+         * The lowest per-word confidence of [phrase] in a final result (with words on), or null
+         * if the phrase isn't in it.
+         */
+        fun phraseConfidence(json: String, phrase: List<String>): Double? {
+            val arr = (runCatching { Json.parseToJsonElement(json) }.getOrNull() as? JsonObject)?.get("result") as? JsonArray ?: return null
+            val words = arr.mapNotNull { e ->
+                val o = e as? JsonObject ?: return@mapNotNull null
+                val w = (o["word"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+                w to ((o["conf"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull() ?: 0.0)
+            }
+            if (phrase.isEmpty()) return null
+            for (i in 0..words.size - phrase.size) {
+                if (phrase.indices.all { words[i + it].first == phrase[it] }) return phrase.indices.minOf { words[i + it].second }
+            }
+            return null
+        }
 
         private fun textOf(json: String, key: String): String =
             ((runCatching { Json.parseToJsonElement(json) }.getOrNull() as? JsonObject)?.get(key) as? JsonPrimitive)
