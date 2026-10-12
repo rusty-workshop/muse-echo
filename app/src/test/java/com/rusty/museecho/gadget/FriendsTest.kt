@@ -177,4 +177,22 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
             assertTrue(FriendsBrain.petEmoji(FriendsBrain.petFor(p)) != "🐟" || FriendsBrain.petFor(p) == "glitterfish")
         }
     }
+
+    @Test
+    fun penpalsBooksRelativesStickers() {
+        val p = FriendsBrain.parsePenpal("**NAME:** Sora!\nPLACE: a lighthouse in Hokkaido\nBIO: Loves the sea.")!!
+        assertEquals("Sora", p.name)
+        assertEquals("a lighthouse in Hokkaido", p.place)
+        assertNull(FriendsBrain.parsePenpal("NAME: Sora"))
+        val b = FriendsBrain.parseBook("TITLE: \"The Puddle Who Wanted to Be a Lake\"\nREVIEW: Made me cry (happy tears).", "Pip", "2026-10-12")!!
+        assertEquals("The Puddle Who Wanted to Be a Lake", b.title)
+        assertEquals("Pip", b.reader)
+        assertNull(FriendsBrain.parseBook("I can't think of one", "Pip", "2026-10-12"))
+        Personality.entries.forEach { assertTrue(FriendsBrain.relativeOf(it).names.isNotEmpty()) }
+        assertTrue(FriendsBrain.relativeOf(Personality.TINY).scale < FriendsBrain.relativeOf(Personality.SLEEPY).scale)
+        val ids = FriendsBrain.STICKERS.map { it.id }
+        assertEquals(ids.size, ids.toSet().size)
+        assertTrue(FriendsBrain.STICKERS.all { it.who == "puff" || it.who == "you" })
+        assertTrue(Friend("guest", scaleOverride = 0.45f).scale == 0.45f)
+    }
 }

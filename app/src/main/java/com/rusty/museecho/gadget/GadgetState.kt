@@ -63,6 +63,9 @@ data class FriendScene(
     /** Group photo day: everyone lined up, and when the camera flashed. */
     val groupPhoto: Boolean = false,
     val flashAt: Long = 0,
+    /** Weather adventures: splashing in puddles, kites on the wind. */
+    val puddles: Boolean = false,
+    val kites: Boolean = false,
     /** The friends' pets run over to play with Puff's pet. */
     val petsPlay: Boolean = false,
     /** Halloween costumes (witch hats) and snowballs instead of a ball. */
@@ -613,6 +616,14 @@ object GadgetState {
     /** Today's agenda items (for the morning hello). */
     @Volatile
     var agendaToday: () -> List<com.rusty.museecho.integrations.AgendaItem> = { emptyList() }
+
+    /** A friend's relative, over for the day (shown as friend id "guest"). */
+    private val _guest = MutableStateFlow<Friend?>(null)
+    val guest: StateFlow<Friend?> = _guest.asStateFlow()
+
+    fun setGuest(f: Friend?) {
+        _guest.value = f
+    }
 
     /** Puff's away visiting a friend (its id) until [Trip.untilMs]. */
     data class Trip(val friendId: String, val untilMs: Long)

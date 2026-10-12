@@ -101,7 +101,7 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         }
         if (has(Decor.FAIRY_LIGHTS)) drawFairyLights(blob.y - 130 * u, cx + 130 * u, u, now, dim)
         if (has(Decor.RUG)) drawOval(Palette.violet.copy(alpha = 0.16f * dim), Offset(cx - 88 * u, floor - 6 * u), Size(176 * u, 26 * u))
-        if (has(Decor.BOOKSHELF)) drawShelf(Offset(cx - 160 * u, floor), u, dim, trophy = has(Decor.TROPHY), globe = has(Decor.SNOW_GLOBE) && month in listOf(11, 0, 1))
+        if (has(Decor.BOOKSHELF)) drawShelf(Offset(cx - 160 * u, floor), u, dim, trophy = has(Decor.TROPHY), globe = has(Decor.SNOW_GLOBE) && month in listOf(11, 0, 1), read = postcards.books.size)
         val sx = { d: Decor -> (moved[d] ?: 0f) * u }
         if (has(Decor.PLANT)) drawPlant(Offset(cx - 118 * u + sx(Decor.PLANT), floor), u, dim, flowers = month in 2..4)
         if (has(Decor.RARE_PLANT)) drawRarePlant(Offset(cx - 142 * u + sx(Decor.RARE_PLANT), floor), u, dim, t)
@@ -281,7 +281,7 @@ private fun DrawScope.drawFairyLights(y: Float, toX: Float, u: Float, now: Long,
     }
 }
 
-private fun DrawScope.drawShelf(at: Offset, u: Float, dim: Float, trophy: Boolean, globe: Boolean) {
+private fun DrawScope.drawShelf(at: Offset, u: Float, dim: Float, trophy: Boolean, globe: Boolean, read: Int = 0) {
     val w = 34 * u
     val h = 86 * u
     val wood = Color(0xFF7A5536).copy(alpha = 0.4f * dim)
@@ -294,6 +294,9 @@ private fun DrawScope.drawShelf(at: Offset, u: Float, dim: Float, trophy: Boolea
         drawRect(Color(0xFFFFC266).copy(alpha = 0.55f * dim), Offset(t.x - 4 * u, t.y - 4 * u), Size(8 * u, 4 * u))
         drawArc(Color(0xFFFFC266).copy(alpha = 0.55f * dim), 0f, 180f, true, Offset(t.x - 7 * u, t.y - 18 * u), Size(14 * u, 14 * u))
     } else for (i in 0 until 3) drawRect(books[(i + 2) % 4].copy(alpha = 0.3f * dim), Offset(at.x + 6 * u + i * 8 * u, at.y - h / 3 - 19 * u), Size(6 * u, 17 * u))
+    // Books Puff and its friends have read fill the top shelf (up to four show).
+    for (i in 0 until read.coerceAtMost(4)) drawRect(books[(i + 1) % 4].copy(alpha = 0.4f * dim),
+        Offset(at.x + 4 * u + i * 7 * u, at.y - h * 2 / 3 - 22 * u), Size(5.5f * u, 20 * u))
     if (globe) {
         val g = Offset(at.x + w / 2, at.y - h - 9 * u)
         drawCircle(Color(0xFFBFE6F5).copy(alpha = 0.35f * dim), 8 * u, g)
@@ -472,6 +475,26 @@ internal fun PetTapTarget(blob: Offset, half: Float) {
         })
 }
 
+
+/** Tap the bookshelf for the books read so far, with the reader's one-line reviews. */
+@Composable
+internal fun BookshelfTapTarget(blob: Offset, half: Float) {
+    val data by GadgetState.friends.collectAsState()
+    val items by GadgetState.room.collectAsState()
+    if (blob == Offset.Unspecified || half <= 0f || Decor.BOOKSHELF.name !in items) return
+    // A treasure hunt uses the shelf as a hiding spot.
+    if (data.treasure?.let { !it.found && it.date == java.time.LocalDate.now().toString() } == true) return
+    val u = half / 110f
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((blob.x - 162 * u).toInt(), (blob.y + 92 * u - 88 * u).toInt()) }
+        .size(with(density) { (38 * u).toDp() }, with(density) { (88 * u).toDp() })
+        .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
+            val books = data.books
+            GadgetState.show(com.rusty.museecho.gadget.Screen.Reader("📚 Puff's bookshelf",
+                if (books.isEmpty()) "No books yet: they appear after book club, or when Puff curls up with one."
+                else books.reversed().joinToString("\n\n") { "**${it.title}**  \n_${it.reader}, ${it.date}_: ${it.review}" }))
+        })
+}
 
 /** During a treasure hunt: tap targets over the things in Puff's room it could be hidden behind. */
 @Composable

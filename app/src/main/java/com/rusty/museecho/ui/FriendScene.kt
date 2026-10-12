@@ -48,6 +48,7 @@ import com.rusty.museecho.gadget.Mood
 import com.rusty.museecho.gadget.Personality
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.sin
 
 /**
@@ -62,6 +63,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     val scene by GadgetState.friendScene.collectAsState()
     val data by GadgetState.friends.collectAsState()
     val laptop by GadgetState.laptopStatus.collectAsState()
+    val guest by GadgetState.guest.collectAsState()
     val v = visit
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     // Smooth (20 fps) only while something's actually moving; otherwise a few times a second is plenty.
@@ -81,7 +83,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     val u = half / 110f
     val dp = with(density) { 1.dp.toPx() }
     val t = (now - (v?.startMs ?: now)) / 1000f
-    val friends = v?.friendIds.orEmpty().mapNotNull { id -> data.friends.firstOrNull { it.id == id } }
+    val friends = v?.friendIds.orEmpty().mapNotNull { id -> data.friends.firstOrNull { it.id == id } ?: guest?.takeIf { it.id == id } }
         .ifEmpty { listOf(Friend(id = "", color = v?.color ?: 0xFFFF9EC7)) }
     val act = v?.activity.orEmpty()
     val vibe = laptop?.takeIf { it.playing }?.musicVibe.orEmpty()
@@ -91,7 +93,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         // Beyond the first two (group photo day), the rest stand further out, a bit smaller.
         val far = i >= 2
         // A back row: smaller, standing behind and above, peeking over the front row's shoulders.
-        val size = 80 * dp * f.p.scale * (if (far) 0.62f else 1f)
+        val size = 80 * dp * f.scale * (if (far) 0.62f else 1f)
         val side = if (i % 2 == 0) 1f else -1f
         val shyGap = if (f.p == Personality.SHY && f.closeness < 40) 16 * dp else 0f
         val home = if (far) Offset(blob.x + side * (58 + (i / 4) * 34) * dp, blob.y - 72 * dp)
@@ -129,6 +131,28 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             drawCup(f0 + Offset(-18 * dp, s0 * 0.42f), dp)
         }
         if (scene.book) drawBook(Offset(mid.x, blob.y + 52 * dp), dp)
+        // Puddle jumping: a puddle under everyone, splashes on each hop, wellies on.
+        if (scene.puddles) {
+            drawOval(Color(0xFF5B8DB8).copy(alpha = 0.55f), Offset(blob.x - 170 * dp, blob.y + 78 * dp), Size(340 * dp, 26 * dp))
+            (listOf(blob to half * 0.9f) + spots).forEachIndexed { i, (p, s) ->
+                val hop = abs(sin(t * 2.4f + i))
+                if (hop < 0.25f) for (k in -2..2) drawCircle(Color(0xFFA9D2F0).copy(alpha = 0.8f),
+                    2.5f * dp, Offset(p.x + k * 9 * dp, blob.y + 80 * dp - (1 - hop * 4) * 14 * dp * (1 - abs(k) * 0.25f)))
+                for (side in listOf(-1f, 1f)) drawRoundRect(Color(0xFFE6C229), Offset(p.x + side * s * 0.18f - 7 * dp, blob.y + 62 * dp), Size(14 * dp, 16 * dp), CornerRadius(4 * dp))
+            }
+        }
+        // Kites on the wind, one per friend, strings down to their paws.
+        if (scene.kites) spots.forEachIndexed { i, (p, s) ->
+            val k = Offset(p.x + (if (i % 2 == 0) 40f else -40f) * dp + sin(t * 1.7f + i) * 18 * dp, blob.y - 150 * dp + cos(t * 1.3f + i) * 12 * dp)
+            val col = Color(friends[i].color)
+            val kite = Path().apply {
+                moveTo(k.x, k.y - 18 * dp); lineTo(k.x + 13 * dp, k.y); lineTo(k.x, k.y + 22 * dp); lineTo(k.x - 13 * dp, k.y); close()
+            }
+            drawLine(Color.White.copy(alpha = 0.5f), k + Offset(0f, 22 * dp), p + Offset(0f, -s * 0.1f), 1.2f * dp)
+            drawPath(kite, col)
+            drawLine(Color.White.copy(alpha = 0.6f), k + Offset(0f, -18 * dp), k + Offset(0f, 22 * dp), 1f * dp)
+            for (b in 1..3) drawCircle(col, 2.5f * dp, k + Offset(sin(t * 3f + b) * 5 * dp, (22 + b * 8) * dp))
+        }
         // Market day: a little stall with a striped awning behind each friend.
         if (scene.market) spots.forEach { (p, s) -> drawStall(p + Offset(0f, s * 0.15f), s) }
         if (scene.pillow) drawPillow(f0 + Offset(0f, s0 * 0.26f), s0)
@@ -238,7 +262,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.8f * a)))
     }
     // The snack in the middle of tea time, as an emoji.
-    if (scene.teacups && scene.snack.isNotEmpty()) {
+    if (scene.snack.isNotEmpty()) {
         val (f0, _) = spots.first()
         Text(scene.snack, fontSize = 20.sp, modifier = Modifier.offset { IntOffset(((blob.x + f0.x) / 2 - 10 * dp).toInt(), (blob.y + 60 * dp).toInt()) })
     }

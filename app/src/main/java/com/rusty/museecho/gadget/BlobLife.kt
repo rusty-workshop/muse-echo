@@ -333,7 +333,12 @@ class BlobLife(
         while (true) {
             delay(60_000)
             val st = GadgetState.laptopStatus.value ?: continue
-            if (st.playing && st.musicVibe.isNotEmpty()) DayLog.musicMinute()
+            if (st.playing && st.musicVibe.isNotEmpty()) {
+                DayLog.musicMinute()
+                // Humming along now and then.
+                if (kotlin.random.Random.nextInt(25) == 0 && idle() && !GadgetState.asleep.value)
+                    GadgetState.say(if (st.musicVibe == "calm") "♪ hmm hmm hmmm ♪" else "♪ la la la ♪", 6)
+            }
             // A new album starting: the blob spins a little record.
             if (st.playing && st.album.isNotBlank() && st.album != lastAlbum) {
                 if (lastAlbum.isNotEmpty()) GadgetState.vinylAt = System.currentTimeMillis()

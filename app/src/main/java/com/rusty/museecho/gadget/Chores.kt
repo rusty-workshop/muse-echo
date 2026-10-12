@@ -227,6 +227,12 @@ class Chores(
                         android.os.Process.killProcess(android.os.Process.myPid())
                     }
                     "ask" -> (item["what"] as? JsonPrimitive)?.contentOrNull?.let { askNow(it) }
+                    // A year (2026) or month (2026-10) in review, as a special Gazette.
+                    "review" -> {
+                        val period = (item["period"] as? JsonPrimitive)?.contentOrNull?.takeIf { Regex("""\d{4}(-\d{2})?""").matches(it) }
+                            ?: java.time.YearMonth.now().toString()
+                        GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.reviewNow(period) } }
+                    }
                     "announce" -> {
                         val text = (item["text"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
                         GadgetState.log("announcement from the watch")
@@ -565,7 +571,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette")).forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette", "penpal", "book", "stickers", "review")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -611,6 +617,10 @@ class Chores(
                 "TREASURE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.treasureNow() } }
                 "TRIP" -> GadgetService.instance?.life?.friends?.let { fl -> fl.store.data.friends.filter { it.name.isNotBlank() }.randomOrNull()?.let { fl.trip(it, 1) } }
                 "GAZETTE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.gazetteNow() } }
+                "PENPAL" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.penpalLetterNow() } }
+                "BOOK" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.addBook(GadgetState.BlobCalled()) } }
+                "STICKERS" -> GadgetService.instance?.life?.friends?.checkStickers()
+                "REVIEW" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.reviewNow(java.time.YearMonth.now().toString()) } }
                 "REPLY" -> GadgetService.instance?.life?.friends?.let { fl ->
                     fl.store.data.letters.lastOrNull { !it.fromBlob }?.let { l -> scope.launch { fl.replyTo(l) } }
                 }

@@ -641,6 +641,7 @@ internal fun Blob(
                     else -> forced("weather")!!.lowercase()
                 }
                 drawWeather(weatherNow, body, r, t)
+                if (playingMusic) drawNotes(body + Offset(-r * 0.55f, -r * 0.35f), r, t, vibe)
                 drawHoliday(forced("holiday")?.let(::holidayCalendar) ?: cal, body, r, t, weatherNow)
             }
             if ((alertGlow || forcedState == "ALERT_GLOW") && !mini) {
@@ -1160,6 +1161,21 @@ private fun DrawScope.drawZs(from: Offset, r: Float, t: Float) {
             lineTo(pos.x + size, pos.y + size)
         }
         drawPath(path, ink, style = Stroke(width = r * 0.022f, cap = StrokeCap.Round))
+    }
+}
+
+/** Humming along: little music notes floating up beside it (faster for loud songs). */
+private fun DrawScope.drawNotes(from: Offset, r: Float, t: Float, vibe: String) {
+    val speed = if (vibe == "hype") 2.6f else if (vibe == "calm") 5.5f else 3.8f
+    for (i in 0 until 3) {
+        val phase = ((t / speed) + i / 3f) % 1f
+        val pos = from + Offset(-phase * r * 0.2f + sin(phase * TAU * 1.5f) * r * 0.06f, -phase * r * 0.6f)
+        val alpha = (if (phase < 0.15f) phase / 0.15f else 1f - (phase - 0.15f) / 0.85f) * 0.85f
+        val ink = (if (i % 2 == 0) Palette.violet else Palette.teal).copy(alpha = alpha)
+        val s = r * 0.045f
+        drawOval(ink, Offset(pos.x - s * 1.2f, pos.y - s * 0.8f), Size(s * 2.4f, s * 1.6f))
+        drawLine(ink, Offset(pos.x + s * 1.05f, pos.y), Offset(pos.x + s * 1.05f, pos.y - s * 4f), r * 0.018f)
+        drawLine(ink, Offset(pos.x + s * 1.05f, pos.y - s * 4f), Offset(pos.x + s * 2.2f, pos.y - s * 3f), r * 0.018f)
     }
 }
 

@@ -101,6 +101,8 @@ data class WeatherNow(
     val tempF: Int, val highF: Int, val lowF: Int, val summary: String, val atMs: Long,
     /** Tomorrow's forecast ("" if it wasn't in the response). */
     val tomorrowSummary: String = "", val tomorrowHighF: Int? = null,
+    /** Wind right now, mph (0 if unknown). */
+    val windMph: Int = 0,
 )
 
 /** One hour of the forecast. [hour] is 0..23 local; [startMs] when it begins. */
@@ -114,8 +116,8 @@ data class Forecast(val hours: List<HourPoint>, val days: List<DayPoint>, val at
 class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()) {
     suspend fun fetch(lat: Double, lon: Double): WeatherNow? = withContext(Dispatchers.IO) {
         val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-            "&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code" +
-            "&temperature_unit=fahrenheit&timezone=auto&forecast_days=2"
+            "&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code" +
+            "&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=2"
         runCatching {
             http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
@@ -132,6 +134,7 @@ class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeou
                     atMs = System.currentTimeMillis(),
                     tomorrowSummary = second("weather_code")?.let { describe(it.toInt()) }.orEmpty(),
                     tomorrowHighF = second("temperature_2m_max")?.let { Math.round(it).toInt() },
+                    windMph = ((current["wind_speed_10m"] as? JsonPrimitive)?.doubleOrNull ?: 0.0).let { Math.round(it).toInt() },
                 )
             }
         }.getOrNull()

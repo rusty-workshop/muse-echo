@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
@@ -84,6 +85,7 @@ internal fun BlobPage(actions: UiActions) {
             FriendLayer(center, half, actions)
             PetTapTarget(center, half)
             TreasureTapLayer(center, half)
+            BookshelfTapTarget(center, half)
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(top = 64.dp, end = 40.dp, bottom = 84.dp)) {
             val blobName by GadgetState.blobName.collectAsState()
@@ -106,6 +108,8 @@ internal fun BlobPage(actions: UiActions) {
                 Tab("👗", tab == "wardrobe") { tab = "wardrobe" }
                 Spacer(Modifier.width(6.dp))
                 Tab("🗞️", tab == "gazette") { tab = "gazette" }
+                Spacer(Modifier.width(6.dp))
+                Tab("🏅", tab == "stickers") { tab = "stickers" }
                 Spacer(Modifier.width(10.dp))
                 // Not a tab: Puff answers in its bubble.
                 Text("💬 How are you?", color = Palette.night, fontSize = 14.sp,
@@ -120,7 +124,8 @@ internal fun BlobPage(actions: UiActions) {
                 tab == "comics" -> ComicsContent(actions, Modifier.fillMaxSize())
                 tab == "play" -> PlayContent(Modifier.fillMaxSize())
                 tab == "wardrobe" -> WardrobeContent(Modifier.fillMaxSize())
-                tab == "gazette" -> GazetteContent(Modifier.fillMaxSize())
+                tab == "gazette" -> GazetteContent(actions, Modifier.fillMaxSize())
+                tab == "stickers" -> StickerBook(Modifier.fillMaxSize())
                 else -> AlbumContent(actions, Modifier.fillMaxSize())
             }
         }
@@ -276,7 +281,9 @@ private fun MailContent(modifier: Modifier) {
     androidx.compose.foundation.lazy.LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         items(letters.size) { i ->
             val l = letters[i]
-            val f = data.friends.firstOrNull { it.id == l.friendId }
+            val f = data.friends.firstOrNull { it.id == l.friendId } ?: data.penpal?.takeIf { l.friendId == com.rusty.museecho.gadget.FriendsBrain.PENPAL_ID }?.let {
+                com.rusty.museecho.gadget.Friend(l.friendId, "${it.name} 🌍", color = it.color)
+            }
             Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = if (l.read) 0.5f else 0.9f), RoundedCornerShape(12.dp))
                 .clickable {
                     GadgetService.instance?.life?.friends?.markLetterRead(l.atMs)
@@ -605,7 +612,8 @@ private fun TricksContent() {
 
 /** The Sunday paper, newest first; flip back through older editions. */
 @Composable
-private fun GazetteContent(modifier: Modifier) {
+private fun GazetteContent(actions: UiActions, modifier: Modifier) {
+    val album by GadgetState.friendAlbum.collectAsState()
     val data by GadgetState.friends.collectAsState()
     var back by remember { mutableStateOf(0) }
     val g = data.gazettes.getOrNull(data.gazettes.size - 1 - back)
@@ -632,6 +640,40 @@ private fun GazetteContent(modifier: Modifier) {
             Text(a.text, color = ink.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 18.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
                 modifier = Modifier.padding(bottom = 6.dp))
         }
+        // A review edition: the best photos of the stretch.
+        val shots = g.photos.mapNotNull { p -> album.firstOrNull { it.file == p } }
+        if (shots.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            shots.forEach { Box(Modifier.weight(1f)) { AlbumThumb(it, actions) } }
+            repeat(4 - shots.size) { Spacer(Modifier.weight(1f)) }
+        }
         if (g.weather.isNotEmpty()) Text("☁️ Weather: ${g.weather}", color = ink.copy(alpha = 0.7f), fontSize = 12.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+    }
+}
+
+/** Milestone stickers, Puff's and Rusty's: earned ones in colour with the day, the rest still to find. */
+@Composable
+private fun StickerBook(modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    val all = com.rusty.museecho.gadget.FriendsBrain.STICKERS
+    Column(modifier.verticalScroll(rememberScrollState())) {
+        Text("🏅 ${data.stickers.size} of ${all.size} stickers", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+        listOf("puff" to "Puff's stickers", "you" to "Rusty's stickers").forEach { (who, title) ->
+            Text(title, color = Palette.amber, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 4.dp))
+            all.filter { it.who == who }.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { s ->
+                        val got = data.stickers[s.id]
+                        Column(Modifier.weight(1f).background(Palette.card.copy(alpha = if (got != null) 0.9f else 0.35f), RoundedCornerShape(12.dp)).padding(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(if (got != null) s.emoji else "🔒", fontSize = 24.sp, modifier = Modifier.alpha(if (got != null) 1f else 0.5f))
+                            Text(s.title, color = if (got != null) Palette.ink else Palette.muted, fontSize = 11.sp, maxLines = 2,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 13.sp)
+                            if (got != null) Text(got, color = Palette.muted, fontSize = 9.sp)
+                        }
+                    }
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
     }
 }

@@ -40,8 +40,11 @@ data class Friend(
     /** Its own pet (comes along on visits): kind, and a name from Pixel. */
     val petKind: String = "",
     val petName: String = "",
+    /** A visiting relative's own size (0 = the personality's). */
+    val scaleOverride: Float = 0f,
 ) {
     val p get() = Personality.entries.firstOrNull { it.name == personality } ?: Personality.BOUNCY
+    val scale get() = if (scaleOverride > 0f) scaleOverride else p.scale
     val shownName get() = name.ifBlank { "New friend" }
     fun favourite(): String? = played.filterKeys { it in FriendsBrain.GAMES }.maxByOrNull { it.value }?.key
 }
@@ -89,6 +92,14 @@ data class Pet(val kind: String, val name: String = "", val bornMs: Long = 0, va
 @Serializable
 data class Treasure(val item: String, val riddle: String, val friendId: String, val date: String, val found: Boolean = false, val wrong: Int = 0)
 
+/** Puff's pen pal: a blob far away (Pixel made it up), who writes now and then. */
+@Serializable
+data class PenPal(val name: String, val place: String, val bio: String, val color: Long = 0xFF7FC8D8)
+
+/** A book on Puff's shelf: what it was, a one-line review, who read it, when. */
+@Serializable
+data class Book(val title: String, val review: String, val reader: String, val date: String)
+
 /** What Puff dreamed overnight, written up in the morning. */
 @Serializable
 data class Dream(val date: String, val text: String)
@@ -97,9 +108,11 @@ data class Dream(val date: String, val text: String)
 @Serializable
 data class Article(val title: String, val text: String)
 
-/** "The Blob Gazette": the week in the neighbourhood, every Sunday. */
+/** "The Blob Gazette": the week in the neighbourhood, every Sunday (or a special year-in-review edition). */
 @Serializable
-data class Gazette(val date: String, val headline: String, val articles: List<Article>, val weather: String = "")
+data class Gazette(val date: String, val headline: String, val articles: List<Article>, val weather: String = "",
+    /** Friends-album pictures (file names) to show with a review edition. */
+    val photos: List<String> = emptyList())
 
 /** The evening comic strip about the blob's day (three panels, written by Pixel). */
 @Serializable
@@ -135,6 +148,10 @@ data class FriendsData(
     val tricks: Map<String, Int> = emptyMap(),
     val practice: Map<String, Int> = emptyMap(),
     val treasure: Treasure? = null,
+    val penpal: PenPal? = null,
+    val books: List<Book> = emptyList(),
+    /** Stickers earned: id to the date. */
+    val stickers: Map<String, String> = emptyMap(),
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -171,7 +188,7 @@ object FriendsBrain {
     /** Everything a visit can be. */
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
-        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub", "groupphoto", "cheerrusty")
+        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub", "groupphoto", "cheerrusty", "cousin", "puddles", "kites", "lollies")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -414,6 +431,82 @@ object FriendsBrain {
             "2 or 3 short, warm sentences, first person, based on these real things:\n" + facts.joinToString("\n") { "- $it" } +
             "\nReply with only the answer: no commands, and don't change anything on any device."
 
+    const val PENPAL_ID = "penpal"
+
+    fun penpalPrompt(blobName: String): String =
+        "Invent a pen pal for $blobName (the little blob on my Echo Show): another little blob who lives somewhere far away and very " +
+            "different (a real place, e.g. a snowy village in Iceland, a rainforest in Brazil, a lighthouse in Japan). " +
+            "Reply in exactly this format and nothing else (no commands, don't change any device):\nNAME: one word\nPLACE: where it lives\nBIO: two sentences about it"
+
+    fun parsePenpal(reply: String): PenPal? {
+        fun f(k: String) = Regex("""(?im)^\W*$k\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"')?.trim()
+        val name = f("name")?.split(Regex("\\s+"))?.firstOrNull()?.trim('.', ',', '!')?.takeIf { it.length in 2..16 } ?: return null
+        val place = f("place")?.takeIf { it.isNotBlank() } ?: return null
+        return PenPal(name.replaceFirstChar { it.uppercase() }, place.take(60), f("bio").orEmpty().take(300))
+    }
+
+    fun penpalLetterPrompt(p: PenPal, blobName: String, lastReply: String?): String =
+        "Write a short letter (3 to 5 sentences, cute) from ${p.name}, a little blob who lives in ${p.place} (${p.bio}), to its pen pal " +
+            "$blobName, the blob on my Echo Show. Describe a little moment from its life there (the season, the food, the weather, what it did). " +
+            (lastReply?.let { "$blobName's last letter said: \"$it\" so answer it. " } ?: "") +
+            "Start with \"Dear $blobName,\" and sign it from ${p.name}. Reply with only the letter: no commands, and don't change anything on any device."
+
+    fun bookPrompt(reader: String, others: List<String>): String =
+        "$reader (a little blob) just read a tiny book. Invent a cute book title a blob would read (" +
+            (if (others.isNotEmpty()) "not one of: ${others.joinToString()}; " else "") +
+            "e.g. \"The Puddle Who Wanted to Be a Lake\") and a one-line review in $reader's voice. Reply in exactly this format " +
+            "and nothing else (no commands, don't change any device):\nTITLE: the title\nREVIEW: one line"
+
+    fun parseBook(reply: String, reader: String, date: String): Book? {
+        fun f(k: String) = Regex("""(?im)^\W*$k\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"')?.trim()
+        val title = f("title")?.takeIf { it.isNotBlank() } ?: return null
+        return Book(title.take(70), f("review").orEmpty().take(160), reader, date)
+    }
+
+    /** A friend's relative, here for a day: who, what they're called, how they look. */
+    data class Relative(val relation: String, val names: List<String>, val scale: Float)
+
+    fun relativeOf(p: Personality): Relative = when (p) {
+        Personality.BOUNCY -> Relative("little sister", listOf("Pipsqueak", "Boing", "Zip"), 0.7f)
+        Personality.SHY -> Relative("cousin", listOf("Fern", "Lichen", "Clover"), 0.85f)
+        Personality.SLEEPY -> Relative("grandma", listOf("Nana Snooze", "Granny Dozy", "Gran"), 1.3f)
+        Personality.SPARKLY -> Relative("aunt", listOf("Auntie Dazzle", "Auntie Sequin", "Auntie Gleam"), 1.05f)
+        Personality.TINY -> Relative("even tinier cousin", listOf("Mote", "Speck", "Crumb"), 0.45f)
+    }
+
+    /** The sticker book: id, emoji, title, and who earns it ("puff" or "you"). */
+    data class Sticker(val id: String, val emoji: String, val title: String, val who: String)
+
+    val STICKERS = listOf(
+        Sticker("first_friend_visit", "👯", "First friend over", "puff"),
+        Sticker("group_photo", "📸", "First group photo", "puff"),
+        Sticker("all_friends_one_day", "🎉", "Every friend over in one day", "puff"),
+        Sticker("first_letter", "💌", "First letter", "puff"),
+        Sticker("first_reply", "📮", "Wrote back", "puff"),
+        Sticker("penpal", "🌍", "A pen pal far away", "puff"),
+        Sticker("story_done", "📖", "Finished an adventure", "puff"),
+        Sticker("three_stories", "📚", "Three adventures", "puff"),
+        Sticker("snowball", "❄️", "First snowball fight", "puff"),
+        Sticker("talent_vote", "🎭", "Judged a talent show", "you"),
+        Sticker("treasure_1", "🗺️", "Found a treasure", "you"),
+        Sticker("treasure_10", "💎", "Found 10 treasures", "you"),
+        Sticker("trick_master", "🤸", "Taught a trick perfectly", "you"),
+        Sticker("practice_5", "🏋️", "Practised tricks 5 days", "you"),
+        Sticker("games_10", "🎮", "Beat Puff 10 times", "you"),
+        Sticker("gifts_5", "🎁", "Sent Puff 5 gifts", "you"),
+        Sticker("pet_month", "🐌", "Pet's one month birthday", "puff"),
+        Sticker("garden_bloom", "🌸", "Garden in bloom", "puff"),
+        Sticker("books_5", "📕", "Five books read", "puff"),
+        Sticker("diary_7", "📔", "A week of diary", "puff"),
+    )
+
+    fun reviewPrompt(blobName: String, period: String, facts: List<String>): String =
+        "Write a cute \"$period in review\" for $blobName (the blob on my Echo Show) and its friends, like a special edition of their tiny " +
+            "newspaper, from these real moments:\n" + facts.joinToString("\n") { "- $it" } +
+            "\nReply in exactly this format and nothing else (no commands, don't change any device):\nHEADLINE: the headline\n" +
+            "ARTICLE: a short title | two or three sentences\n(three or four ARTICLE lines: the best bits, the funniest, the friends, what's next)\n" +
+            "WEATHER: a one-line wish for what comes next"
+
     fun activityLabel(a: String) = when (a) {
         "tictactoe" -> "tic-tac-toe"
         "rps" -> "rock-paper-scissors"
@@ -441,6 +534,10 @@ object FriendsBrain {
         "gardenclub" -> "garden club"
         "groupphoto" -> "group photo day"
         "cheerrusty" -> "cheering Rusty up"
+        "cousin" -> "a visit from a relative"
+        "puddles" -> "puddle jumping"
+        "kites" -> "kite flying"
+        "lollies" -> "an ice-lolly party"
         "nap" -> "a nap"
         else -> a
     }

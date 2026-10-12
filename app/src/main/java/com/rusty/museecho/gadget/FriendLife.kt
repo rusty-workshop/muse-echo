@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color
 
 /**
  * The blob's friends: who they are (named by Pixel), when they visit and what they get up to,
@@ -39,6 +40,8 @@ class FriendLife(
         scope.launch { morningLoop() }
         scope.launch { treasureLoop() }
         scope.launch { tripLoop() }
+        scope.launch { penpalLoop() }
+        scope.launch { stickerLoop() }
         // Every friend has a pet of its own.
         if (store.data.friends.any { it.petKind.isBlank() }) store.update { d ->
             d.copy(friends = d.friends.map { if (it.petKind.isBlank()) it.copy(petKind = FriendsBrain.petFor(it.p)) else it })
@@ -165,6 +168,10 @@ class FriendLife(
                 nextAt = System.currentTimeMillis() + (4 + rnd.nextInt(9)) * 60_000L
                 continue
             }
+            // A loud song on the laptop: a friend may drop in to dance even between visits.
+            val st = GadgetState.laptopStatus.value
+            if (st?.playing == true && st.musicVibe == "hype" && on() && !isQuiet() && life.idle() && rnd.nextFloat() < 0.1f &&
+                System.currentTimeMillis() - prefs.getLong("friend_last", 0L) > 5 * 60_000L) { visit("dance"); continue }
             if (System.currentTimeMillis() < nextAt) continue
             if (isQuiet() || !life.idle() || life.hour() !in 8..21) continue
             if (System.currentTimeMillis() - GadgetState.lastHuman < 20_000) continue
@@ -193,6 +200,10 @@ class FriendLife(
                 prefs.edit().putString("garden_watered", today).apply()
                 DayLog.event("watered the window-box garden", "garden")
                 HeldItem.WATERING_CAN to listOf("Watering my garden 🌱", "Grow, little plants! 🌿", "There. All watered! 💧")
+            }
+            rnd.nextInt(5) == 0 -> {
+                scope.launch { delay(40_000); addBook(GadgetState.BlobCalled()) }
+                HeldItem.NOTE to listOf("Reading a book 📖", "*turns a page*", "What a good story! ✨")
             }
             else -> SOLO.random()
         }
@@ -228,6 +239,10 @@ class FriendLife(
         return when {
             st?.playing == true && st.musicVibe.isNotEmpty() && roll < 0.6f -> "dance"
             GadgetState.tvPlaying.value && h >= 17 && roll < 0.7f -> "movie"
+            GadgetState.weather.value?.summary?.lowercase()?.let { "rain" in it || "drizzle" in it || "shower" in it } == true && h in 9..19 && roll < 0.4f -> "puddles"
+            (GadgetState.weather.value?.windMph ?: 0) >= 15 && h in 9..18 && roll < 0.4f -> "kites"
+            (GadgetState.weather.value?.tempF ?: 0) >= 85 && h in 11..18 && roll < 0.4f -> "lollies"
+            roll > 0.94f && System.currentTimeMillis() - prefs.getLong("cousin_last", 0L) > 5 * 86_400_000L -> "cousin"
             h in 14..16 && roll < 0.35f -> "tea"
             h >= 19 && roll < 0.3f -> "nap"
             roll < 0.07f && f.closeness >= 20 && FriendsBrain.GIFTS.any { !life.has(it) } -> "gift"
@@ -315,6 +330,7 @@ class FriendLife(
                 visit("party")
             }
             today.monthValue == 10 && today.dayOfMonth == 31 && h in 17..21 && once("halloween") -> visit("trickortreat")
+            today.monthValue == 12 && today.dayOfMonth == 31 && h >= 18 && once("year_review") -> scope.launch { reviewNow(today.year.toString()) }
             today.dayOfWeek == java.time.DayOfWeek.SATURDAY && h in 10..15 && once("market") -> visit("market")
             // The first Sunday of the month, mid-afternoon: everyone comes over for the group photo.
             today.dayOfWeek == java.time.DayOfWeek.SUNDAY && today.dayOfMonth <= 7 && h in 14..17 &&
@@ -429,7 +445,14 @@ class FriendLife(
             it.id != f.id && it.name.isNotBlank() && FriendsBrain.clubOf(it).name.lowercase() == act.removeSuffix("club")
         } else null
         val second = clubMate ?: if (group || act in setOf("chat", "tea", "party", "dance", "story", "movie") && rnd.nextFloat() < 0.3f) pickBuddy(f) else null
-        val ids = if (act == "groupphoto") listOf(f.id) + store.data.friends.filter { it.id != f.id && it.name.isNotBlank() }.map { it.id }
+        val guest = if (act == "cousin") FriendsBrain.relativeOf(f.p).let { r ->
+            val c = Color(f.color)
+            Friend(id = "guest", name = r.names[(f.id.hashCode() and 0x7fffffff) % r.names.size], personality = f.personality,
+                color = (0xFF000000 or (androidx.core.graphics.ColorUtils.blendARGB(f.color.toInt(), if (r.scale > 1f) 0xFF808080.toInt() else 0xFFFFFFFF.toInt(), 0.35f).toLong() and 0xFFFFFF)),
+                scaleOverride = r.scale, bio = r.relation)
+        } else null
+        GadgetState.setGuest(guest)
+        val ids = if (guest != null) listOf(f.id, "guest") else if (act == "groupphoto") listOf(f.id) + store.data.friends.filter { it.id != f.id && it.name.isNotBlank() }.map { it.id }
             else listOfNotNull(f.id, second?.id)
         val base = when (act) {
             "sleepover" -> 9 * 60
@@ -496,6 +519,10 @@ class FriendLife(
                     "gardenclub" -> gardenClub(f, second, v)
                     "groupphoto" -> groupPhoto(f, v)
                     "cheerrusty" -> cheerRusty(f, second)
+                    "cousin" -> cousinVisit(f, GadgetState.guest.value)
+                    "puddles" -> puddles(f, second, v)
+                    "kites" -> kites(f, second, v)
+                    "lollies" -> lollies(f, second, v)
                     else -> squabble(f)
                 }
                 // After the game or whatever it was, they stay and hang out until it's time to go.
@@ -510,6 +537,7 @@ class FriendLife(
                 GadgetState.clearFriendSay()
                 GadgetState.scene { FriendScene() }
                 GadgetState.setFriend(null)
+                GadgetState.setGuest(null)
                 record(f, act, detail, second)
             }
         }
@@ -959,7 +987,9 @@ class FriendLife(
     }
 
     suspend fun replyTo(l: Letter): Boolean {
-        val f = store.friend(l.friendId) ?: return false
+        val f = store.friend(l.friendId) ?: store.data.penpal?.takeIf { l.friendId == FriendsBrain.PENPAL_ID }?.let { p ->
+            Friend(FriendsBrain.PENPAL_ID, p.name, "${p.bio} It lives in ${p.place}.")
+        } ?: return false
         val name = GadgetState.blobName.value.ifBlank { "Blob" }
         val text = quietAsk(FriendsBrain.replyPrompt(name, f, l.text)) ?: return false
         store.update { it.copy(letters = (it.letters + Letter(f.id, java.time.LocalDate.now().toString(), text.take(1200),
@@ -1103,6 +1133,7 @@ class FriendLife(
 
     /** Rusty sent a gift from the settings page: Puff unwraps it. [kind] hat / snack / room / pet. */
     fun giftFromRusty(kind: String, value: String, note: String) = scope.launch {
+        prefs.edit().putInt("gifts_sent", prefs.getInt("gifts_sent", 0) + 1).apply()
         GadgetState.lastTouch = System.currentTimeMillis()
         GadgetState.setAsleep(false)
         GadgetState.hold(HeldItem.GIFT, "🎁 From Rusty", 1)
@@ -1229,6 +1260,8 @@ class FriendLife(
     /** One practice of [trick] (the Play tab): skill goes up, and Puff tries it. Returns the new skill. */
     fun practise(trick: String): Int {
         val today = java.time.LocalDate.now().toString()
+        val days = prefs.getString("practice_days", "")!!.split(',').filter { it.isNotBlank() }.toSet()
+        if (today !in days) prefs.edit().putString("practice_days", (days + today).sorted().takeLast(60).joinToString(",")).apply()
         val key = "$today|$trick"
         val goes = store.data.practice[key] ?: 0
         val skill = FriendsBrain.practiced(store.data.tricks[trick] ?: 0, goes)
@@ -1504,6 +1537,191 @@ class FriendLife(
         ).random()
     }
 
+    // -- The pen pal --------------------------------------------------------------------------------
+
+    /** A pen pal far away (Pixel invents it), who writes every few days; Puff writes back like to anyone. */
+    private suspend fun penpalLoop() {
+        delay(8 * 60_000L)
+        while (true) {
+            if (store.data.penpal == null && !isQuiet()) {
+                quietAsk(FriendsBrain.penpalPrompt(GadgetState.blobCalled()))?.let(FriendsBrain::parsePenpal)?.let { p ->
+                    store.update { it.copy(penpal = p) }
+                    GadgetState.log("pen pal: ${p.name} in ${p.place}")
+                    DayLog.event("got a pen pal: ${p.name}, who lives in ${p.place}", "letter")
+                }
+            }
+            val p = store.data.penpal
+            val gap = (4 + ((p?.name?.length ?: 0) % 3)) * 86_400_000L
+            if (p != null && !isQuiet() && life.hour() in 10..19 && System.currentTimeMillis() - prefs.getLong("penpal_last", 0L) > gap) penpalLetterNow()
+            delay(60 * 60_000L)
+        }
+    }
+
+    suspend fun penpalLetterNow(): Boolean {
+        val p = store.data.penpal ?: return false
+        val lastReply = store.data.letters.lastOrNull { it.fromBlob && it.friendId == FriendsBrain.PENPAL_ID }?.text
+        val text = quietAsk(FriendsBrain.penpalLetterPrompt(p, GadgetState.blobCalled(), lastReply)) ?: return false
+        prefs.edit().putLong("penpal_last", System.currentTimeMillis()).apply()
+        store.update { d ->
+            d.copy(letters = (d.letters + Letter(FriendsBrain.PENPAL_ID, java.time.LocalDate.now().toString(), text.take(1200), System.currentTimeMillis())).takeLast(80),
+                postcards = (d.postcards + Postcard(FriendsBrain.PENPAL_ID, "Greetings from ${p.place}! 🌍", java.time.LocalDate.now().toString())).takeLast(12))
+        }
+        life.unlock(Decor.POSTCARDS, " from ${p.place}", quietly = true)
+        DayLog.event("got a letter from its pen pal ${p.name} in ${p.place}", "letter")
+        if (!isQuiet()) {
+            GadgetState.react(Reaction.HOP)
+            GadgetState.hold(HeldItem.LETTER, "🌍 Letter from ${p.name} (${p.place})", 60)
+            GadgetState.say("A letter from my pen pal in ${p.place}! 🌍", 12)
+        }
+        return true
+    }
+
+    // -- Books ---------------------------------------------------------------------------------------
+
+    /** A new book on Puff's shelf, read by [reader] (Pixel makes up the title and the review). */
+    suspend fun addBook(reader: String) {
+        val b = quietAsk(FriendsBrain.bookPrompt(reader, store.data.books.map { it.title }.takeLast(15)))
+            ?.let { FriendsBrain.parseBook(it, reader, java.time.LocalDate.now().toString()) } ?: return
+        store.update { it.copy(books = (it.books + b).takeLast(40)) }
+        DayLog.event("$reader read \"${b.title}\"", "book")
+        GadgetState.log("book: ${b.title}")
+    }
+
+    // -- Relatives and weather adventures -------------------------------------------------------------
+
+    private suspend fun cousinVisit(f: Friend, guest: Friend?): String {
+        prefs.edit().putLong("cousin_last", System.currentTimeMillis()).apply()
+        val g = guest ?: return chat(f, null)
+        say(f, "This is my ${g.bio}, ${g.name}! 🤗", 3_500)
+        GadgetState.setFriendSay(when {
+            g.scale < 0.6f -> "hi!!! (I'm VERY small) 👋"
+            g.scale > 1.2f -> "Hello, dear. What a lovely room. 👵"
+            else -> "Hiya! 👋"
+        }, "guest")
+        delay(3_500)
+        GadgetState.setFriendSay(null, "guest")
+        blob("Welcome, ${g.name}! 🤗", 3_000)
+        GadgetState.react(Reaction.WAVE)
+        DayLog.event("${f.shownName} brought their ${g.bio} ${g.name} over", "friend")
+        return "${f.shownName} brought their ${g.bio} ${g.name}"
+    }
+
+    private suspend fun puddles(f: Friend, second: Friend?, v: FriendVisit): String {
+        GadgetState.scene { it.copy(puddles = true) }
+        say(f, "It's raining! Puddle jumping! 🌧️👢", 3_000)
+        second?.let { say(it, "SPLASH! 💦", 2_000) }
+        blob("Wheee! 💦", 2_500)
+        GadgetState.react(Reaction.HOP)
+        untilEnd(v)
+        GadgetState.scene { it.copy(puddles = false) }
+        return "puddle jumping in the rain"
+    }
+
+    private suspend fun kites(f: Friend, second: Friend?, v: FriendVisit): String {
+        GadgetState.scene { it.copy(kites = true) }
+        say(f, "It's so windy! Kite time! 🪁", 3_000)
+        second?.let { say(it, "Mine's going higher! 🪁", 2_500) }
+        blob("Look at them go! 🌬️", 2_500)
+        untilEnd(v)
+        GadgetState.scene { it.copy(kites = false) }
+        return "kite flying on a windy day"
+    }
+
+    private suspend fun lollies(f: Friend, second: Friend?, v: FriendVisit): String {
+        GadgetState.scene { it.copy(teacups = false, snack = "🍦", party = false) }
+        say(f, "It's SO hot. Ice lollies! 🍭", 3_000)
+        second?.let { say(it, "Brain freeze! 🥶", 2_500) }
+        blob("Mmm, cold! 🍦", 2_500)
+        untilEnd(v)
+        GadgetState.scene { it.copy(snack = "") }
+        return "an ice-lolly party on a hot day"
+    }
+
+    // -- Stickers -----------------------------------------------------------------------------------
+
+    private suspend fun stickerLoop() {
+        delay(3 * 60_000L)
+        while (true) {
+            checkStickers()
+            delay(10 * 60_000L)
+        }
+    }
+
+    fun checkStickers() {
+        val d = store.data
+        val have = d.stickers.keys
+        val today = java.time.LocalDate.now().toString()
+        val named = d.friends.filter { it.name.isNotBlank() }
+        val visitedToday = d.today.keys.filter { it.startsWith("$today|") }.map { it.substringAfter('|') }.toSet()
+        fun earned(id: String): Boolean = when (id) {
+            "first_friend_visit" -> d.friends.any { it.visits > 0 }
+            "group_photo" -> GadgetState.friendAlbum.value.any { "Group photo" in it.caption }
+            "all_friends_one_day" -> named.size >= 2 && named.all { it.id in visitedToday }
+            "first_letter" -> d.letters.any { !it.fromBlob }
+            "first_reply" -> d.letters.any { it.fromBlob }
+            "penpal" -> d.penpal != null
+            "story_done" -> d.pastStories.isNotEmpty()
+            "three_stories" -> d.pastStories.size >= 3
+            "snowball" -> d.friends.any { (it.played["snowball"] ?: 0) > 0 }
+            "talent_vote" -> prefs.getInt("talent_votes", 0) > 0
+            "treasure_1" -> prefs.getInt("treasure_found", 0) >= 1
+            "treasure_10" -> prefs.getInt("treasure_found", 0) >= 10
+            "trick_master" -> d.tricks.values.any { it >= 90 }
+            "practice_5" -> prefs.getString("practice_days", "")!!.split(',').count { it.isNotBlank() } >= 5
+            "games_10" -> prefs.getInt("play_you", 0) >= 10
+            "gifts_5" -> prefs.getInt("gifts_sent", 0) >= 5
+            "pet_month" -> d.pet?.let { System.currentTimeMillis() - it.bornMs > 30 * 86_400_000L } == true
+            "garden_bloom" -> GadgetState.garden.value >= 3
+            "books_5" -> d.books.size >= 5
+            "diary_7" -> GadgetState.diary.value.size >= 7
+            else -> false
+        }
+        val new = FriendsBrain.STICKERS.filter { it.id !in have && earned(it.id) }
+        if (new.isEmpty()) return
+        store.update { it.copy(stickers = it.stickers + new.associate { s -> s.id to today }) }
+        // One ceremony at a time (the rest just appear in the book).
+        val s = new.first()
+        GadgetState.log("sticker: ${s.title}")
+        DayLog.event("earned the \"${s.title}\" sticker", "sticker")
+        if (!isQuiet() && !GadgetState.asleep.value) {
+            GadgetState.react(Reaction.CELEBRATE)
+            GadgetState.hold(HeldItem.STAR, "${s.emoji} ${s.title}", 5)
+            GadgetState.say(if (s.who == "you") "🏅 New sticker for you, Rusty: ${s.title}!" else "🏅 New sticker: ${s.title}!", 10)
+        }
+    }
+
+    // -- Year (or month) in review ---------------------------------------------------------------
+
+    /** A special edition of the Gazette looking back over [period]: "2026" or "2026-10". */
+    suspend fun reviewNow(period: String): Boolean {
+        val d = store.data
+        val inPeriod = { date: String -> date.startsWith(period) }
+        val label = if (period.length == 4) period else runCatching {
+            java.time.YearMonth.parse(period).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US))
+        }.getOrDefault(period)
+        val name = { id: String -> d.friends.firstOrNull { it.id == id }?.name ?: d.penpal?.name ?: "a friend" }
+        val facts = buildList {
+            GadgetState.diary.value.filter { inPeriod(it.date) }.takeLast(10).forEach { add("diary: ${it.text.take(160)}") }
+            d.comics.filter { inPeriod(it.date) }.forEach { add("comic: ${it.title}") }
+            d.letters.filter { inPeriod(it.date) && !it.fromBlob }.forEach { add("letter from ${name(it.friendId)}") }
+            d.happenings.filter { inPeriod(it.date) }.forEach { add(it.text) }
+            d.pastStories.forEach { add("adventure: $it") }
+            d.stickers.filterValues { inPeriod(it) }.keys.mapNotNull { id -> FriendsBrain.STICKERS.firstOrNull { it.id == id }?.title }.forEach { add("sticker: $it") }
+            d.books.filter { inPeriod(it.date) }.forEach { add("book: ${it.title}") }
+            d.friends.filter { it.trophies > 0 }.forEach { add("${it.name}: ${it.trophies} talent show trophies") }
+            GadgetState.friendAlbum.value.filter { inPeriod(it.date) }.forEach { add("photo: ${it.caption}") }
+        }.ifEmpty { listOf("a cozy, quiet stretch at home") }
+        val g = quietAsk(FriendsBrain.reviewPrompt(GadgetState.blobCalled(), label, facts))
+            ?.let { FriendsBrain.parseGazette(it, java.time.LocalDate.now().toString()) } ?: return false
+        val photos = GadgetState.friendAlbum.value.filter { inPeriod(it.date) }.let { all ->
+            (all.filter { "Group photo" in it.caption } + all.shuffled()).distinct().take(4).map { it.file }
+        }
+        store.update { it.copy(gazettes = (it.gazettes + g.copy(headline = "✨ $label in review: ${g.headline}", photos = photos)).takeLast(30)) }
+        GadgetState.log("review: $label")
+        if (!isQuiet()) GadgetState.say("📰 A special edition: $label in review!", 10)
+        return true
+    }
+
     // -- Clubs --------------------------------------------------------------------------------------
 
     private suspend fun bookClub(f: Friend, second: Friend?, v: FriendVisit): String {
@@ -1512,6 +1730,7 @@ class FriendLife(
         second?.let { say(it, "I couldn't put it down! 📖", 3_000) }
         blob(listOf("The ending surprised me! 😮", "I liked the part with the dragon. 🐉", "I read it twice! ✨").random(), 3_000)
         say(f, "Same time next week? 🤓", 2_500)
+        scope.launch { delay(60_000); addBook(f.shownName) }
         untilEnd(v)
         GadgetState.scene { it.copy(book = false) }
         return "book club"
@@ -1592,6 +1811,7 @@ class FriendLife(
     fun guess(item: String) {
         val t = store.data.treasure?.takeIf { !it.found } ?: return
         if (item == t.item) {
+            prefs.edit().putInt("treasure_found", prefs.getInt("treasure_found", 0) + 1).apply()
             scope.launch { finishTreasure(byPuff = false) }
             return
         }
@@ -1677,6 +1897,7 @@ class FriendLife(
         GadgetState.setVote(null)
         val winner = acts.firstOrNull { it.id == GadgetState.voted } ?: acts.random()
         val byVote = GadgetState.voted != null
+        if (byVote) prefs.edit().putInt("talent_votes", prefs.getInt("talent_votes", 0) + 1).apply()
         GadgetState.react(Reaction.CELEBRATE)
         say(winner, "I won!! 🏆", 3_000)
         store.edit(winner.id) { it.copy(trophies = it.trophies + 1) }
