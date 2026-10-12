@@ -345,6 +345,8 @@ class GadgetService : Service() {
     }
 
     /** Extra fields for device.health: how the app itself is doing. */
+    fun healthReport() = runCatching { commands.healthReport() }.getOrNull()
+
     fun healthExtras() = kotlinx.serialization.json.buildJsonObject {
         put("app_uptime_s", (System.currentTimeMillis() - startedAt) / 1000)
         put("connected", GadgetState.link.value == Link.CONNECTED)
@@ -1430,6 +1432,38 @@ class GadgetService : Service() {
         }
         scope.launch { postJournalOnce() }
         return true
+    }
+
+    /** "How are you, Puff?": Pixel answers in Puff's voice from what's really been going on; Puff says it in its bubble. */
+    fun askPuff() {
+        scope.launch {
+            val name = GadgetState.blobCalled()
+            GadgetState.react(Reaction.LEAN_IN)
+            GadgetState.say("Hmm, let me think… 💭", 20)
+            val d = life.friends.store.data
+            val day = DayLog.today()
+            val facts = buildList {
+                GadgetState.weather.value?.let { add("weather: ${it.summary}, ${it.tempF}°F") }
+                addAll(day.events.takeLast(8))
+                if (day.talks > 0) add("Rusty talked to it ${day.talks} times today")
+                d.story?.takeIf { !it.done && it.at > 0 }?.let { add("the friends' adventure \"${it.title}\": ${it.chapters[it.at - 1].line}") }
+                d.pet?.takeIf { it.name.isNotBlank() }?.let { add("its pet ${it.label} ${it.name}" + if (it.fedDate == java.time.LocalDate.now().toString()) " (fed today)" else "") }
+                d.letters.lastOrNull()?.let { l -> add("latest letter: " + if (l.fromBlob) "it wrote to a friend" else "from ${d.friends.firstOrNull { it.id == l.friendId }?.name ?: "a friend"}") }
+                d.treasure?.takeIf { !it.found }?.let { add("there's a treasure hunt on that nobody has solved yet") }
+                GadgetState.mood.value?.let { add("mood right now: ${it.mood.name.lowercase()}") }
+            }.ifEmpty { listOf("a quiet day at home") }
+            val answer = quietAskImpl(FriendsBrain.askPrompt(name, facts), waitForCalm = false)
+            if (answer == null) {
+                GadgetState.say("I'm good! Just a bit sleepy. 😊", 8)
+                return@launch
+            }
+            GadgetState.react(Reaction.HOP)
+            for (part in answer.split(Regex("(?<=[.!?])\\s+")).filter { it.isNotBlank() }.take(6)) {
+                GadgetState.say(part, 6)
+                delay(5_500)
+            }
+            DayLog.event("Rusty asked how it was doing", "talk")
+        }
     }
 
     /** From the settings page: the diary or a new thing of the day, now. */

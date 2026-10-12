@@ -60,6 +60,8 @@ data class FriendScene(
     val sadId: String? = null,
     /** Market day: stalls in the room. */
     val market: Boolean = false,
+    /** The friends' pets run over to play with Puff's pet. */
+    val petsPlay: Boolean = false,
     /** Halloween costumes (witch hats) and snowballs instead of a ball. */
     val costume: Boolean = false,
     val snow: Boolean = false,
@@ -598,6 +600,9 @@ object GadgetState {
 
     /** The blob's name, or "the blob" until it has one. */
     fun blobCalled(): String = _blobName.value.ifBlank { "the blob" }
+
+    /** The same, for the start of a sentence or a title ("Puff", or "The blob" until named). */
+    fun BlobCalled(): String = blobCalled().replaceFirstChar { it.uppercase() }
 
     /** A talent show's vote: who performed (ids to names), until when. Null: no vote on. */
     private val _vote = MutableStateFlow<Pair<List<Pair<String, String>>, Long>?>(null)

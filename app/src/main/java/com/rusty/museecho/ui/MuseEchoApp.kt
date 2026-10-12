@@ -507,6 +507,7 @@ private fun IdleFace(actions: UiActions) {
     // Visiting friends show up here too.
     FriendLayer(blobCenter, blobHalf, actions)
     PetTapTarget(blobCenter, blobHalf)
+    TreasureTapLayer(blobCenter, blobHalf)
     }
 }
 
@@ -1328,8 +1329,10 @@ private fun BlobCards() {
     val captions = heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE
     val thing by GadgetState.dailyThing.collectAsState()
     val hasThing = thing?.date == java.time.LocalDate.now().toString()
+    val friendsData by GadgetState.friends.collectAsState()
+    val hunt = friendsData.treasure?.let { !it.found && it.date == java.time.LocalDate.now().toString() } == true
     AnimatedVisibility(
-        (cards.isNotEmpty() || hasThing) && !captions,
+        (cards.isNotEmpty() || hasThing || hunt) && !captions,
         enter = fadeIn(tween(300)) + androidx.compose.animation.expandVertically(tween(300)),
         exit = fadeOut(tween(200)) + androidx.compose.animation.shrinkVertically(tween(250)),
     ) {
@@ -1340,6 +1343,7 @@ private fun BlobCards() {
         ) {
             // Today's word / fact rides along with the chips rather than taking a line of its own.
             DailyThingSign()
+            TreasureSign()
             cards.forEach { (text, color) ->
                 androidx.compose.runtime.key(text) {
                     Text(text, color = Palette.night, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

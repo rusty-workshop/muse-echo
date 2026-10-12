@@ -94,6 +94,7 @@ class Chores(
                 put("internet", GadgetState.internet.value)
                 put("uptime_s", (System.currentTimeMillis() - startedAt) / 1000)
                 put("on_screen", MainActivity.visible)
+                GadgetService.instance?.healthReport()?.let { put("health", it) }
             })
             postState()
             delay(60_000)
@@ -487,7 +488,9 @@ class Chores(
             put("blob_room", p.blobRoom)
             put("page_order", buildJsonArray { com.rusty.museecho.ui.HomePage.ordered(p.pageOrder).forEach { add(JsonPrimitive(it.name)) } })
             put("pages_hidden", buildJsonArray { p.pagesHidden.forEach { add(JsonPrimitive(it)) } })
-            put("page_labels", buildJsonObject { com.rusty.museecho.ui.HomePage.entries.forEach { put(it.name, it.label) } })
+            put("page_labels", buildJsonObject {
+                com.rusty.museecho.ui.HomePage.entries.forEach { put(it.name, if (it == com.rusty.museecho.ui.HomePage.BLOB) GadgetState.BlobCalled() else it.label) }
+            })
             put("blob_friend", p.blobFriend)
             put("laptop_break", p.laptopBreak)
             put("warm_evenings", p.warmEvenings)
@@ -561,7 +564,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES + listOf("letter", "reply", "hangout", "comic", "dream", "gazette")).forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "letter", "reply", "hangout", "comic", "dream", "gazette")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("EARS", "THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -604,6 +607,7 @@ class Chores(
                 "HANGOUT" -> GadgetService.instance?.life?.friends?.hangoutNow()?.let { GadgetState.log("friends hung out: $it") }
                 "COMIC" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.comicNow() } }
                 "DREAM" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.dreamNow() } }
+                "TREASURE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.treasureNow() } }
                 "GAZETTE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.gazetteNow() } }
                 "REPLY" -> GadgetService.instance?.life?.friends?.let { fl ->
                     fl.store.data.letters.lastOrNull { !it.fromBlob }?.let { l -> scope.launch { fl.replyTo(l) } }

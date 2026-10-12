@@ -58,11 +58,20 @@ internal fun NeighbourhoodPage(actions: UiActions) {
     val data by GadgetState.friends.collectAsState()
     val visit by GadgetState.friend.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
+    val weatherNow by GadgetState.weather.collectAsState()
+    val sky = remember(weatherNow) { StreetWeather.of(weatherNow?.summary) }
+    val month = java.time.LocalDate.now().monthValue
+    // Rain, snow, falling leaves or blossom move ~10 times a second; otherwise twice a minute is plenty.
+    val moving = sky == StreetWeather.RAIN || sky == StreetWeather.STORM || sky == StreetWeather.SNOW || month in 3..5 || month in 9..11
+    LaunchedEffect(moving) {
         while (true) {
-            kotlinx.coroutines.delay(30_000)
+            kotlinx.coroutines.delay(if (moving) 100 else 30_000)
             now = System.currentTimeMillis()
         }
+    }
+    val rainedToday = remember(now / 600_000) {
+        GadgetService.instance?.getSharedPreferences("museecho", android.content.Context.MODE_PRIVATE)
+            ?.getString("garden_rain_day", "") == java.time.LocalDate.now().toString()
     }
     var note by remember { mutableStateOf("") }
     var inside by remember { mutableStateOf<String?>(null) }
@@ -85,13 +94,15 @@ internal fun NeighbourhoodPage(actions: UiActions) {
     Box(Modifier.fillMaxSize()) {
         // The sky for the time of day, faintly behind the street.
         Canvas(Modifier.fillMaxSize()) {
+            val street = sky
             val sky = when (hour) {
-                in 7..16 -> listOf(Color(0xFF6FA8DC), Color(0xFFB4D7F0))
+                in 7..16 -> if (street == StreetWeather.CLEAR) listOf(Color(0xFF6FA8DC), Color(0xFFB4D7F0)) else listOf(Color(0xFF7D8796), Color(0xFFA9B1BD))
                 in 17..19 -> listOf(Color(0xFFE07A5F), Color(0xFFF2CC8F))
                 5, 6 -> listOf(Color(0xFF9A8FC8), Color(0xFFF2B5A0))
                 else -> listOf(Color(0xFF0B1030), Color(0xFF1B2050))
             }
             drawRect(Brush.verticalGradient(sky.map { it.copy(alpha = 0.18f) }))
+            drawSeasonAndWeather(street, month, hour, now, rainedToday)
             if (hour >= 20 || hour < 6) for (i in 0 until 30) {
                 drawCircle(Color.White.copy(alpha = 0.35f), 1.4f, Offset((i * 0.618f * 997f) % size.width, (i * 0.414f * 613f) % (size.height * 0.5f)))
             }
@@ -136,7 +147,8 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                 data.friends.forEach { f ->
                     val where = FriendsBrain.whereabouts(f, visiting, now, hour)
                     val bday = FriendsBrain.isBirthday(f, today)
-                    val status = if (bday) "🎂 birthday!" else where.label + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
+                    val whereLabel = if (where == Where.VISITING) "visiting ${blobName.ifBlank { "the blob" }}" else where.label
+                    val status = if (bday) "🎂 birthday!" else whereLabel + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
                     House(f.shownName, f.color, f.p.scale, where, if (marketOn && where == Where.HOME) "selling ${FriendsBrain.marketGoods(f)}" else status,
                         hour, decor = decor, balloons = bday, stall = marketOn && where == Where.HOME) { inside = f.id }
                 }
@@ -286,7 +298,7 @@ private fun HouseInside(f: Friend, where: Where, hour: Int, actions: UiActions, 
             .clickable(enabled = false) {}.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${f.shownName}'s house", color = c, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text(where.label, color = Palette.muted, fontSize = 13.sp)
+                Text(if (where == Where.VISITING) "visiting ${GadgetState.blobCalled()}" else where.label, color = Palette.muted, fontSize = 13.sp)
             }
             Box(Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp)) {
                 Canvas(Modifier.fillMaxSize()) { drawInterior(f, c, hour) }
@@ -295,6 +307,10 @@ private fun HouseInside(f: Friend, where: Where, hour: Int, actions: UiActions, 
                     tintOverride = c, ownStyle = false)
                 else Text(when (where) { Where.VISITING -> "Out visiting ${GadgetState.blobCalled()}!"; Where.AWAY -> "Away on a trip ✈️"; else -> "Nobody home right now" },
                     color = Palette.muted, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
+                // Its pet stays home (unless they've gone visiting together).
+                if (f.petKind.isNotBlank() && where != Where.VISITING && where != Where.AWAY)
+                    Text(FriendsBrain.petEmoji(f.petKind) + if (f.petName.isNotBlank()) " ${f.petName}" else "", color = Palette.ink, fontSize = 14.sp,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(start = 40.dp, bottom = 8.dp))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (where == Where.HOME || where == Where.OUT) Text("Invite over 🚶", color = Palette.night, fontSize = 15.sp,
@@ -351,4 +367,106 @@ private fun DrawScope.drawInterior(f: Friend, c: Color, hour: Int) {
     }
     // Its trophies on a little shelf.
     for (i in 0 until f.trophies.coerceAtMost(5)) drawCircle(Color(0xFFFFC266), 6f, Offset(w * (0.25f + i * 0.04f), h * 0.08f))
+}
+
+
+/** The street's weather, from the forecast's words. */
+internal enum class StreetWeather {
+    CLEAR, CLOUDY, RAIN, STORM, SNOW, FOG;
+
+    companion object {
+        fun of(summary: String?): StreetWeather {
+            val s = summary.orEmpty().lowercase()
+            return when {
+                "thunder" in s -> STORM
+                "snow" in s -> SNOW
+                "rain" in s || "drizzle" in s || "shower" in s -> RAIN
+                "fog" in s || "mist" in s -> FOG
+                "cloud" in s || "overcast" in s -> CLOUDY
+                else -> CLEAR
+            }
+        }
+    }
+}
+
+/**
+ * Behind the houses: trees for the season (blossom in spring, green in summer with a little pool,
+ * orange in autumn with leaves on the road, bare and snowy in winter with a snowman), and the real
+ * weather on top (sun, clouds, rain and puddles, snow, fog, a storm's flash, a rainbow after rain).
+ */
+private fun DrawScope.drawSeasonAndWeather(w: StreetWeather, month: Int, hour: Int, now: Long, rainedToday: Boolean) {
+    val road = size.height - 112.dp.toPx()
+    val t = (now % 3_600_000L) / 1000f
+    val day = hour in 7..18
+    val season = when (month) { 3, 4, 5 -> 0; 6, 7, 8 -> 1; 9, 10, 11 -> 2; else -> 3 }
+    // Trees along the back of the street.
+    val treeXs = listOf(0.05f, 0.33f, 0.61f, 0.9f)
+    treeXs.forEach { fx ->
+        val x = size.width * fx
+        val trunkTop = road - 120.dp.toPx()
+        drawLine(Color(0xFF5A4030).copy(alpha = 0.6f), Offset(x, road), Offset(x, trunkTop), 6.dp.toPx())
+        val crown = Offset(x, trunkTop - 14.dp.toPx())
+        when (season) {
+            0 -> { drawCircle(Color(0xFFFFB7D5).copy(alpha = 0.55f), 30.dp.toPx(), crown); drawCircle(Color(0xFFFFD6E8).copy(alpha = 0.5f), 20.dp.toPx(), crown + Offset(12.dp.toPx(), 8.dp.toPx())) }
+            1 -> drawCircle(Color(0xFF4FA060).copy(alpha = 0.55f), 32.dp.toPx(), crown)
+            2 -> { drawCircle(Color(0xFFE07A3A).copy(alpha = 0.55f), 30.dp.toPx(), crown); drawCircle(Color(0xFFD9A441).copy(alpha = 0.5f), 18.dp.toPx(), crown + Offset(-12.dp.toPx(), 10.dp.toPx())) }
+            else -> for (k in -1..1) drawLine(Color(0xFF5A4030).copy(alpha = 0.6f), crown + Offset(0f, 20.dp.toPx()), crown + Offset(k * 18.dp.toPx(), -12.dp.toPx()), 3.dp.toPx())
+        }
+        // Falling petals (spring) or leaves (autumn).
+        if (season == 0 || season == 2) for (k in 0 until 3) {
+            val fall = ((t * 12f + k * 37f + fx * 100f) % 140f).dp.toPx()
+            val px = crown.x + kotlin.math.sin(t + k) * 14.dp.toPx() + (k - 1) * 12.dp.toPx()
+            drawOval((if (season == 0) Color(0xFFFFC7DD) else Color(0xFFE07A3A)).copy(alpha = 0.7f), Offset(px, crown.y + fall), Size(5.dp.toPx(), 3.dp.toPx()))
+        }
+    }
+    // The ground for the season.
+    when (season) {
+        1 -> drawOval(Color(0xFF6FC3E8).copy(alpha = 0.55f), Offset(size.width * 0.72f, road + 18.dp.toPx()), Size(90.dp.toPx(), 22.dp.toPx()))
+        2 -> for (k in 0 until 14) drawOval(listOf(Color(0xFFE07A3A), Color(0xFFD9A441), Color(0xFFB5523A))[k % 3].copy(alpha = 0.6f),
+            Offset(size.width * ((k * 0.618f) % 1f), road + (4 + (k % 3) * 3).dp.toPx()), Size(6.dp.toPx(), 3.dp.toPx()))
+        3 -> {
+            drawRect(Color.White.copy(alpha = 0.35f), Offset(0f, road - 3.dp.toPx()), Size(size.width, 5.dp.toPx()))
+            val sm = Offset(size.width * 0.97f, road - 14.dp.toPx())
+            drawCircle(Color.White.copy(alpha = 0.9f), 12.dp.toPx(), sm)
+            drawCircle(Color.White.copy(alpha = 0.9f), 8.dp.toPx(), sm + Offset(0f, -17.dp.toPx()))
+            drawCircle(Color(0xFF1B1526), 1.5.dp.toPx(), sm + Offset(-3.dp.toPx(), -19.dp.toPx()))
+            drawCircle(Color(0xFF1B1526), 1.5.dp.toPx(), sm + Offset(3.dp.toPx(), -19.dp.toPx()))
+            drawLine(Color(0xFFFF9A3C), sm + Offset(0f, -16.dp.toPx()), sm + Offset(7.dp.toPx(), -15.dp.toPx()), 2.dp.toPx())
+        }
+    }
+    // The weather.
+    when (w) {
+        StreetWeather.CLEAR -> if (day) drawCircle(Color(0xFFFFE08A).copy(alpha = 0.6f), 22.dp.toPx(), Offset(size.width * 0.86f, 70.dp.toPx()))
+        StreetWeather.CLOUDY, StreetWeather.RAIN, StreetWeather.STORM -> for (k in 0 until 4) {
+            val cx = ((size.width * (0.15f + k * 0.25f) + t * 6f) % (size.width + 120f)) - 60f
+            val c = Color(if (w == StreetWeather.CLOUDY) 0xFFC9CED8 else 0xFF8A919E).copy(alpha = 0.45f)
+            drawCircle(c, 22.dp.toPx(), Offset(cx, 60.dp.toPx())); drawCircle(c, 16.dp.toPx(), Offset(cx + 22.dp.toPx(), 66.dp.toPx()))
+        }
+        StreetWeather.FOG -> drawRect(Color.White.copy(alpha = 0.12f))
+        else -> {}
+    }
+    if (w == StreetWeather.RAIN || w == StreetWeather.STORM) {
+        for (k in 0 until 40) {
+            val x = (k * 0.618f * 997f) % size.width
+            val y = ((t * 420f + k * 53f) % (road + 20f))
+            drawLine(Color(0xFFBFE6F5).copy(alpha = 0.45f), Offset(x, y), Offset(x - 3f, y + 10f), 1.5f)
+        }
+        // Puddles on the road.
+        for (k in 0 until 4) drawOval(Color(0xFF6FA8DC).copy(alpha = 0.35f), Offset(size.width * (0.1f + k * 0.24f), road + 2.dp.toPx()), Size(40.dp.toPx(), 7.dp.toPx()))
+        if (w == StreetWeather.STORM && (t % 7f) < 0.15f) drawRect(Color.White.copy(alpha = 0.35f))
+    }
+    if (w == StreetWeather.SNOW) for (k in 0 until 40) {
+        val x = (k * 0.618f * 997f + kotlin.math.sin(t + k) * 10f) % size.width
+        val y = ((t * 40f + k * 53f) % (road + 10f))
+        drawCircle(Color.White.copy(alpha = 0.7f), 2f, Offset(x, y))
+    }
+    // A rainbow when it's rained today but stopped, in daylight.
+    if (rainedToday && day && w != StreetWeather.RAIN && w != StreetWeather.STORM) {
+        val colors = listOf(0xFFFF6B6B, 0xFFFFA94D, 0xFFFFE066, 0xFF69DB7C, 0xFF4DABF7, 0xFF9775FA)
+        colors.forEachIndexed { k, c ->
+            val r = (150 - k * 8).dp.toPx()
+            drawArc(Color(c).copy(alpha = 0.35f), 180f, 180f, false, Offset(size.width * 0.5f - r, road - r * 0.9f), Size(r * 2, r * 2),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(8.dp.toPx()))
+        }
+    }
 }

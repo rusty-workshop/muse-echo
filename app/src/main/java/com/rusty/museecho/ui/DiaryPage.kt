@@ -52,7 +52,7 @@ internal fun DiaryContent(modifier: Modifier) {
         }
         val e = entries.getOrNull(entries.size - 1 - back)
         if (e == null) {
-            Text("Nothing yet. After 9 pm, ${GadgetState.museName.value} writes the blob's day here.",
+            Text("Nothing yet. After 9 pm, ${GadgetState.museName.value} writes ${GadgetState.blobCalled()}'s day here.",
                 color = Palette.muted, fontSize = 16.sp, modifier = Modifier.padding(top = 10.dp))
             return@Column
         }
@@ -91,6 +91,22 @@ internal fun DailyThingSign() {
             .clickable {
                 GadgetState.react(com.rusty.museecho.gadget.Reaction.HOP)
                 GadgetState.show(com.rusty.museecho.gadget.Screen.Text("${DayWriting.thingIcon(t.kind)} $kind: ${t.title}", t.text))
+            }
+            .padding(horizontal = 11.dp, vertical = 5.dp))
+}
+
+
+/** A treasure hunt is on: a chip with the riddle (tap it to read it again). */
+@Composable
+internal fun TreasureSign() {
+    val data by GadgetState.friends.collectAsState()
+    val t = data.treasure?.takeIf { !it.found && it.date == java.time.LocalDate.now().toString() } ?: return
+    val hider = data.friends.firstOrNull { it.id == t.friendId }?.shownName ?: "A friend"
+    Text("🗺️ Treasure hunt!", color = Palette.night, fontSize = 13.sp, maxLines = 1,
+        modifier = Modifier.background(Palette.amber, RoundedCornerShape(50))
+            .clickable {
+                GadgetState.show(com.rusty.museecho.gadget.Screen.Text("🗺️ $hider's treasure hunt",
+                    t.riddle + "\n\nTap the right thing in ${GadgetState.blobCalled()}'s room to find it."))
             }
             .padding(horizontal = 11.dp, vertical = 5.dp))
 }

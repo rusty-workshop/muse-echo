@@ -37,6 +37,9 @@ data class Friend(
     val birthday: String = "",
     /** Talent shows won. */
     val trophies: Int = 0,
+    /** Its own pet (comes along on visits): kind, and a name from Pixel. */
+    val petKind: String = "",
+    val petName: String = "",
 ) {
     val p get() = Personality.entries.firstOrNull { it.name == personality } ?: Personality.BOUNCY
     val shownName get() = name.ifBlank { "New friend" }
@@ -81,6 +84,10 @@ data class Pet(val kind: String, val name: String = "", val bornMs: Long = 0, va
     fun growth(nowMs: Long) = (0.6f + 0.4f * ((nowMs - bornMs) / (30 * 86_400_000f))).coerceIn(0.6f, 1f)
     val label get() = when (kind) { "snail" -> "snail"; "sprout" -> "sprout"; else -> "goldfish" }
 }
+
+/** A treasure hunt: a friend hid something behind a room item (a Decor name), with Pixel's riddle. */
+@Serializable
+data class Treasure(val item: String, val riddle: String, val friendId: String, val date: String, val found: Boolean = false, val wrong: Int = 0)
 
 /** What Puff dreamed overnight, written up in the morning. */
 @Serializable
@@ -127,6 +134,7 @@ data class FriendsData(
     /** Tricks Puff is learning: name to skill 0..100, and practice counts per day ("date|trick" to n). */
     val tricks: Map<String, Int> = emptyMap(),
     val practice: Map<String, Int> = emptyMap(),
+    val treasure: Treasure? = null,
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -163,7 +171,7 @@ object FriendsBrain {
     /** Everything a visit can be. */
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
-        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market")
+        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -255,7 +263,7 @@ object FriendsBrain {
         return if (panels.size == 3) Comic(date, title.take(50), panels) else null
     }
 
-    enum class Where(val label: String) { HOME("home"), OUT("out and about"), AWAY("away on a trip"), VISITING("visiting the blob"), ASLEEP("asleep") }
+    enum class Where(val label: String) { HOME("home"), OUT("out and about"), AWAY("away on a trip"), VISITING("visiting"), ASLEEP("asleep") }
 
     /** Where a friend is right now, for the neighbourhood: a little routine of its own, steady within the hour. */
     fun whereabouts(f: Friend, visiting: Set<String>, nowMs: Long, hour: Int): Where = when {
@@ -289,7 +297,7 @@ object FriendsBrain {
     val PET_KINDS = listOf("goldfish", "snail", "sprout")
 
     fun petNamePrompt(kind: String, blobName: String, taken: List<String>): String =
-        "$blobName (the blob on my Echo Show) just got a tiny pet $kind for its room. Give it a short, cute one-word name" +
+        "$blobName (a little blob, part of my Echo Show's blob world) has a tiny pet $kind. Give it a short, cute one-word name" +
             (if (taken.isNotEmpty()) " that isn't one of these: ${taken.joinToString()}" else "") +
             ". Reply in exactly this format and nothing else (no commands, don't change any device):\nNAME: the name"
 
@@ -362,6 +370,50 @@ object FriendsBrain {
         return if (articles.size >= 2) Gazette(date, headline.take(80), articles, weather.take(160)) else null
     }
 
+    /** Each personality's pet: what it is and how it's drawn. */
+    fun petFor(p: Personality): String = when (p) {
+        Personality.BOUNCY -> "bunny"
+        Personality.SHY -> "ladybug"
+        Personality.SLEEPY -> "tortoise"
+        Personality.SPARKLY -> "glitterfish"
+        Personality.TINY -> "mouse"
+    }
+
+    fun petEmoji(kind: String) = when (kind) {
+        "bunny" -> "🐰"; "ladybug" -> "🐞"; "tortoise" -> "🐢"; "glitterfish" -> "🐠"; "mouse" -> "🐭"; "snail" -> "🐌"; "sprout" -> "🌱"; else -> "🐟"
+    }
+
+    /** The clubs: which a friend belongs to, and when each meets (day of week, hours). */
+    enum class Club(val label: String, val emoji: String, val day: java.time.DayOfWeek, val hours: IntRange) {
+        BOOK("book club", "📚", java.time.DayOfWeek.TUESDAY, 16..19),
+        DANCE("dance club", "💃", java.time.DayOfWeek.THURSDAY, 17..20),
+        GARDEN("garden club", "🌻", java.time.DayOfWeek.SUNDAY, 10..13),
+    }
+
+    fun clubOf(f: Friend): Club = when (f.p) {
+        Personality.SHY, Personality.SLEEPY -> if (f.p == Personality.SHY) Club.BOOK else Club.GARDEN
+        Personality.BOUNCY, Personality.SPARKLY -> Club.DANCE
+        Personality.TINY -> Club.GARDEN
+    }
+
+    /** Room items a treasure can hide behind, with their spot (x from the blob's centre, height above the floor, in room units). */
+    val HIDING_SPOTS = mapOf(
+        Decor.PLANT to (-118f to 22f), Decor.LAMP to (120f to 60f), Decor.BOOKSHELF to (-143f to 45f), Decor.RUG to (0f to 2f),
+        Decor.WINDOW to (-98f to 182f), Decor.RECORD_PLAYER to (-83f to 10f), Decor.CUSHION to (-130f to 4f),
+        Decor.LAVA_LAMP to (78f to 20f), Decor.UMBRELLA_STAND to (96f to 20f), Decor.RARE_PLANT to (-142f to 25f),
+        Decor.TEAPOT to (-143f to 88f), Decor.WALL_CLOCK to (30f to 232f),
+    )
+
+    fun riddlePrompt(item: String, hider: String): String =
+        "$hider (a little blob) hid a treasure in the room of my Echo Show's blob, behind or under its $item. " +
+            "Write a short, cute riddle (one or two lines, under 120 characters) whose answer is the $item, without saying the word. " +
+            "Reply with only the riddle: no commands, and don't change anything on any device."
+
+    fun askPrompt(blobName: String, facts: List<String>): String =
+        "Rusty just asked $blobName (the little blob on my Echo Show, your on-screen face) how it's doing. Answer in $blobName's own voice: " +
+            "2 or 3 short, warm sentences, first person, based on these real things:\n" + facts.joinToString("\n") { "- $it" } +
+            "\nReply with only the answer: no commands, and don't change anything on any device."
+
     fun activityLabel(a: String) = when (a) {
         "tictactoe" -> "tic-tac-toe"
         "rps" -> "rock-paper-scissors"
@@ -383,6 +435,10 @@ object FriendsBrain {
         "talentshow" -> "a talent show"
         "sad" -> "a cheer-up chat"
         "market" -> "market day"
+        "treasure" -> "a treasure hunt"
+        "bookclub" -> "book club"
+        "danceclub" -> "dance club"
+        "gardenclub" -> "garden club"
         "nap" -> "a nap"
         else -> a
     }

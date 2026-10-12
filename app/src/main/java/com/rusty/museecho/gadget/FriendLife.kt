@@ -37,6 +37,11 @@ class FriendLife(
         scope.launch { comicLoop() }
         scope.launch { storyLoop() }
         scope.launch { morningLoop() }
+        scope.launch { treasureLoop() }
+        // Every friend has a pet of its own.
+        if (store.data.friends.any { it.petKind.isBlank() }) store.update { d ->
+            d.copy(friends = d.friends.map { if (it.petKind.isBlank()) it.copy(petKind = FriendsBrain.petFor(it.p)) else it })
+        }
         scope.launch { gazetteLoop() }
         scope.launch { gardenLoop() }
         if (store.data.pet == null) store.update { it.copy(pet = Pet(FriendsBrain.PET_KINDS.random(), bornMs = System.currentTimeMillis())) }
@@ -59,7 +64,7 @@ class FriendLife(
         val p = Personality.entries.firstOrNull { pp -> have.none { it.personality == pp.name } } ?: Personality.entries.random()
         val color = FriendsBrain.COLORS.firstOrNull { c -> have.none { it.color == c } } ?: FriendsBrain.COLORS.random()
         val f = Friend(id = java.util.UUID.randomUUID().toString().take(8), personality = p.name, color = color, metMs = System.currentTimeMillis(),
-            birthday = FriendsBrain.randomBirthday(rnd))
+            birthday = FriendsBrain.randomBirthday(rnd), petKind = FriendsBrain.petFor(p))
         store.update { it.copy(friends = it.friends + f) }
         GadgetState.log("a new friend (${p.label})")
         return f
@@ -107,6 +112,14 @@ class FriendLife(
                         store.update { it.copy(pet = it.pet?.copy(name = n)) }
                         GadgetState.log("the pet ${pet.label} is called $n")
                     }
+            }
+            // Then the friends' pets, once their owners have names.
+            store.data.friends.firstOrNull { it.name.isNotBlank() && it.petKind.isNotBlank() && it.petName.isBlank() }?.let { owner ->
+                val taken = store.data.friends.flatMap { listOf(it.name, it.petName) } + listOfNotNull(store.data.pet?.name, Prefs(context).blobName)
+                quietAsk(FriendsBrain.petNamePrompt(owner.petKind, owner.name, taken.filter { it.isNotBlank() }))?.let(FriendsBrain::parseBlobName)?.let { n ->
+                    store.edit(owner.id) { it.copy(petName = n) }
+                    GadgetState.log("${owner.name}'s ${owner.petKind} is called $n")
+                }
             }
             val f = store.data.friends.firstOrNull { it.name.isBlank() }
             if (f != null) {
@@ -302,6 +315,14 @@ class FriendLife(
             }
             today.monthValue == 10 && today.dayOfMonth == 31 && h in 17..21 && once("halloween") -> visit("trickortreat")
             today.dayOfWeek == java.time.DayOfWeek.SATURDAY && h in 10..15 && once("market") -> visit("market")
+            FriendsBrain.Club.entries.firstOrNull { c -> c.day == today.dayOfWeek && h in c.hours }?.let { c ->
+                store.data.friends.firstOrNull { it.name.isNotBlank() && FriendsBrain.clubOf(it) == c }?.takeIf { once("club_${c.name}") }
+                    ?.let { member -> c to member }
+            } != null -> {
+                val c = FriendsBrain.Club.entries.first { it.day == today.dayOfWeek && h in it.hours }
+                val member = store.data.friends.first { it.name.isNotBlank() && FriendsBrain.clubOf(it) == c }
+                visit(c.name.lowercase() + "club", null, member.name)
+            }
             w != null && ("snow" in w.summary.lowercase() || (w.tempF <= 40 && today.monthValue in listOf(11, 12, 1, 2))) && h in 10..18 &&
                 rnd.nextFloat() < 0.3f && once("snowball") -> visit("snowball")
             today.monthValue in 6..8 && today.dayOfWeek == java.time.DayOfWeek.SATURDAY && h in 14..18 &&
@@ -399,7 +420,10 @@ class FriendLife(
         }?.takeIf { it in FriendsBrain.ACTIVITIES } ?: pickActivity(f)
         // Two at once for the sociable things, now and then.
         val group = act in setOf("birthday", "trickortreat", "blockparty", "talentshow", "market")
-        val second = if (group || act in setOf("chat", "tea", "party", "dance", "story", "movie") && rnd.nextFloat() < 0.3f) pickBuddy(f) else null
+        val clubMate = if (act.endsWith("club")) store.data.friends.firstOrNull {
+            it.id != f.id && it.name.isNotBlank() && FriendsBrain.clubOf(it).name.lowercase() == act.removeSuffix("club")
+        } else null
+        val second = clubMate ?: if (group || act in setOf("chat", "tea", "party", "dance", "story", "movie") && rnd.nextFloat() < 0.3f) pickBuddy(f) else null
         val ids = listOfNotNull(f.id, second?.id)
         val base = when (act) {
             "sleepover" -> 9 * 60
@@ -460,6 +484,10 @@ class FriendLife(
                     "talentshow" -> talentShow(f, second)
                     "sad" -> cheerUp(f)
                     "market" -> marketDay(f, second, v)
+                    "treasure" -> hideTreasure(f)
+                    "bookclub" -> bookClub(f, second, v)
+                    "danceclub" -> danceClub(f, second, v)
+                    "gardenclub" -> gardenClub(f, second, v)
                     else -> squabble(f)
                 }
                 // After the game or whatever it was, they stay and hang out until it's time to go.
@@ -549,6 +577,16 @@ class FriendLife(
                 delay(3_000)
                 GadgetState.setFriendSay(listOf("Wow!! 👏", "How did you do that?! 😮", "Teach me! 🤩").random(), f.id)
                 delay(3_000)
+                GadgetState.clearFriendSay()
+                continue
+            }
+            // The pets run off to play together now and then.
+            if (f.petName.isNotBlank() && store.data.pet != null && rnd.nextInt(5) == 0) {
+                GadgetState.setFriendSay("${f.petName} wants to play with ${store.data.pet?.name?.ifBlank { null } ?: "your pet"}! 🐾", f.id)
+                GadgetState.scene { it.copy(petsPlay = true) }
+                GadgetState.petPokedAt = System.currentTimeMillis()
+                delay(8_000)
+                GadgetState.scene { it.copy(petsPlay = false) }
                 GadgetState.clearFriendSay()
                 continue
             }
@@ -1287,6 +1325,121 @@ class FriendLife(
         untilEnd(v)
         GadgetState.scene { it.copy(market = false) }
         return "market day (came home with $bought)"
+    }
+
+    // -- Clubs --------------------------------------------------------------------------------------
+
+    private suspend fun bookClub(f: Friend, second: Friend?, v: FriendVisit): String {
+        GadgetState.scene { it.copy(book = true) }
+        say(f, "Book club is now in session! 📚", 3_000)
+        second?.let { say(it, "I couldn't put it down! 📖", 3_000) }
+        blob(listOf("The ending surprised me! 😮", "I liked the part with the dragon. 🐉", "I read it twice! ✨").random(), 3_000)
+        say(f, "Same time next week? 🤓", 2_500)
+        untilEnd(v)
+        GadgetState.scene { it.copy(book = false) }
+        return "book club"
+    }
+
+    private suspend fun danceClub(f: Friend, second: Friend?, v: FriendVisit): String {
+        GadgetState.scene { it.copy(party = true) }
+        say(f, "Dance club! Five, six, seven, eight! 💃", 3_000)
+        second?.let { say(it, "Spin! 🌀", 2_000) }
+        GadgetState.react(Reaction.WANDER)
+        blob("I'm getting the hang of it! 🕺", 3_000)
+        GadgetState.setMood(Mood.HAPPY, ((v.untilMs - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(5))
+        untilEnd(v)
+        GadgetState.scene { it.copy(party = false) }
+        return "dance club"
+    }
+
+    private suspend fun gardenClub(f: Friend, second: Friend?, v: FriendVisit): String {
+        say(f, "Garden club is here to help! 🌻", 3_000)
+        GadgetState.hold(HeldItem.WATERING_CAN, "", 2)
+        second?.let { say(it, "Your window box looks lovely! 🌱", 3_000) }
+        // A good watering counts like a rainy day for the garden.
+        prefs.edit().putInt("garden_rain", prefs.getInt("garden_rain", 0) + 1).apply()
+        blob("Thank you, garden club! 🌸", 3_000)
+        untilEnd(v)
+        return "garden club (they helped the window box grow)"
+    }
+
+    // -- Treasure hunts ------------------------------------------------------------------------------
+
+    private var pendingRiddle: Treasure? = null
+
+    /** Every couple of days a friend hides something in Puff's room and leaves a riddle; Rusty finds it by tapping. */
+    private suspend fun treasureLoop() {
+        delay(6 * 60_000L)
+        while (true) {
+            val today = java.time.LocalDate.now().toString()
+            val t = store.data.treasure
+            // Not found by evening: Puff finds it itself.
+            if (t != null && !t.found && t.date == today && life.hour() >= 21) finishTreasure(byPuff = true)
+            else if (t != null && !t.found && t.date != today) store.update { it.copy(treasure = null) }
+            val due = (t == null || t.found || t.date != today) &&
+                System.currentTimeMillis() - prefs.getLong("treasure_last", 0L) > 2 * 86_400_000L
+            if (due && on() && !isQuiet() && life.hour() in 10..18 && rnd.nextFloat() < 0.3f) treasureNow()
+            delay(30 * 60_000L)
+        }
+    }
+
+    /** Start a hunt now: a friend writes a riddle (with Pixel) and comes over to hide the treasure. */
+    suspend fun treasureNow(): Boolean {
+        val today = java.time.LocalDate.now().toString()
+        val f = store.data.friends.filter { it.name.isNotBlank() }.randomOrNull() ?: return false
+        val spot = FriendsBrain.HIDING_SPOTS.keys.filter { life.has(it) }.randomOrNull() ?: return false
+        val item = spot.label.removePrefix("a ").removePrefix("an ")
+        val riddle = quietAsk(FriendsBrain.riddlePrompt(item, f.name))?.takeIf { it.isNotBlank() } ?: return false
+        prefs.edit().putLong("treasure_last", System.currentTimeMillis()).apply()
+        pendingRiddle = Treasure(spot.name, riddle.take(200), f.id, today)
+        if (visit("treasure", null, f.name) == "already visiting") {
+            // Someone's already over: the hider leaves it as a note instead.
+            pendingRiddle?.let { tr -> store.update { d -> d.copy(treasure = tr) } }
+            pendingRiddle = null
+            GadgetState.hold(HeldItem.NOTE, "🗺️ Treasure hunt from ${f.name}", 30)
+        }
+        return true
+    }
+
+    private suspend fun hideTreasure(f: Friend): String {
+        val t = pendingRiddle ?: return chat(f, null)
+        pendingRiddle = null
+        say(f, "Psst… I hid something in your room! 🤫", 3_000)
+        store.update { it.copy(treasure = t) }
+        say(f, t.riddle, 6_000)
+        blob("A treasure hunt! Can you find it, Rusty? 🗺️", 3_500)
+        return "${f.shownName} hid a treasure"
+    }
+
+    /** Rusty tapped [item] (a Decor name) in Puff's room during a hunt. */
+    fun guess(item: String) {
+        val t = store.data.treasure?.takeIf { !it.found } ?: return
+        if (item == t.item) {
+            scope.launch { finishTreasure(byPuff = false) }
+            return
+        }
+        store.update { it.copy(treasure = t.copy(wrong = t.wrong + 1)) }
+        val hint = if (t.wrong + 1 >= 2) " Hint: it starts with \"${Decor.valueOf(t.item).label.removePrefix("a ").removePrefix("an ").first().uppercase()}\"." else ""
+        GadgetState.react(Reaction.SHAKE)
+        GadgetState.say("Not there! 🤔$hint", 6)
+    }
+
+    private suspend fun finishTreasure(byPuff: Boolean) {
+        val t = store.data.treasure ?: return
+        store.update { it.copy(treasure = t.copy(found = true)) }
+        val where = Decor.valueOf(t.item).label.removePrefix("a ").removePrefix("an ")
+        val hider = store.friend(t.friendId)
+        // The prize: a new outfit if there's one to get, else something for the room, else a shiny star.
+        val outfit = listOf("CROWN", "SCARF", "SUNGLASSES", "PARTY_HAT", "FLOWER", "BOW").firstOrNull { it !in store.data.wardrobe }
+        val prize = when {
+            outfit != null -> { addOutfit(outfit); "a ${outfit.lowercase().replace('_', ' ')}" }
+            FriendsBrain.MARKET.any { !life.has(it) } -> FriendsBrain.MARKET.first { !life.has(it) }.let { life.unlock(it, " from a treasure hunt", quietly = true); it.label }
+            else -> { GadgetState.hold(HeldItem.STAR, "", 30); "a shiny star" }
+        }
+        GadgetState.react(Reaction.CELEBRATE)
+        GadgetState.say(if (byPuff) "I found the treasure under the $where! It's $prize! ✨" else "You found it! Under the $where: $prize! 🎉", 12)
+        DayLog.event((if (byPuff) "found" else "Rusty found") + " ${hider?.name ?: "a friend"}'s treasure under the $where ($prize)", "treasure")
+        hider?.let { remember(it, "the treasure I hid under the $where") }
     }
 
     private suspend fun trickOrTreat(f: Friend, second: Friend?, v: FriendVisit): String {

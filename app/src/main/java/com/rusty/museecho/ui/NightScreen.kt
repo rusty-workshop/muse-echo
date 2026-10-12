@@ -30,8 +30,8 @@ import kotlinx.coroutines.delay
 /** What the screen shows when it goes to sleep overnight (Setup > Night screen). */
 enum class NightScene(val label: String, val blurb: String) {
     BLACK("Black", "Screen fully off"),
-    STARS("Starry night", "The blob asleep among slowly drifting stars"),
-    AQUARIUM("Aquarium", "The blob dozing in a dark, bubbly tank"),
+    STARS("Starry night", "{name} asleep among slowly drifting stars"),
+    AQUARIUM("Aquarium", "{name} dozing in a dark, bubbly tank"),
     ;
 
     companion object {

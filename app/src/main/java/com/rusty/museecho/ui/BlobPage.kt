@@ -80,6 +80,7 @@ internal fun BlobPage(actions: UiActions) {
             }
             FriendLayer(center, half, actions)
             PetTapTarget(center, half)
+            TreasureTapLayer(center, half)
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(top = 64.dp, end = 40.dp, bottom = 84.dp)) {
             val blobName by GadgetState.blobName.collectAsState()
@@ -102,6 +103,11 @@ internal fun BlobPage(actions: UiActions) {
                 Tab("👗", tab == "wardrobe") { tab = "wardrobe" }
                 Spacer(Modifier.width(6.dp))
                 Tab("🗞️", tab == "gazette") { tab = "gazette" }
+                Spacer(Modifier.width(10.dp))
+                // Not a tab: Puff answers in its bubble.
+                Text("💬 How are you?", color = Palette.night, fontSize = 14.sp,
+                    modifier = Modifier.background(Palette.teal, RoundedCornerShape(50)).clickable { GadgetService.instance?.askPuff() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp))
             }
             Spacer(Modifier.height(8.dp))
             when {
@@ -154,7 +160,7 @@ private fun ShotGrid(shots: List<AlbumShot>, actions: UiActions, modifier: Modif
 private fun DailyAlbum(actions: UiActions, modifier: Modifier) {
     val shots by GadgetState.album.collectAsState()
     if (shots.isEmpty()) {
-        Text("No pictures yet. Once a day the Echo snaps the blob doing something cute (a friend visit, a new hat, " +
+        Text("No pictures yet. Once a day the Echo snaps ${GadgetState.blobCalled()} doing something cute (a friend visit, a new hat, " +
             "something new in its room), or just hanging out in the afternoon.", color = Palette.muted, fontSize = 15.sp, modifier = modifier)
         return
     }

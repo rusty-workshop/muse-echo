@@ -310,7 +310,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 speedResult?.let { Body(it, Palette.muted) }
 
-                SectionTitle("Blob energy")
+                SectionTitle("${GadgetState.BlobCalled()}'s energy")
                 val ctx = androidx.compose.ui.platform.LocalContext.current
                 val energy by GadgetState.blobEnergy.collectAsState()
                 androidx.compose.material3.Slider(
@@ -327,7 +327,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     else -> "Hyper: bouncy, and up to something every few minutes."
                 }, Palette.muted)
                 var sounds by remember { mutableStateOf(com.rusty.museecho.gadget.Prefs(ctx).blobSounds) }
-                ToggleRow("Blob sounds", "Tiny, quiet chirps when it hops, yawns or celebrates. Never during quiet hours or while talking.", sounds) {
+                ToggleRow("${GadgetState.BlobCalled()}'s sounds", "Tiny, quiet chirps when it hops, yawns or celebrates. Never during quiet hours or while talking.", sounds) {
                     sounds = it
                     com.rusty.museecho.gadget.Prefs(ctx).blobSounds = it
                 }
@@ -534,7 +534,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 var nameField by remember(currentName) { mutableStateOf(currentName) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(value = nameField, onValueChange = { nameField = it.take(16) }, singleLine = true,
-                        label = { Text("The blob's name") }, modifier = Modifier.width(220.dp))
+                        label = { Text(if (currentName.isBlank()) "The blob's name" else "Name") }, modifier = Modifier.width(220.dp))
                     Spacer(Modifier.width(8.dp))
                     TextButton(onClick = {
                         prefs.blobName = nameField
@@ -545,10 +545,10 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 var roomSense by remember { mutableStateOf(prefs.roomSense) }
                 var diaryOn by remember { mutableStateOf(prefs.diary) }
                 var thingOn by remember { mutableStateOf(prefs.dailyThing) }
-                ToggleRow("Room sense", "Lights off at night: the Echo goes to sleep. Lights on in the morning: the blob wakes up.", roomSense) {
+                ToggleRow("Room sense", "Lights off at night: the Echo goes to sleep. Lights on in the morning: ${GadgetState.blobCalled()} wakes up.", roomSense) {
                     roomSense = it; prefs.roomSense = it
                 }
-                ToggleRow("Blob diary", "Each evening ${GadgetState.museName.value} writes the blob's day (a page of its own)", diaryOn) {
+                ToggleRow("${GadgetState.BlobCalled()}'s diary", "Each evening ${GadgetState.museName.value} writes ${GadgetState.blobCalled()}'s day", diaryOn) {
                     diaryOn = it; prefs.diary = it; GadgetState.setDiaryOn(it)
                 }
                 ToggleRow("Thing of the day", "A word, fact or bit of history on a little sign each morning", thingOn) {
@@ -559,10 +559,10 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 var breakOn by remember { mutableStateOf(prefs.laptopBreak) }
                 var warmOn by remember { mutableStateOf(prefs.warmEvenings) }
                 var bedOn by remember { mutableStateOf(prefs.bedtimeHint) }
-                ToggleRow("Blob's room", "Things it collects over the weeks, drawn faintly behind it", roomOn) {
+                ToggleRow("${GadgetState.BlobCalled()}'s room", "Things it collects over the weeks, drawn faintly behind it", roomOn) {
                     roomOn = it; prefs.blobRoom = it; com.rusty.museecho.gadget.GadgetService.instance?.life?.loadRoom()
                 }
-                ToggleRow("Friend visits", "A second blob drops by now and then to chat, play tag or nap", friendOn) {
+                ToggleRow("Friend visits", "Its friends drop by to chat, play games or nap", friendOn) {
                     friendOn = it; prefs.blobFriend = it
                 }
                 ToggleRow("Laptop breaks", "A nudge after 2 hours at the laptop, and a wind-down hint late at night", breakOn) {
@@ -585,7 +585,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 ToggleRow("👀 Rest your eyes", "Every 20 minutes (look far away for 20 seconds)", eyes) { eyes = it; prefs.wellnessEyes = it }
                 var wStart by remember { mutableStateOf(prefs.wellnessStart) }
                 var wEnd by remember { mutableStateOf(prefs.wellnessEnd) }
-                Body("Between ${wStart}:00 and ${wEnd}:00. A bubble from the blob, never spoken.", Palette.muted)
+                Body("Between ${wStart}:00 and ${wEnd}:00. A bubble from ${GadgetState.blobCalled()}, never spoken.", Palette.muted)
                 ChoiceRow(options = listOf(8, 9, 10, 12).map { it.toString() to "from $it:00" }, selected = wStart.toString()) {
                     wStart = it.toInt(); prefs.wellnessStart = wStart
                 }
@@ -599,7 +599,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                     GadgetState.setNightScene(it)
                     prefs.nightScene = it
                 }
-                Body(NightScene.of(nightScene).blurb + " when the screen sleeps overnight. A tap wakes it.", Palette.muted)
+                Body(NightScene.of(nightScene).blurb.replace("{name}", GadgetState.BlobCalled()) + " when the screen sleeps overnight. A tap wakes it.", Palette.muted)
 
                 SectionTitle("Quiet hours")
                 Body("No wake word, no speaking, a dim screen, soft timer beeps. Alarms still ring.", Palette.muted)
@@ -791,7 +791,7 @@ private fun PagesEditor() {
     order.forEachIndexed { i, pg ->
         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${i + 1}.", color = Palette.muted, fontSize = 14.sp, modifier = Modifier.width(26.dp))
-            Body(pg.label, if (pg.name in hidden) Palette.muted else Palette.ink)
+            Body(if (pg == HomePage.BLOB) GadgetState.BlobCalled() else pg.label, if (pg.name in hidden) Palette.muted else Palette.ink)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { save(order.toMutableList().apply { add(i - 1, removeAt(i)) }, hidden) }, enabled = i > 0) { Text("↑") }
             TextButton(onClick = { save(order.toMutableList().apply { add(i + 1, removeAt(i)) }, hidden) }, enabled = i < order.size - 1) { Text("↓") }

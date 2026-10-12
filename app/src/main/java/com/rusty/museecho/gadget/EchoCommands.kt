@@ -228,6 +228,9 @@ class EchoCommands(
         commandError("timed out")
     }
 
+    /** The health report (also sent with every heartbeat, for the settings page). */
+    fun healthReport(): JsonObject = health().let { (it["payload"] as? JsonObject) ?: it }
+
     private fun health(): JsonObject {
         val mem = ActivityManager.MemoryInfo().also { context.getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
         val stat = StatFs(context.filesDir.path)
@@ -258,9 +261,21 @@ class EchoCommands(
             put("volume_percent", currentVolume())
             put("screen_on", context.getSystemService(PowerManager::class.java).isInteractive)
             put("tts_available", speaker.available)
+            cpuTempC()?.let { put("cpu_temp_c", it) }
+            runCatching { java.io.File("/proc/loadavg").readText().split(" ").take(3).map { it.toDouble() } }.getOrNull()
+                ?.let { l -> put("load", kotlinx.serialization.json.JsonArray(l.map { kotlinx.serialization.json.JsonPrimitive(it) })) }
             healthExtras().forEach { (k, v) -> put(k, v) }
         })
     }
+
+    /** The CPU's temperature from the kernel's thermal zones (the MediaTek "mtktscpu" one), if readable. */
+    private fun cpuTempC(): Double? = runCatching {
+        java.io.File("/sys/class/thermal").listFiles().orEmpty().firstNotNullOfOrNull { z ->
+            val type = java.io.File(z, "type").takeIf { it.canRead() }?.readText()?.trim() ?: return@firstNotNullOfOrNull null
+            if (type != "mtktscpu" && "cpu" !in type) return@firstNotNullOfOrNull null
+            java.io.File(z, "temp").readText().trim().toDoubleOrNull()?.let { if (it > 1000) it / 1000 else it }
+        }
+    }.getOrNull()
 
     private suspend fun drawUrl(url: String?, caption: String?): JsonObject {
         if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {

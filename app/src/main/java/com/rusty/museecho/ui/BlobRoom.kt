@@ -468,3 +468,25 @@ internal fun PetTapTarget(blob: Offset, half: Float) {
             com.rusty.museecho.gadget.GadgetService.instance?.life?.friends?.petTapped()
         })
 }
+
+
+/** During a treasure hunt: tap targets over the things in Puff's room it could be hidden behind. */
+@Composable
+internal fun TreasureTapLayer(blob: Offset, half: Float) {
+    val data by GadgetState.friends.collectAsState()
+    val items by GadgetState.room.collectAsState()
+    val t = data.treasure?.takeIf { !it.found && it.date == java.time.LocalDate.now().toString() } ?: return
+    if (blob == Offset.Unspecified || half <= 0f) return
+    val u = half / 110f
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    com.rusty.museecho.gadget.FriendsBrain.HIDING_SPOTS.filterKeys { it.name in items }.forEach { (decor, spot) ->
+        val (x, up) = spot
+        val at = Offset(blob.x + x * u, blob.y + 92 * u - up * u)
+        val sz = 34 * u
+        Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((at.x - sz / 2).toInt(), (at.y - sz / 2).toInt()) }
+            .size(with(density) { sz.toDp() })
+            .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
+                com.rusty.museecho.gadget.GadgetService.instance?.life?.friends?.guess(decor.name)
+            })
+    }
+}

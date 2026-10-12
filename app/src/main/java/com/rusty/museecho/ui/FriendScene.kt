@@ -201,6 +201,16 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         }
         if (enter > 0.9f && !hiding && f.name.isNotBlank()) Text(f.name, color = Color(f.color), fontSize = 11.sp,
             modifier = Modifier.offset { IntOffset((x - size * 0.25f).toInt(), (y + size * 0.42f).toInt()) })
+        // Its pet tags along at its feet, and runs over to Puff's pet to play now and then.
+        if (f.petKind.isNotBlank() && !hiding) {
+            val petHome = Offset(x + side * size * 0.45f, y + size * 0.3f)
+            val miso = Offset(blob.x + PET_SPOT.x * u, blob.y + 92 * u - 10 * u)
+            val to by androidx.compose.animation.core.animateOffsetAsState(if (scene.petsPlay && i == 0) miso + Offset(14 * u, 0f) else petHome,
+                androidx.compose.animation.core.tween(1200), label = "pet$i")
+            val hop = if (scene.petsPlay) kotlin.math.abs(sin(t * 6f)) * 6 * dp else 0f
+            Text(com.rusty.museecho.gadget.FriendsBrain.petEmoji(f.petKind), fontSize = 16.sp,
+                modifier = Modifier.offset { IntOffset((to.x - 9 * dp).toInt(), (to.y - 10 * dp - hop).toInt()) })
+        }
     }
     // Sleepover: a little quilt over the friend's lower half (on top of it).
     if (scene.pillow && enter > 0.5f) Canvas(Modifier.fillMaxSize()) {

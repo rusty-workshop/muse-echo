@@ -168,4 +168,13 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
         assertEquals(2, g.articles.size)
         assertEquals("Cloudy with a chance of cookies", g.weather)
     }
+
+    @Test
+    fun everyoneHasAClubAndAPet() {
+        Personality.entries.forEach { p ->
+            val f = Friend("x", personality = p.name)
+            assertTrue(FriendsBrain.clubOf(f) in FriendsBrain.Club.entries)
+            assertTrue(FriendsBrain.petEmoji(FriendsBrain.petFor(p)) != "🐟" || FriendsBrain.petFor(p) == "glitterfish")
+        }
+    }
 }
