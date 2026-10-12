@@ -118,6 +118,8 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             drawCup(f0 + Offset(-18 * dp, s0 * 0.42f), dp)
         }
         if (scene.book) drawBook(Offset(mid.x, blob.y + 52 * dp), dp)
+        // Market day: a little stall with a striped awning behind each friend.
+        if (scene.market) spots.forEach { (p, s) -> drawStall(p + Offset(0f, s * 0.15f), s) }
         if (scene.pillow) drawPillow(f0 + Offset(0f, s0 * 0.26f), s0)
         if (scene.hug) {
             val h = Offset((blob.x + f0.x) / 2, blob.y - 40 * dp + sin(t * 3f) * 4 * dp)
@@ -160,6 +162,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             napping -> Mood.SLEEPY
             scene.tappedId == f.id && now < scene.tappedUntil -> Mood.WINK
             act == "squabble" && scene.apart -> Mood.SAD
+            scene.sadId == f.id -> Mood.SAD
             act == "story" && t > 25f && i == 0 -> Mood.DROWSY
             f.p == Personality.SLEEPY -> Mood.DROWSY
             else -> Mood.HAPPY
@@ -288,4 +291,15 @@ private fun DrawScope.drawQuilt(c: Offset, s: Float, friend: Color, alpha: Float
     drawCircle(Color(0xFF7FE0A8).copy(alpha = 0.5f * alpha), s * 0.03f, Offset(left + w * 5 / 6, top + h * 0.6f))
     // The folded-over top edge.
     drawRoundRect(Color(0xFFF2EEFA).copy(alpha = alpha), Offset(left - s * 0.02f, top - s * 0.02f), Size(w + s * 0.04f, s * 0.07f), CornerRadius(s * 0.035f))
+}
+
+
+private fun DrawScope.drawStall(c: Offset, s: Float) {
+    val w = s * 1.3f
+    val top = c.y - s * 0.75f
+    drawRect(Color(0xFF8A5A3C).copy(alpha = 0.7f), Offset(c.x - w / 2, c.y + s * 0.2f), Size(w, s * 0.12f))
+    for (x in listOf(-1f, 1f)) drawLine(Color(0xFF8A5A3C).copy(alpha = 0.7f), Offset(c.x + x * w * 0.45f, top), Offset(c.x + x * w * 0.45f, c.y + s * 0.2f), 3f)
+    val stripes = 6
+    for (i in 0 until stripes) drawRect((if (i % 2 == 0) Color(0xFFFF7A8A) else Color.White).copy(alpha = 0.8f),
+        Offset(c.x - w / 2 + i * w / stripes, top), Size(w / stripes, s * 0.16f))
 }

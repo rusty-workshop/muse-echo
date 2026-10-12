@@ -201,6 +201,30 @@ class Chores(
                         val added = GadgetService.instance?.life?.friends?.addFriends(n) ?: 0
                         GadgetState.log("new friends from the laptop: $added")
                     }
+                    "gift" -> {
+                        val kind = (item["kind"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        val value = (item["value"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        val note = (item["note"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        toFront()
+                        GadgetService.instance?.life?.friends?.giftFromRusty(kind, value, note)
+                    }
+                    "export" -> scope.launch {
+                        val ok = hub.postExport(EchoBackup.collect(context, BuildConfig.VERSION_NAME, shareable = true))
+                        GadgetState.log("world export for the laptop: ${if (ok) "sent" else "failed"}")
+                    }
+                    "import" -> scope.launch {
+                        val bundle = hub.fetchImport() ?: return@launch
+                        val n = runCatching { EchoBackup.apply(context, bundle, shareable = true) }.getOrElse {
+                            GadgetState.log("world import failed: ${it.message}")
+                            return@launch
+                        }
+                        GadgetState.log("world import: $n files; restarting")
+                        GadgetState.show(Screen.Text("📦 Restored", "Puff's world was restored from a file. Restarting…"))
+                        delay(2_000)
+                        context.getSharedPreferences("museecho", Context.MODE_PRIVATE).edit().putLong("last_crash_relaunch", 0).commit()
+                        ErrorLog.scheduleRelaunch(context)
+                        android.os.Process.killProcess(android.os.Process.myPid())
+                    }
                     "ask" -> (item["what"] as? JsonPrimitive)?.contentOrNull?.let { askNow(it) }
                     "announce" -> {
                         val text = (item["text"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue

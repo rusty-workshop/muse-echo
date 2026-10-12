@@ -506,6 +506,7 @@ private fun IdleFace(actions: UiActions) {
     }
     // Visiting friends show up here too.
     FriendLayer(blobCenter, blobHalf, actions)
+    PetTapTarget(blobCenter, blobHalf)
     }
 }
 

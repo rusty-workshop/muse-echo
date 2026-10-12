@@ -22,6 +22,8 @@ enum class Decor(val label: String, val emoji: String) {
     // Gifts from friends, and their postcards.
     LAVA_LAMP("a lava lamp", "🫧"), FRIENDSHIP_PHOTO("a friendship photo", "📷"), RARE_PLANT("a rare glowing plant", "🌿"),
     POSTCARDS("postcards on the wall", "💌"),
+    // From market day (or gifts).
+    WIND_CHIME("a wind chime", "🎐"), TEAPOT("a teapot", "🫖"), CUSHION("a big cushion", "🛋️"), BUNTING("bunting", "🎏"), WALL_CLOCK("a wall clock", "🕰️"),
 }
 
 /** Pure helpers (unit-tested). */

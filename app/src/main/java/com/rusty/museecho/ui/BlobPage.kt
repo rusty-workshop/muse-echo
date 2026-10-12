@@ -50,6 +50,7 @@ import com.rusty.museecho.gadget.GadgetService
 import com.rusty.museecho.gadget.GadgetState
 import com.rusty.museecho.gadget.Screen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -78,6 +79,7 @@ internal fun BlobPage(actions: UiActions) {
                 Blob(Modifier.fillMaxSize(), actions, follower = true)
             }
             FriendLayer(center, half, actions)
+            PetTapTarget(center, half)
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(top = 64.dp, end = 40.dp, bottom = 84.dp)) {
             val blobName by GadgetState.blobName.collectAsState()
@@ -94,6 +96,8 @@ internal fun BlobPage(actions: UiActions) {
                 Tab(if (unread > 0) "✉️ $unread" else "✉️", tab == "mail") { tab = "mail" }
                 Spacer(Modifier.width(6.dp))
                 Tab("📰", tab == "comics") { tab = "comics" }
+                Spacer(Modifier.width(6.dp))
+                Tab("🎮", tab == "play") { tab = "play" }
             }
             Spacer(Modifier.height(8.dp))
             when {
@@ -101,6 +105,7 @@ internal fun BlobPage(actions: UiActions) {
                 tab == "friends" -> FriendsContent(actions, Modifier.fillMaxSize())
                 tab == "mail" -> MailContent(Modifier.fillMaxSize())
                 tab == "comics" -> ComicsContent(actions, Modifier.fillMaxSize())
+                tab == "play" -> PlayContent(Modifier.fillMaxSize())
                 else -> AlbumContent(actions, Modifier.fillMaxSize())
             }
         }
@@ -199,6 +204,24 @@ private fun FriendsContent(actions: UiActions, modifier: Modifier) {
         return
     }
     androidx.compose.foundation.lazy.LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // The adventure they're in the middle of, and the pet.
+        data.story?.takeIf { !it.done }?.let { s ->
+            item {
+                Column(Modifier.fillMaxWidth().background(Palette.amber.copy(alpha = 0.15f), RoundedCornerShape(14.dp)).padding(10.dp)) {
+                    Text("📖 ${s.title}", color = Palette.amber, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Chapter ${s.at} of ${s.chapters.size}" + if (s.at > 0) ": \"${s.chapters[s.at - 1].line}\"" else " (starts on the next visit)",
+                        color = Palette.ink, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        data.pet?.let { p ->
+            item {
+                val age = ((System.currentTimeMillis() - p.bornMs) / 86_400_000L).toInt()
+                Text("${when (p.kind) { "snail" -> "🐌"; "sprout" -> "🌱"; else -> "🐟" }} ${p.name.ifBlank { "The new pet" }} the ${p.label} · " +
+                    "$age day${if (age == 1) "" else "s"} old · patted ${p.pats} times" + if (p.fedDate == java.time.LocalDate.now().toString()) " · fed today" else "",
+                    color = Palette.muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 4.dp))
+            }
+        }
         items(data.friends.size) { i ->
             val f = data.friends[i]
             Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(14.dp)).clickable { open = f.id }.padding(10.dp),
@@ -385,4 +408,95 @@ private fun ComicPanel(p: com.rusty.museecho.gadget.Panel, data: com.rusty.musee
 private fun propEmoji(p: String) = when (p) {
     "umbrella" -> "☂️"; "coffee" -> "☕"; "letter" -> "✉️"; "gift" -> "🎁"; "cake" -> "🎂"; "star" -> "⭐"; "heart" -> "💛"
     "note" -> "📝"; "hourglass" -> "⏳"; "balloon" -> "🎈"; "package" -> "📦"; "sunglasses" -> "😎"; else -> ""
+}
+
+
+/** Play against Puff by touch: tic-tac-toe (you're X) or rock-paper-scissors, with a scoreboard. */
+@Composable
+private fun PlayContent(modifier: Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("museecho", android.content.Context.MODE_PRIVATE) }
+    val name = GadgetState.blobName.collectAsState().value.ifBlank { "Puff" }
+    var score by remember { mutableStateOf(Triple(prefs.getInt("play_you", 0), prefs.getInt("play_puff", 0), prefs.getInt("play_draw", 0))) }
+    var game by remember { mutableStateOf("ttt") }
+    var board by remember { mutableStateOf(CharArray(9) { ' ' }.concatToString()) }
+    var result by remember { mutableStateOf("") }
+    var rps by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    fun finish(outcome: Int, what: String) {
+        // outcome: 1 you won, -1 Puff won, 0 draw.
+        score = when (outcome) {
+            1 -> score.copy(first = score.first + 1)
+            -1 -> score.copy(second = score.second + 1)
+            else -> score.copy(third = score.third + 1)
+        }
+        prefs.edit().putInt("play_you", score.first).putInt("play_puff", score.second).putInt("play_draw", score.third).apply()
+        result = when (outcome) { 1 -> "You win! 🏆"; -1 -> "$name wins! 🎉"; else -> "A draw 🤝" }
+        when (outcome) {
+            1 -> { GadgetState.setMood(com.rusty.museecho.gadget.Mood.SAD, 6); GadgetState.say("Aww, you got me! 😤 Again?", 6) }
+            -1 -> { GadgetState.react(com.rusty.museecho.gadget.Reaction.CELEBRATE); GadgetState.say("I win! 🎉", 5) }
+            else -> { GadgetState.react(com.rusty.museecho.gadget.Reaction.NOD); GadgetState.say("A draw! 🤝", 5) }
+        }
+        com.rusty.museecho.gadget.DayLog.event("played $what with Rusty (${when (outcome) { 1 -> "Rusty won"; -1 -> "$name won"; else -> "a draw" }})", "game")
+    }
+
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Tab("Tic-tac-toe", game == "ttt") { game = "ttt"; result = "" }
+            Spacer(Modifier.width(6.dp))
+            Tab("Rock-paper-scissors", game == "rps") { game = "rps"; result = "" }
+            Spacer(Modifier.weight(1f))
+            Text("You ${score.first} · $name ${score.second} · draws ${score.third}", color = Palette.muted, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        if (game == "ttt") Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (r in 0 until 3) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (c in 0 until 3) {
+                        val i = r * 3 + c
+                        val ch = board[i]
+                        Box(Modifier.size(58.dp).background(Palette.card, RoundedCornerShape(8.dp)).clickable(enabled = ch == ' ' && result.isEmpty()) {
+                            val b = board.toCharArray()
+                            b[i] = 'X'
+                            board = b.concatToString()
+                            if (com.rusty.museecho.gadget.FriendsBrain.winner(b) == 'X') { finish(1, "tic-tac-toe"); return@clickable }
+                            if (b.none { it == ' ' }) { finish(0, "tic-tac-toe"); return@clickable }
+                            scope.launch {
+                                kotlinx.coroutines.delay(700)
+                                val move = com.rusty.museecho.gadget.FriendsBrain.puffMove(b, java.util.Random())
+                                b[move] = 'O'
+                                board = b.concatToString()
+                                GadgetState.react(com.rusty.museecho.gadget.Reaction.LEAN_IN)
+                                if (com.rusty.museecho.gadget.FriendsBrain.winner(b) == 'O') finish(-1, "tic-tac-toe")
+                                else if (b.none { it == ' ' }) finish(0, "tic-tac-toe")
+                            }
+                        }, contentAlignment = Alignment.Center) {
+                            Text(if (ch == ' ') "" else ch.toString(), color = if (ch == 'X') Palette.teal else Palette.coral, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Column(Modifier.padding(start = 16.dp)) {
+                Text(if (result.isNotEmpty()) result else "You're X. Tap a square!", color = Palette.ink, fontSize = 16.sp)
+                if (result.isNotEmpty()) Spacer(Modifier.height(8.dp))
+                if (result.isNotEmpty()) Tab("Play again", false) { board = CharArray(9) { ' ' }.concatToString(); result = "" }
+            }
+        } else Column {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                com.rusty.museecho.gadget.FriendsBrain.RPS_EMOJI.forEachIndexed { i, e ->
+                    Box(Modifier.size(64.dp).background(Palette.card, RoundedCornerShape(14.dp)).clickable {
+                        val puff = java.util.Random().nextInt(3)
+                        rps = i to puff
+                        GadgetState.say(com.rusty.museecho.gadget.FriendsBrain.RPS_EMOJI[puff], 4)
+                        finish(com.rusty.museecho.gadget.FriendsBrain.rps(i, puff), "rock-paper-scissors")
+                    }, contentAlignment = Alignment.Center) { Text(e, fontSize = 30.sp) }
+                }
+            }
+            rps?.let { (me, puff) ->
+                Text("You ${com.rusty.museecho.gadget.FriendsBrain.RPS_EMOJI[me]}  vs  $name ${com.rusty.museecho.gadget.FriendsBrain.RPS_EMOJI[puff]}  ·  $result",
+                    color = Palette.ink, fontSize = 16.sp, modifier = Modifier.padding(top = 10.dp))
+            }
+        }
+    }
 }

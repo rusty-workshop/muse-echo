@@ -34,7 +34,7 @@ enum class Reaction(val ms: Long) {
 }
 
 /** Something the blob holds up (blob.hold, or its own forecast props). */
-enum class HeldItem { NONE, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN, HOURGLASS }
+enum class HeldItem { NONE, WATERING_CAN, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN, HOURGLASS }
 
 data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
@@ -56,6 +56,10 @@ data class FriendScene(
     val popcorn: Boolean = false,
     val party: Boolean = false,
     val pillow: Boolean = false,
+    /** The friend (id) who turned up sad, until cheered up. */
+    val sadId: String? = null,
+    /** Market day: stalls in the room. */
+    val market: Boolean = false,
     /** Halloween costumes (witch hats) and snowballs instead of a ball. */
     val costume: Boolean = false,
     val snow: Boolean = false,
@@ -571,6 +575,18 @@ object GadgetState {
 
     /** Where the full-size blob is on screen, in window pixels, per page (0 clock, 8 Blob page). */
     val blobBounds = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Rect>()
+
+    /** The window-box garden's stage: 0 soil, 1 sprouts, 2 leaves and buds, 3 flowers. */
+    private val _garden = MutableStateFlow(0)
+    val garden: StateFlow<Int> = _garden.asStateFlow()
+
+    fun setGarden(stage: Int) {
+        _garden.value = stage
+    }
+
+    /** When the pet was last tapped or fed (it wiggles). */
+    @Volatile
+    var petPokedAt = 0L
 
     /** The main blob's own name (Pixel picks it; changeable in Setup). Empty until named. */
     private val _blobName = MutableStateFlow("")

@@ -165,6 +165,12 @@ class Hub(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    /** Puff's world as a shareable file (no secrets), for the settings page's download. */
+    suspend fun postExport(bundle: String): Boolean = withContext(Dispatchers.IO) { post("/echo/export", bundle).first == 200 }
+
+    /** A world file uploaded on the settings page, to restore. */
+    suspend fun fetchImport(): String? = withContext(Dispatchers.IO) { get("/echo/import") }
+
     suspend fun presence(): Presence? = withContext(Dispatchers.IO) {
         get("/presence")?.let { runCatching { json.decodeFromString(Presence.serializer(), it) }.getOrNull() }
     }

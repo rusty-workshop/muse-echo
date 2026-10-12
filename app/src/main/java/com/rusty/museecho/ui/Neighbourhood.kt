@@ -68,6 +68,8 @@ internal fun NeighbourhoodPage(actions: UiActions) {
     val hour = java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.HOUR_OF_DAY)
     val visiting = visit?.friendIds.orEmpty().toSet()
     val unread = data.letters.filter { !it.read && !it.fromBlob }
+    val garden by GadgetState.garden.collectAsState()
+    val marketOn = java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.SATURDAY && hour in 10..15
     val blobName by GadgetState.blobName.collectAsState()
     val weather by GadgetState.weather.collectAsState()
     val today = java.time.LocalDate.now()
@@ -122,7 +124,7 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                 verticalAlignment = Alignment.Bottom) {
                 // The blob's own house, with its mailbox: tap to read the newest unread letter.
                 House(blobName.ifBlank { "The blob" }, Palette.violet.toArgb().toLong() and 0xFFFFFFFFL, 1.15f, Where.HOME, if (unread.isNotEmpty()) "📬 ${unread.size} new letter${if (unread.size == 1) "" else "s"}" else "home",
-                    hour, mailbox = true, mailFlag = unread.isNotEmpty(), decor = decor) {
+                    hour, mailbox = true, mailFlag = unread.isNotEmpty(), decor = decor, garden = garden) {
                     val l = unread.lastOrNull()
                     if (l == null) note = "No new letters" else {
                         val from = data.friends.firstOrNull { it.id == l.friendId }?.shownName ?: "a friend"
@@ -134,7 +136,8 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                     val where = FriendsBrain.whereabouts(f, visiting, now, hour)
                     val bday = FriendsBrain.isBirthday(f, today)
                     val status = if (bday) "🎂 birthday!" else where.label + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
-                    House(f.shownName, f.color, f.p.scale, where, status, hour, decor = decor, balloons = bday) {
+                    House(f.shownName, f.color, f.p.scale, where, if (marketOn && where == Where.HOME) "selling ${FriendsBrain.marketGoods(f)}" else status,
+                        hour, decor = decor, balloons = bday, stall = marketOn && where == Where.HOME) {
                         note = when (where) {
                             Where.VISITING -> "${f.shownName} is already over! 👯"
                             Where.AWAY -> "${f.shownName} is away on a trip ✈️"
@@ -153,11 +156,13 @@ internal fun NeighbourhoodPage(actions: UiActions) {
 /** One house: walls in the owner's colour, a roof, a door and a window that tells you if they're in. */
 @Composable
 private fun House(name: String, color: Long, scale: Float, where: Where, status: String, hour: Int, mailbox: Boolean = false, mailFlag: Boolean = false,
-                  decor: StreetDecor = StreetDecor.NONE, balloons: Boolean = false, onTap: () -> Unit) {
+                  decor: StreetDecor = StreetDecor.NONE, balloons: Boolean = false, garden: Int = -1, stall: Boolean = false, onTap: () -> Unit) {
     Column(Modifier.width(104.dp).clickable(onClick = onTap), horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(Modifier.width(96.dp).height((70 + 30 * scale).dp)) {
             drawHouse(Color(color), where, hour, mailbox, mailFlag)
             drawDecor(decor, balloons)
+            if (garden >= 0) drawFrontGarden(garden)
+            if (stall) drawMarketStall()
         }
         Text(name, color = Color(color), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(status, color = Palette.muted, fontSize = 11.sp, maxLines = 1, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
@@ -239,4 +244,31 @@ private fun DrawScope.drawDecor(decor: StreetDecor, balloons: Boolean) {
             drawOval(c, Offset(anchor.x + o.x - 6f, anchor.y + o.y - 8f), Size(12f, 16f))
         }
     }
+}
+
+
+/** Puff's front garden, at the same stage as its window box. */
+private fun DrawScope.drawFrontGarden(stage: Int) {
+    val y = size.height - 2f
+    for (i in 0 until 4) {
+        val x = size.width * (0.18f + i * 0.08f)
+        when (stage) {
+            0 -> drawCircle(Color(0xFF5A3A28), 2f, Offset(x, y))
+            1 -> drawLine(Color(0xFF7FE0A8), Offset(x, y), Offset(x, y - 5f), 2f)
+            else -> {
+                drawLine(Color(0xFF5FBF7F), Offset(x, y), Offset(x, y - 10f), 2f)
+                drawCircle(if (stage == 3) listOf(Color(0xFFFF7A9A), Color(0xFFFFC266), Color(0xFFC79BFF))[i % 3] else Color(0xFF9FD97F), 3f, Offset(x, y - 11f))
+            }
+        }
+    }
+}
+
+/** Market day: a small striped stall in front of the house. */
+private fun DrawScope.drawMarketStall() {
+    val w = size.width * 0.5f
+    val x = size.width * 0.02f
+    val top = size.height - size.height * 0.32f
+    for (i in 0 until 5) drawRect(if (i % 2 == 0) Color(0xFFFF7A8A) else Color.White, Offset(x + i * w / 5, top), Size(w / 5, 7f))
+    drawRect(Color(0xFF8A5A3C), Offset(x, size.height - 12f), Size(w, 6f))
+    for (sx in listOf(x + 2f, x + w - 4f)) drawLine(Color(0xFF8A5A3C), Offset(sx, top), Offset(sx, size.height - 6f), 2f)
 }

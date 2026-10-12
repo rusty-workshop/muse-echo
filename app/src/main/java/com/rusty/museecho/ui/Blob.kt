@@ -1216,6 +1216,17 @@ private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float,
     val a = core + Offset(-r * 0.44f, r * 0.36f)
     when (item) {
         HeldItem.NONE -> {}
+        HeldItem.WATERING_CAN -> rotate(-20f + sin(t * 2f) * 4f, a) {
+            // Tilted, pouring a few drops.
+            val can = Color(0xFF6FB3A8)
+            drawRoundRect(can, Offset(a.x - r * 0.1f, a.y - r * 0.08f), Size(r * 0.2f, r * 0.16f), CornerRadius(r * 0.03f))
+            drawLine(can, Offset(a.x + r * 0.09f, a.y - r * 0.02f), Offset(a.x + r * 0.2f, a.y - r * 0.1f), r * 0.03f, StrokeCap.Round)
+            drawArc(can, 180f, 180f, false, Offset(a.x - r * 0.07f, a.y - r * 0.15f), Size(r * 0.12f, r * 0.12f), style = Stroke(width = r * 0.02f))
+            for (i in 0..2) {
+                val p = ((t * 1.5f + i * 0.33f) % 1f)
+                drawCircle(Color(0xFF9FE3F0).copy(alpha = 1f - p), r * 0.012f, Offset(a.x + r * (0.22f + 0.02f * i), a.y - r * 0.08f + p * r * 0.25f))
+            }
+        }
         HeldItem.PACKAGE -> {
             drawRect(cardboard, Offset(a.x - r * 0.13f, a.y - r * 0.1f), Size(r * 0.26f, r * 0.2f))
             drawRect(tape, Offset(a.x - r * 0.025f, a.y - r * 0.1f), Size(r * 0.05f, r * 0.2f))

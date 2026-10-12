@@ -106,4 +106,39 @@ PANEL: Bean, Moss | happy | heart | room | Best gift ever. | The end"""
         assertTrue(Regex("\\d{2}-\\d{2}").matches(b))
         assertTrue(FriendsBrain.isBirthday(Friend("a", birthday = "10-12"), java.time.LocalDate.of(2026, 10, 12)))
     }
+
+    @Test
+    fun storiesParse() {
+        val reply = """TITLE: Pebble's Big Climb
+CAST: Pebble, Doze
+CHAPTER: Pebble | I'm going to climb the bookshelf!
+CHAPTER: Doze | I'll be base camp. *yawn*
+CHAPTER: Pebble | Training day: ten tiny push-ups!
+CHAPTER: Puff | Pebble made it to the top! 🎉"""
+        val s = FriendsBrain.parseStory(reply, "2026-10-12")!!
+        assertEquals("Pebble's Big Climb", s.title)
+        assertEquals(listOf("Pebble", "Doze"), s.cast)
+        assertEquals(4, s.chapters.size)
+        assertEquals("Doze", s.next!!.copy().let { s.chapters[1].who })
+        assertEquals(false, s.done)
+        assertEquals(true, s.copy(at = 4).done)
+        assertNull(FriendsBrain.parseStory("TITLE: x\nCAST: a\nCHAPTER: a | b", "d"))
+    }
+
+    @Test
+    fun gardenGrows() {
+        assertEquals(0, FriendsBrain.gardenStage(0, 0, 6))
+        assertEquals(1, FriendsBrain.gardenStage(3, 0, 6))
+        assertEquals(2, FriendsBrain.gardenStage(3, 3, 6))
+        assertEquals(3, FriendsBrain.gardenStage(10, 0, 6))
+        assertEquals(2, FriendsBrain.gardenStage(10, 0, 12), "no flowers in December")
+    }
+
+    private fun assertEquals(expected: Int, actual: Int, msg: String) = org.junit.Assert.assertEquals(msg, expected.toLong(), actual.toLong())
+
+    @Test
+    fun puffTakesTheWin() {
+        val b = "OO XX    ".toCharArray()
+        assertEquals(2, FriendsBrain.puffMove(b, java.util.Random(1)))
+    }
 }

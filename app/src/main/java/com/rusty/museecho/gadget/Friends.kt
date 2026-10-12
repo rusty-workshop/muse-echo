@@ -62,6 +62,26 @@ data class Letter(val friendId: String, val date: String, val text: String, val 
 data class Panel(val who: List<String>, val mood: String = "happy", val prop: String = "", val place: String = "room",
     val speech: String = "", val caption: String = "")
 
+/** One step of a multi-day story: who says it, and the line. */
+@Serializable
+data class StoryBeat(val who: String, val line: String)
+
+/** A little story that plays out over several days, a chapter a day, in visits, letters and comics. */
+@Serializable
+data class Storyline(val title: String, val cast: List<String>, val chapters: List<StoryBeat>, val at: Int = 0,
+    val started: String = "", val lastPlayed: String = "") {
+    val done get() = at >= chapters.size
+    val next get() = chapters.getOrNull(at)
+}
+
+/** Puff's pet: what it is, its name, and when it arrived (it grows over the weeks). */
+@Serializable
+data class Pet(val kind: String, val name: String = "", val bornMs: Long = 0, val fedDate: String = "", val pats: Int = 0) {
+    /** 0.6 when new, full size after a month. */
+    fun growth(nowMs: Long) = (0.6f + 0.4f * ((nowMs - bornMs) / (30 * 86_400_000f))).coerceIn(0.6f, 1f)
+    val label get() = when (kind) { "snail" -> "snail"; "sprout" -> "sprout"; else -> "goldfish" }
+}
+
 /** The evening comic strip about the blob's day (three panels, written by Pixel). */
 @Serializable
 data class Comic(val date: String, val title: String, val panels: List<Panel>)
@@ -82,6 +102,11 @@ data class FriendsData(
     val happenings: List<Happening> = emptyList(),
     val letters: List<Letter> = emptyList(),
     val comics: List<Comic> = emptyList(),
+    val story: Storyline? = null,
+    val pastStories: List<String> = emptyList(),
+    val pet: Pet? = null,
+    /** A friend Puff cheered up, who should write to say thanks (its id). */
+    val owesThanks: String? = null,
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -118,7 +143,7 @@ object FriendsBrain {
     /** Everything a visit can be. */
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
-        "birthday", "trickortreat", "snowball", "blockparty", "talentshow")
+        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -222,6 +247,61 @@ object FriendsBrain {
         else -> Where.HOME
     }
 
+    fun storyPrompt(blobName: String, friends: List<Friend>, past: List<String>): String =
+        "Start a little story that will play out over 4 or 5 days for $blobName (the blob on my Echo Show) and its friends " +
+            friends.joinToString { "${it.name} (${it.p.label}: ${it.bio})" } + ". Something small and cute with a goal, e.g. a climb, a show, " +
+            "a lost thing, a building project, a surprise. " + (if (past.isNotEmpty()) "Earlier stories (don't repeat): ${past.joinToString()}. " else "") +
+            "Pick 1 to 3 of the friends as the cast. One chapter a day; each chapter is ONE short line (under 90 characters) said by a cast member " +
+            "(or by $blobName), moving the story on; the last chapter wraps it up happily. Reply in exactly this format and nothing else " +
+            "(no commands, don't change any device):\nTITLE: the title\nCAST: names, comma separated\nCHAPTER: who | the line\n(4 or 5 CHAPTER lines)"
+
+    fun parseStory(reply: String, date: String): Storyline? {
+        val title = Regex("""(?im)^\W*title\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"') ?: return null
+        val cast = Regex("""(?im)^\W*cast\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.split(",")?.map { it.trim().trim('*') }
+            ?.filter { it.isNotEmpty() }.orEmpty()
+        val beats = Regex("""(?im)^\W*chapter(?:\s*\d)?\W*:\s*(.+)$""").findAll(reply).mapNotNull { m ->
+            val parts = m.groupValues[1].split("|", limit = 2).map { it.trim().trim('*', '"') }
+            if (parts.size == 2 && parts[1].isNotEmpty()) StoryBeat(parts[0], parts[1].take(120)) else null
+        }.take(6).toList()
+        return if (beats.size >= 3 && cast.isNotEmpty()) Storyline(title.take(60), cast.take(3), beats, 0, date) else null
+    }
+
+    val PET_KINDS = listOf("goldfish", "snail", "sprout")
+
+    fun petNamePrompt(kind: String, blobName: String, taken: List<String>): String =
+        "$blobName (the blob on my Echo Show) just got a tiny pet $kind for its room. Give it a short, cute one-word name" +
+            (if (taken.isNotEmpty()) " that isn't one of these: ${taken.joinToString()}" else "") +
+            ". Reply in exactly this format and nothing else (no commands, don't change any device):\nNAME: the name"
+
+    /** Why a friend might turn up sad (Puff cheers it up). */
+    fun sadReason(f: Friend, rnd: java.util.Random): String = when (f.p) {
+        Personality.SHY -> listOf("I lost my favourite pebble… 🥺", "Someone laughed at my bow… 😢")
+        Personality.SLEEPY -> listOf("I had a bad dream… 😟", "I couldn't sleep at all… 😩")
+        Personality.SPARKLY -> listOf("My glitter ran out!! 😭", "Nobody noticed my new sparkle… 😔")
+        Personality.TINY -> listOf("I couldn't reach the top shelf… 😞", "A pigeon was mean to me… 😢")
+        Personality.BOUNCY -> listOf("I bounced too high and bonked my head… 🤕", "It rained on my picnic… 🌧️")
+    }.let { it[rnd.nextInt(it.size)] }
+
+    /** What each friend sells on market day. */
+    fun marketGoods(f: Friend): String = when (f.p) {
+        Personality.BOUNCY -> "bouncy balls 🎾"
+        Personality.SHY -> "smooth pebbles 🪨"
+        Personality.SLEEPY -> "extra-soft pillows 🛌"
+        Personality.SPARKLY -> "glitter jars ✨"
+        Personality.TINY -> "tiny hats 🎩"
+    }
+
+    /** Things Puff can bring home from the market (and get as gifts). */
+    val MARKET = listOf(Decor.WIND_CHIME, Decor.TEAPOT, Decor.CUSHION, Decor.BUNTING, Decor.WALL_CLOCK)
+
+    /** The window-box garden's stage from its age in days (rain counts double). */
+    fun gardenStage(days: Int, rainyDays: Int, month: Int): Int {
+        val grown = days + rainyDays
+        val stage = when { grown < 2 -> 0; grown < 5 -> 1; grown < 9 -> 2; else -> 3 }
+        // Flowers only in the growing season (March to October); otherwise just leaves.
+        return if (stage == 3 && month !in 3..10) 2 else stage
+    }
+
     fun activityLabel(a: String) = when (a) {
         "tictactoe" -> "tic-tac-toe"
         "rps" -> "rock-paper-scissors"
@@ -241,6 +321,8 @@ object FriendsBrain {
         "snowball" -> "a snowball fight"
         "blockparty" -> "the block party"
         "talentshow" -> "a talent show"
+        "sad" -> "a cheer-up chat"
+        "market" -> "market day"
         "nap" -> "a nap"
         else -> a
     }
@@ -308,6 +390,15 @@ object FriendsBrain {
         val copy = b.copyOf()
         copy[cell] = who
         return winner(copy) == who
+    }
+
+    /** Puff's tic-tac-toe move as O: win if it can, block you, else the middle or anywhere (a bit beatable). */
+    fun puffMove(b: CharArray, rnd: java.util.Random): Int {
+        val free = (0 until 9).filter { b[it] == ' ' }
+        return free.firstOrNull { wins(b, it, 'O') }
+            ?: free.firstOrNull { wins(b, it, 'X') && rnd.nextInt(5) > 0 }
+            ?: (if (4 in free && rnd.nextBoolean()) 4 else null)
+            ?: free[rnd.nextInt(free.size)]
     }
 
     /** Rock-paper-scissors: 1 if [a] beats [b], -1 if it loses, 0 for a tie (0 rock, 1 paper, 2 scissors). */
