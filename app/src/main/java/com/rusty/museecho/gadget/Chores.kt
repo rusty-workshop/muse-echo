@@ -485,6 +485,7 @@ class Chores(
             put("background", p.background)
             put("room_sense", p.roomSense)
             put("blob_name", p.blobName)
+            put("still_until_ms", if (p.stillUntil == Long.MAX_VALUE) -1L else p.stillUntil)
             put("blob_room", p.blobRoom)
             put("page_order", buildJsonArray { com.rusty.museecho.ui.HomePage.ordered(p.pageOrder).forEach { add(JsonPrimitive(it.name)) } })
             put("pages_hidden", buildJsonArray { p.pagesHidden.forEach { add(JsonPrimitive(it)) } })

@@ -586,6 +586,19 @@ object GadgetState {
     @Volatile
     var petPokedAt = 0L
 
+    /**
+     * "Hold still": no idle motion (breathing, drifting, idle antics, energy hops, friends bobbing)
+     * until this time; Long.MAX_VALUE means until turned off, 0 means off.
+     */
+    private val _stillUntil = MutableStateFlow(0L)
+    val stillUntil: StateFlow<Long> = _stillUntil.asStateFlow()
+
+    fun setStillUntil(ms: Long) {
+        _stillUntil.value = ms
+    }
+
+    fun holdingStill() = _stillUntil.value > System.currentTimeMillis()
+
     /** The main blob's own name (Pixel picks it; changeable in Setup). Empty until named. */
     private val _blobName = MutableStateFlow("")
     val blobName: StateFlow<String> = _blobName.asStateFlow()

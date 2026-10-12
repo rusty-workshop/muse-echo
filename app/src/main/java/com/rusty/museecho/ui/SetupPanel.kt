@@ -310,6 +310,19 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 }
                 speedResult?.let { Body(it, Palette.muted) }
 
+                SectionTitle("Hold still")
+                val stillUntil by GadgetState.stillUntil.collectAsState()
+                val stillOn = stillUntil > System.currentTimeMillis()
+                Body(when {
+                    !stillOn -> "${GadgetState.BlobCalled()} and its friends breathe, drift and fidget when idle. Stop that for a while:"
+                    stillUntil == Long.MAX_VALUE -> "Holding still until you turn it off. (Reactions, talking, games and visits still move.)"
+                    else -> "Holding still until ${java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(stillUntil))}. (Reactions, talking, games and visits still move.)"
+                }, Palette.muted)
+                ChoiceRow(options = listOf("0" to "Off", "30" to "30 min", "60" to "1 hour", "120" to "2 hours", "-1" to "Until I turn it off"),
+                    selected = if (!stillOn) "0" else "") {
+                    com.rusty.museecho.gadget.GadgetService.instance?.setStill(it.toInt())
+                }
+
                 SectionTitle("${GadgetState.BlobCalled()}'s energy")
                 val ctx = androidx.compose.ui.platform.LocalContext.current
                 val energy by GadgetState.blobEnergy.collectAsState()

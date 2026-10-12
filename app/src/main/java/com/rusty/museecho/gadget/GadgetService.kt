@@ -148,6 +148,7 @@ class GadgetService : Service() {
         GadgetState.setDiaryOn(Prefs(this).diary)
         GadgetState.setPages(Prefs(this).pageOrder, Prefs(this).pagesHidden)
         GadgetState.setBlobName(Prefs(this).blobName)
+        GadgetState.setStillUntil(Prefs(this).stillUntil)
         Prefs(this).dailyThingJson?.let { j ->
             runCatching { kotlinx.serialization.json.Json.decodeFromString(DailyThing.serializer(), j) }.getOrNull()
                 ?.takeIf { Prefs(this).dailyThing }?.let(GadgetState::setDailyThing)
@@ -345,6 +346,18 @@ class GadgetService : Service() {
     }
 
     /** Extra fields for device.health: how the app itself is doing. */
+    /** Hold still for [minutes] (-1: until turned off; 0: off). */
+    fun setStill(minutes: Int) {
+        val until = when {
+            minutes < 0 -> Long.MAX_VALUE
+            minutes == 0 -> 0L
+            else -> System.currentTimeMillis() + minutes * 60_000L
+        }
+        Prefs(this).stillUntil = until
+        GadgetState.setStillUntil(until)
+        GadgetState.log(if (until == 0L) "moving again" else "holding still" + if (minutes > 0) " for $minutes min" else "")
+    }
+
     fun healthReport() = runCatching { commands.healthReport() }.getOrNull()
 
     fun healthExtras() = kotlinx.serialization.json.buildJsonObject {
@@ -1029,6 +1042,7 @@ class GadgetService : Service() {
             p.pagesHidden = arr.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.toSet()
             GadgetState.setPages(p.pageOrder, p.pagesHidden); done += "pages_hidden"
         }
+        num("still_minutes")?.let { v -> setStill(v.toInt()); done += "still_minutes" }
         str("blob_name")?.let { v -> p.blobName = v; GadgetState.setBlobName(p.blobName); done += "blob_name" }
         bool("blob_room")?.let { v -> p.blobRoom = v; life.loadRoom(); done += "blob_room" }
         bool("blob_friend")?.let { v -> p.blobFriend = v; if (!v) life.endVisit(); done += "blob_friend" }
@@ -2111,6 +2125,11 @@ class Prefs(context: Context) {
     var blobBirthday: String
         get() = prefs.getString("blob_birthday", null) ?: "10-05"
         set(v) = prefs.edit().putString("blob_birthday", v).apply()
+
+    /** Hold still until (epoch ms; Long.MAX_VALUE = until turned off; 0 = off). */
+    var stillUntil: Long
+        get() = prefs.getLong("still_until", 0L)
+        set(v) = prefs.edit().putLong("still_until", v).apply()
 
     var blobRoom: Boolean
         get() = prefs.getBoolean("blob_room", true)

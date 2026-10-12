@@ -159,6 +159,8 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
                 "hype" -> y -= (1 - abs(sin(t * PI.toFloat() * 2.3f))) * 14 * dp
                 else -> y -= abs(sin(t * PI.toFloat() * 2f + i)) * 10 * dp
             }
+            // Idle bobbing (not while Rusty has asked everyone to hold still).
+            GadgetState.holdingStill() -> {}
             f.p == Personality.BOUNCY && (t % 3f) < 0.4f -> y -= sin((t % 3f) / 0.4f * PI.toFloat()) * 12 * dp
             f.p == Personality.SLEEPY -> y += sin(t * 0.8f) * 2 * dp
         }

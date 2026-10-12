@@ -143,6 +143,17 @@ internal fun Blob(
     // Playing catch (or a snowball fight): hold still so the ball really lands on its head.
     val catchGame by GadgetState.friendScene.collectAsState()
     val holdStill = catchGame.throwAt > 0
+    // Rusty asked it to hold still (Setup or the settings page): no idle motion, until the timer runs out.
+    val stillUntil by GadgetState.stillUntil.collectAsState()
+    var stillNow by remember { mutableStateOf(false) }
+    LaunchedEffect(stillUntil) {
+        stillNow = stillUntil > System.currentTimeMillis()
+        if (stillNow && stillUntil != Long.MAX_VALUE) {
+            delay(stillUntil - System.currentTimeMillis())
+            stillNow = false
+        }
+    }
+    val idleStill = stillNow
     val leaveBy by GadgetState.leaveBy.collectAsState()
     val work by GadgetState.assignments.collectAsState()
     val guest = if (mini) false else rememberGuest()
@@ -299,7 +310,7 @@ internal fun Blob(
             delay((base + Math.random() * base).toLong())
             val (q, s, tk) = state.value
             val now = System.currentTimeMillis()
-            if (!q && !s && tk == Talk.IDLE && !musicOn.value && now - GadgetState.lastChat > 6 * 3_600_000L) {
+            if (!q && !s && tk == Talk.IDLE && !musicOn.value && now - GadgetState.lastChat > 6 * 3_600_000L && !GadgetState.holdingStill()) {
                 GadgetState.react(Reaction.NUDGE)
                 GadgetState.say(BlobBrain.BORED.random(), 20)
             }
@@ -346,7 +357,7 @@ internal fun Blob(
             delay((base + Math.random() * base).toLong())
             val (q, s, tk) = state.value
             val idleFor = System.currentTimeMillis() - GadgetState.lastTouch
-            if (!q && !s && tk == Talk.IDLE && !GadgetState.ringing.value && !musicOn.value && idleFor > 60_000) {
+            if (!q && !s && tk == Talk.IDLE && !GadgetState.ringing.value && !musicOn.value && idleFor > 60_000 && !GadgetState.holdingStill()) {
                 GadgetState.react(antics.random())
             }
         }
@@ -576,7 +587,7 @@ internal fun Blob(
             val munch = if (accessory == Accessory.POPCORN && (t % 5f) < 1.5f) abs(sin(t * 9f)) else 0f
 
             // Hyper: a little hop every few seconds.
-            if (energy > 0.8f && react == null && talk == Talk.IDLE && !quiet) {
+            if (energy > 0.8f && react == null && talk == Talk.IDLE && !quiet && !idleStill) {
                 val ph = (t % 4f) / 0.35f
                 if (ph < 1f) dy -= sin(ph * PIF) * r * 0.05f * (energy - 0.8f) * 5f
             }
@@ -605,9 +616,9 @@ internal fun Blob(
             sm.breath += dt * TAU / (9f - 4f * energy)
             sm.drift += dt * (0.6f + 0.8f * energy) / 14f
             sm.energyAmp += ((0.04f + 0.06f * energy) - sm.energyAmp) * ease(2f)
-            val breatheNow = if (holdStill) 1f else 0.99f + sm.energyAmp * sin(sm.breath) + 0.08f * voice + 0.12f * mic
+            val breatheNow = if (holdStill) 1f else if (idleStill) 1f + 0.08f * voice + 0.12f * mic else 0.99f + sm.energyAmp * sin(sm.breath) + 0.08f * voice + 0.12f * mic
             val angle = (sm.drift % 1f) * TAU
-            val shift = if (holdStill) Offset.Zero else Offset(cos(angle) * r * 0.18f, sin(angle) * r * 0.18f)
+            val shift = if (holdStill || idleStill) Offset.Zero else Offset(cos(angle) * r * 0.18f, sin(angle) * r * 0.18f)
             val body = c + Offset(sm.dx, sm.dy)
             // Mood, accessory and prop changes cross-fade instead of popping.
             if (mood != sm.mood) { sm.prevMood = sm.mood; sm.mood = mood; sm.moodAt = t }
