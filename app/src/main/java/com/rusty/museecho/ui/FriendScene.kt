@@ -118,7 +118,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             drawCup(f0 + Offset(-18 * dp, s0 * 0.42f), dp)
         }
         if (scene.book) drawBook(Offset(mid.x, blob.y + 52 * dp), dp)
-        if (scene.pillow) drawRoundRect(Color.White.copy(alpha = 0.55f), f0 + Offset(-s0 * 0.42f, s0 * 0.22f), Size(s0 * 0.84f, s0 * 0.22f), CornerRadius(8 * dp))
+        if (scene.pillow) drawPillow(f0 + Offset(0f, s0 * 0.26f), s0)
         if (scene.hug) {
             val h = Offset((blob.x + f0.x) / 2, blob.y - 40 * dp + sin(t * 3f) * 4 * dp)
             drawHeartShape(h, 12 * dp, Color(0xFFFF7A8A))
@@ -198,6 +198,11 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         if (enter > 0.9f && !hiding && f.name.isNotBlank()) Text(f.name, color = Color(f.color), fontSize = 11.sp,
             modifier = Modifier.offset { IntOffset((x - size * 0.25f).toInt(), (y + size * 0.42f).toInt()) })
     }
+    // Sleepover: a little quilt over the friend's lower half (on top of it).
+    if (scene.pillow && enter > 0.5f) Canvas(Modifier.fillMaxSize()) {
+        val (f0, s0) = spots.first()
+        drawQuilt(f0, s0, Color(friends.first().color), enter)
+    }
     // The snack in the middle of tea time, as an emoji.
     if (scene.teacups && scene.snack.isNotEmpty()) {
         val (f0, _) = spots.first()
@@ -247,4 +252,39 @@ private fun DrawScope.drawHeartShape(c: Offset, s: Float, color: Color) {
     drawCircle(color, s * 0.5f, c + Offset(-s * 0.45f, 0f))
     drawCircle(color, s * 0.5f, c + Offset(s * 0.45f, 0f))
     drawPath(Path().apply { moveTo(c.x - s * 0.95f, c.y + s * 0.15f); lineTo(c.x + s * 0.95f, c.y + s * 0.15f); lineTo(c.x, c.y + s * 1.1f); close() }, color)
+}
+
+
+/** A puffy pillow under a sleeping friend: pinched corners, a soft shade and a seam. */
+private fun DrawScope.drawPillow(c: Offset, s: Float) {
+    val w = s * 0.95f
+    val h = s * 0.3f
+    val path = Path().apply {
+        moveTo(c.x - w / 2, c.y - h / 2)
+        quadraticTo(c.x, c.y - h * 0.62f, c.x + w / 2, c.y - h / 2)
+        quadraticTo(c.x + w * 0.44f, c.y, c.x + w / 2, c.y + h / 2)
+        quadraticTo(c.x, c.y + h * 0.62f, c.x - w / 2, c.y + h / 2)
+        quadraticTo(c.x - w * 0.44f, c.y, c.x - w / 2, c.y - h / 2)
+        close()
+    }
+    drawPath(path, Color(0xFFE9E4F5))
+    drawPath(path, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0x33000000)), c.y - h / 2, c.y + h / 2))
+    drawLine(Color(0x22000000), Offset(c.x - w * 0.36f, c.y), Offset(c.x + w * 0.36f, c.y), 1.5f)
+}
+
+/** A small patchwork quilt over the lower half of a sleeping friend ([c] its centre, [s] its size). */
+private fun DrawScope.drawQuilt(c: Offset, s: Float, friend: Color, alpha: Float) {
+    val top = c.y + s * 0.08f
+    val w = s * 0.86f
+    val h = s * 0.32f
+    val left = c.x - w / 2
+    val quilt = androidx.compose.ui.graphics.lerp(friend, Color(0xFF3A3F8F), 0.55f)
+    drawRoundRect(quilt.copy(alpha = alpha), Offset(left, top), Size(w, h), CornerRadius(s * 0.08f))
+    // Patches and stitching.
+    for (k in 1..2) drawLine(Color.White.copy(alpha = 0.18f * alpha), Offset(left + w * k / 3, top + s * 0.05f), Offset(left + w * k / 3, top + h), 1.5f)
+    drawCircle(Color(0xFFFFC266).copy(alpha = 0.5f * alpha), s * 0.03f, Offset(left + w / 6, top + h * 0.6f))
+    drawCircle(Color(0xFFFF9EC7).copy(alpha = 0.5f * alpha), s * 0.03f, Offset(left + w / 2, top + h * 0.6f))
+    drawCircle(Color(0xFF7FE0A8).copy(alpha = 0.5f * alpha), s * 0.03f, Offset(left + w * 5 / 6, top + h * 0.6f))
+    // The folded-over top edge.
+    drawRoundRect(Color(0xFFF2EEFA).copy(alpha = alpha), Offset(left - s * 0.02f, top - s * 0.02f), Size(w + s * 0.04f, s * 0.07f), CornerRadius(s * 0.035f))
 }
