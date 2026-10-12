@@ -528,6 +528,21 @@ class Chores(
                     put(name, buildJsonArray { list.forEach { a -> add(buildJsonObject { put("label", a.label); put("prompt", a.prompt) }) } })
                 }
             })
+            // Friendly names and a line about each, where the internal names don't say enough.
+            put("choice_labels", buildJsonObject {
+                put("wake_sensitivity", buildJsonObject {
+                    WakeWord.Sensitivity.entries.forEach { put(it.name, it.label) }
+                })
+                put("theme", buildJsonObject { com.rusty.museecho.ui.AppTheme.entries.forEach { put(it.name, it.label) } })
+                put("background", buildJsonObject { com.rusty.museecho.ui.AppBackground.entries.forEach { put(it.name, it.label) } })
+            })
+            put("choice_hints", buildJsonObject {
+                put("wake_sensitivity", buildJsonObject {
+                    put("LOW", "Needs a clear, close phrase it's very sure of (92%). Fewest false wake-ups.")
+                    put("MEDIUM", "Hears you across the room; needs the whole phrase, clearly (85%). A good default.")
+                    put("HIGH", "Wakes most easily: quiet speech and the last word alone (76%). Most false wake-ups.")
+                })
+            })
             put("choices", buildJsonObject {
                 put("clock_face", buildJsonArray { com.rusty.museecho.ui.ClockFace.entries.forEach { add(JsonPrimitive(it.name)) } })
                 put("frame_clock", buildJsonArray { com.rusty.museecho.ui.FrameClock.entries.forEach { add(JsonPrimitive(it.name)) } })
