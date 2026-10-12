@@ -513,6 +513,8 @@ private fun IdleFace(actions: UiActions) {
     PetTapTarget(blobCenter, blobHalf)
     TreasureTapLayer(blobCenter, blobHalf)
     BookshelfTapTarget(blobCenter, blobHalf)
+    WindowTapTarget(blobCenter, blobHalf)
+    SouvenirBadge(blobCenter, blobHalf)
     }
 }
 

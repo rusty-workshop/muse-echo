@@ -62,7 +62,11 @@ internal fun NeighbourhoodPage(actions: UiActions) {
     val sky = remember(weatherNow) { StreetWeather.of(weatherNow?.summary) }
     val month = java.time.LocalDate.now().monthValue
     // Rain, snow, falling leaves or blossom move ~10 times a second; otherwise twice a minute is plenty.
-    val moving = sky == StreetWeather.RAIN || sky == StreetWeather.STORM || sky == StreetWeather.SNOW || month in 3..5 || month in 9..11
+    val preview by GadgetState.festivalPreview.collectAsState()
+    val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    val fest = preview?.takeIf { it.second > now }?.let { p -> FriendsBrain.Festival.entries.firstOrNull { it.name == p.first } }
+        ?: FriendsBrain.festival(java.time.LocalDate.now(), hourNow)
+    val moving = fest == FriendsBrain.Festival.PARADE || sky == StreetWeather.RAIN || sky == StreetWeather.STORM || sky == StreetWeather.SNOW || month in 3..5 || month in 9..11
     LaunchedEffect(moving) {
         while (true) {
             kotlinx.coroutines.delay(if (moving) 100 else 30_000)
@@ -103,6 +107,11 @@ internal fun NeighbourhoodPage(actions: UiActions) {
             }
             drawRect(Brush.verticalGradient(sky.map { it.copy(alpha = 0.18f) }))
             drawSeasonAndWeather(street, month, hour, now, rainedToday)
+            when (fest) {
+                FriendsBrain.Festival.FAIR -> drawHarvestFair()
+                FriendsBrain.Festival.PARADE -> drawLightsParade(now, data.friends.map { Color(it.color) } + Palette.violet)
+                null -> {}
+            }
             if (hour >= 20 || hour < 6) for (i in 0 until 30) {
                 drawCircle(Color.White.copy(alpha = 0.35f), 1.4f, Offset((i * 0.618f * 997f) % size.width, (i * 0.414f * 613f) % (size.height * 0.5f)))
             }
@@ -130,7 +139,7 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                 Text("Neighbourhood", color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
                 if (note.isNotEmpty()) Text("   $note", color = Palette.teal, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text("Tap a house to look inside.", color = Palette.muted, fontSize = 13.sp)
+            Text(fest?.label ?: "Tap a house to look inside.", color = if (fest != null) Palette.amber else Palette.muted, fontSize = 13.sp)
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.Bottom) {
@@ -153,7 +162,16 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                     val whereLabel = if (where == Where.VISITING) "visiting ${blobName.ifBlank { "the blob" }}" else where.label
                     val status = if (bday) "🎂 birthday!" else whereLabel + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
                     House(f.shownName, f.color, f.p.scale, where, if (marketOn && where == Where.HOME) "selling ${FriendsBrain.marketGoods(f)}" else status,
-                        hour, decor = decor, balloons = bday, stall = marketOn && where == Where.HOME) { inside = f.id }
+                        hour, decor = decor, balloons = bday, stall = (marketOn || fest == FriendsBrain.Festival.FAIR) && where == Where.HOME) { inside = f.id }
+                }
+                // A new house going up (a week of building), until someone moves in.
+                data.building?.takeIf { it.friendId.isEmpty() }?.let { b ->
+                    val day = runCatching { java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(b.startDate), java.time.LocalDate.now()).toInt() }.getOrDefault(0)
+                    Column(Modifier.width(104.dp).clickable { note = "Someone's moving in soon… 🏗️" }, horizontalAlignment = Alignment.CenterHorizontally) {
+                        Canvas(Modifier.width(96.dp).height(100.dp)) { drawBuildingSite(day.coerceIn(0, 7), now) }
+                        Text("New house", color = Palette.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (day >= 7) "moving day!" else "building · day ${day + 1} of 7", color = Palette.muted, fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -471,5 +489,89 @@ private fun DrawScope.drawSeasonAndWeather(w: StreetWeather, month: Int, hour: I
             drawArc(Color(c).copy(alpha = 0.35f), 180f, 180f, false, Offset(size.width * 0.5f - r, road - r * 0.9f), Size(r * 2, r * 2),
                 style = androidx.compose.ui.graphics.drawscope.Stroke(8.dp.toPx()))
         }
+    }
+}
+
+/** A house going up over a week: the plot and foundations, a frame in scaffolding, walls, then the roof. */
+private fun DrawScope.drawBuildingSite(day: Int, now: Long) {
+    val w = size.width * 0.78f
+    val wallH = size.height * 0.52f
+    val left = (size.width - w) / 2
+    val top = size.height - wallH
+    val wood = Color(0xFFB08A5A)
+    // Foundations.
+    drawRect(Color(0xFF8A8A8A), Offset(left - 4f, size.height - 6f), Size(w + 8f, 6f))
+    // Walls rising with the days.
+    val built = ((day - 1).coerceAtLeast(0) / 4f).coerceAtMost(1f)
+    if (day >= 1) {
+        for (k in 0..4) drawLine(wood, Offset(left + w * k / 4, size.height), Offset(left + w * k / 4, top), 3f)
+        drawLine(wood, Offset(left, top), Offset(left + w, top), 3f)
+        drawRect(Color(0xFFC9B8A8), Offset(left, size.height - wallH * built), Size(w, wallH * built))
+    }
+    // The roof on the last days.
+    if (day >= 5) drawPath(Path().apply {
+        moveTo(left - w * 0.08f, top + 2f); lineTo(size.width / 2, top - size.height * 0.36f * (if (day >= 6) 1f else 0.5f)); lineTo(left + w * 1.08f, top + 2f); close()
+    }, Color(0xFF7A5536))
+    // Scaffolding until it's done, and a little crane swinging.
+    if (day < 7) {
+        for (k in 0..2) drawLine(Color(0xFFFFC266), Offset(left - 8f + k * (w + 16f) / 2, size.height), Offset(left - 8f + k * (w + 16f) / 2, top - 10f), 2f)
+        drawLine(Color(0xFFFFC266), Offset(left - 8f, top + wallH * 0.4f), Offset(left + w + 8f, top + wallH * 0.4f), 2f)
+        val swing = kotlin.math.sin(now / 1500f) * 6f
+        drawLine(Color(0xFFFF9A3C), Offset(left + w + 4f, top - 30f), Offset(left + w * 0.3f, top - 30f), 3f)
+        drawLine(Color(0xFFFF9A3C), Offset(left + w + 4f, top - 30f), Offset(left + w + 4f, size.height), 3f)
+        drawLine(Color.White.copy(alpha = 0.6f), Offset(left + w * 0.45f, top - 30f), Offset(left + w * 0.45f + swing, top - 10f), 1f)
+        drawRect(Color(0xFF8A8A8A), Offset(left + w * 0.45f + swing - 5f, top - 10f), Size(10f, 6f))
+    }
+}
+
+/** The harvest fair: autumn bunting, hay bales, an apple barrel and pumpkins along the street. */
+private fun DrawScope.drawHarvestFair() {
+    val road = size.height - 112.dp.toPx()
+    val y = road - 160.dp.toPx()
+    val flags = listOf(Color(0xFFE07A3A), Color(0xFFD9A441), Color(0xFFB5523A), Color(0xFF7FA650))
+    val step = 26.dp.toPx()
+    for (i in 0 until (size.width / step).toInt()) {
+        val x = i * step
+        val sag = kotlin.math.sin((x / size.width) * Math.PI.toFloat()) * 12.dp.toPx()
+        drawPath(Path().apply { moveTo(x, y + sag); lineTo(x + step * 0.8f, y + sag); lineTo(x + step * 0.4f, y + sag + 14.dp.toPx()); close() },
+            flags[i % flags.size].copy(alpha = 0.75f))
+    }
+    for (k in 0 until 4) {
+        val x = size.width * (0.08f + k * 0.26f)
+        val b = Offset(x, road + 26.dp.toPx())
+        drawRoundRect(Color(0xFFE3C36A).copy(alpha = 0.8f), Offset(b.x, b.y), Size(30.dp.toPx(), 14.dp.toPx()), CornerRadius(3.dp.toPx()))
+        for (l in 1..2) drawLine(Color(0xFFB08A3A).copy(alpha = 0.7f), Offset(b.x, b.y + l * 4.5f.dp.toPx()), Offset(b.x + 30.dp.toPx(), b.y + l * 4.5f.dp.toPx()), 1.dp.toPx())
+        drawOval(Color(0xFFE88A3A), Offset(b.x + 34.dp.toPx(), b.y + 3.dp.toPx()), Size(14.dp.toPx(), 11.dp.toPx()))
+    }
+    // The apple-bobbing barrel.
+    val bar = Offset(size.width * 0.9f, road + 22.dp.toPx())
+    drawRoundRect(Color(0xFF8A5A3C), bar, Size(26.dp.toPx(), 20.dp.toPx()), CornerRadius(4.dp.toPx()))
+    drawOval(Color(0xFF6FA8DC), Offset(bar.x + 2.dp.toPx(), bar.y - 2.dp.toPx()), Size(22.dp.toPx(), 6.dp.toPx()))
+    for (k in 0..2) drawCircle(Color(0xFFE04848), 3.dp.toPx(), Offset(bar.x + (6 + k * 7).dp.toPx(), bar.y))
+}
+
+/** The winter lights parade: strings of lights over the street and lanterns bobbing along the road in everyone's colours. */
+private fun DrawScope.drawLightsParade(now: Long, colors: List<Color>) {
+    val road = size.height - 112.dp.toPx()
+    val t = (now % 3_600_000L) / 1000f
+    val y = road - 165.dp.toPx()
+    val step = 22.dp.toPx()
+    drawLine(Color.White.copy(alpha = 0.2f), Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+    for (i in 0 until (size.width / step).toInt()) {
+        val x = i * step + step / 2
+        val sag = kotlin.math.sin((x / size.width) * Math.PI.toFloat()) * 12.dp.toPx()
+        val on = ((t * 2).toInt() + i) % 3 != 0
+        drawCircle(listOf(Color(0xFFFF4D5E), Color(0xFF7FE0A8), Color(0xFFFFE08A), Color(0xFF9AB8FF))[i % 4].copy(alpha = if (on) 0.9f else 0.3f),
+            3.dp.toPx(), Offset(x, y + sag + 3.dp.toPx()))
+    }
+    // The lanterns, a line of them walking left to right along the road.
+    val span = size.width + 200.dp.toPx()
+    colors.forEachIndexed { k, c ->
+        val x = ((t * 22.dp.toPx() + k * 70.dp.toPx()) % span) - 100.dp.toPx()
+        val ly = road + 30.dp.toPx() + kotlin.math.sin(t * 2f + k) * 3.dp.toPx()
+        drawLine(Color(0xFF8A7A6A), Offset(x, ly - 26.dp.toPx()), Offset(x, ly + 20.dp.toPx()), 1.5f.dp.toPx())
+        drawCircle(Brush.radialGradient(listOf(c.copy(alpha = 0.5f), Color.Transparent), Offset(x, ly - 30.dp.toPx()), 22.dp.toPx()), 22.dp.toPx(), Offset(x, ly - 30.dp.toPx()))
+        drawRoundRect(c.copy(alpha = 0.9f), Offset(x - 7.dp.toPx(), ly - 38.dp.toPx()), Size(14.dp.toPx(), 16.dp.toPx()), CornerRadius(5.dp.toPx()))
+        drawRect(Color(0xFFFFE9A8).copy(alpha = 0.8f), Offset(x - 3.dp.toPx(), ly - 33.dp.toPx()), Size(6.dp.toPx(), 6.dp.toPx()))
     }
 }

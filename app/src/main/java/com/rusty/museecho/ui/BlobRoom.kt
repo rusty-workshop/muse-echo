@@ -496,6 +496,36 @@ internal fun BookshelfTapTarget(blob: Offset, half: Float) {
         })
 }
 
+/** What Puff brought Rusty back from a trip today: a little gift by its feet; tap to see it. */
+@Composable
+internal fun SouvenirBadge(blob: Offset, half: Float) {
+    val sv by GadgetState.souvenir.collectAsState()
+    val s = sv?.takeIf { it.date == java.time.LocalDate.now().toString() } ?: return
+    if (blob == Offset.Unspecified || half <= 0f) return
+    val u = half / 110f
+    Text(s.emoji, fontSize = 22.sp, modifier = Modifier.offset { androidx.compose.ui.unit.IntOffset((blob.x + 62 * u).toInt(), (blob.y + 60 * u).toInt()) }
+        .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
+            GadgetState.show(com.rusty.museecho.gadget.Screen.Text("🎁 For Rusty", "${GadgetState.BlobCalled()} brought you ${s.what} from ${s.from}'s house! ${s.emoji}"))
+        })
+}
+
+/** The window: tap for the constellations Puff and its friends have named. */
+@Composable
+internal fun WindowTapTarget(blob: Offset, half: Float) {
+    val data by GadgetState.friends.collectAsState()
+    val items by GadgetState.room.collectAsState()
+    if (blob == Offset.Unspecified || half <= 0f || Decor.WINDOW.name !in items || data.constellations.isEmpty()) return
+    if (data.treasure?.let { !it.found && it.date == java.time.LocalDate.now().toString() } == true) return
+    val u = half / 110f
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((blob.x - 124 * u).toInt(), (blob.y - 114 * u).toInt()) }
+        .size(with(density) { (50 * u).toDp() }, with(density) { (50 * u).toDp() })
+        .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
+            GadgetState.show(com.rusty.museecho.gadget.Screen.Reader("🔭 Constellations",
+                data.constellations.reversed().joinToString("\n\n") { "**⭐ ${it.name}**  \n${it.shape}  \n_${it.by}, ${it.date}_" }))
+        })
+}
+
 /** During a treasure hunt: tap targets over the things in Puff's room it could be hidden behind. */
 @Composable
 internal fun TreasureTapLayer(blob: Offset, half: Float) {

@@ -132,6 +132,8 @@ internal fun Blob(
     val energy by GadgetState.blobEnergy.collectAsState()
     val muted by GadgetState.muted.collectAsState()
     val tucked by GadgetState.tuckedIn.collectAsState()
+    val sniffles by GadgetState.sniffles.collectAsState()
+    val sickBlanket by GadgetState.sickBlanket.collectAsState()
     val presenting by GadgetState.presenting.collectAsState()
     val alerts by GadgetState.alerts.collectAsState()
     val reminderDay by GadgetState.reminders.collectAsState()
@@ -273,6 +275,8 @@ internal fun Blob(
             GadgetState.show(com.rusty.museecho.gadget.Screen.Text("📝 Today's reminders", day.items.joinToString("\n") { r ->
                 (if (r.time.isNotBlank()) "${r.time}  " else "• ") + r.text
             }))
+        } else if (dist < sizePx * 0.32f && com.rusty.museecho.gadget.GadgetService.instance?.life?.friends?.tuckBlanket() == true) {
+            GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.TAP)
         } else if (dist < sizePx * 0.32f) {
             GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.TAP)
             com.rusty.museecho.gadget.DayLog.poked()
@@ -678,7 +682,12 @@ internal fun Blob(
                 val look = Offset(sm.lookX, sm.lookY)
                 if (moodF < 1f) drawFace(faceAt, r, sm.prevMood, look, lid, voice, munch, react, p, t, eyeInk.copy(alpha = 0.88f * (1 - moodF)))
                 drawFace(faceAt, r, mood, look, lid, voice, munch, react, p, t, eyeInk.copy(alpha = 0.88f * moodF))
-                if (tucked || react == Reaction.TUCK_IN || forcedState == "TUCKED_IN") drawBlanket(core, r, if (react == Reaction.TUCK_IN) p else 1f, t)
+                // The sniffles: a rosy nose and flushed cheeks.
+                if (sniffles) {
+                    drawCircle(Color(0xFFFF6B7A).copy(alpha = 0.85f), r * 0.04f, faceAt + Offset(0f, r * 0.07f))
+                    for (sd in listOf(-1f, 1f)) drawOval(Color(0xFFFF7A9A).copy(alpha = 0.35f), faceAt + Offset(sd * r * 0.2f - r * 0.06f, r * 0.07f), Size(r * 0.12f, r * 0.06f))
+                }
+                if (tucked || sickBlanket || react == Reaction.TUCK_IN || forcedState == "TUCKED_IN") drawBlanket(core, r, if (react == Reaction.TUCK_IN) p else 1f, t)
                 popIn(accF, core) { sm.accessory?.let { drawAccessory(it, core, r, t) } }
                 if (accF < 1f) popIn(1f - accF, core) { sm.prevAccessory?.let { drawAccessory(it, core, r, t) } }
                 if (!mini) {

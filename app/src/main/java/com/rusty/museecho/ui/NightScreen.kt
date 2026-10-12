@@ -32,6 +32,7 @@ enum class NightScene(val label: String, val blurb: String) {
     BLACK("Black", "Screen fully off"),
     STARS("Starry night", "{name} asleep among slowly drifting stars"),
     AQUARIUM("Aquarium", "{name} dozing in a dark, bubbly tank"),
+    STREET("Puff's street", "The street at night, windows going dark one by one"),
     ;
 
     companion object {
@@ -50,6 +51,10 @@ private const val TAU = (2 * PI).toFloat()
 internal fun NightScreen(scene: NightScene, actions: UiActions) {
     if (scene == NightScene.BLACK) {
         Box(Modifier.fillMaxSize().background(Color.Black))
+        return
+    }
+    if (scene == NightScene.STREET) {
+        NightStreet()
         return
     }
     var t by remember { mutableFloatStateOf(0f) }
@@ -144,4 +149,57 @@ private fun DrawScope.drawTank(t: Float) {
     }
     // Sand at the bottom.
     drawRect(Color(0xFF1A2420), Offset(0f, size.height - 18f), androidx.compose.ui.geometry.Size(size.width, 18f))
+}
+
+/**
+ * The street after bedtime: everyone's houses under the stars, each window going dark at its own
+ * time (sleepy friends first), Puff's with a soft nightlight. The whole street drifts a little so
+ * nothing stays put on the panel.
+ */
+@Composable
+private fun NightStreet() {
+    val data by GadgetState.friends.collectAsState()
+    var t by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        val start = System.currentTimeMillis()
+        while (true) {
+            t = (System.currentTimeMillis() - start) / 1000f
+            delay(500)
+        }
+    }
+    val cal = java.util.Calendar.getInstance()
+    // Minutes since 9pm (negative before; after midnight keeps counting).
+    val h = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    val sinceNine = ((if (h < 12) h + 24 else h) - 21) * 60 + cal.get(java.util.Calendar.MINUTE)
+    val houses = listOf(Triple(Color(0xFF8B6CFF), 1.15f, true)) + data.friends.map { Triple(Color(it.color), it.scale, sinceNine < com.rusty.museecho.gadget.FriendsBrain.lightsOut(it)) }
+    Box(Modifier.fillMaxSize().background(Color(0xFF04030A))) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawStars(t)
+            val drift = sin(t / 240f) * 24f
+            val ground = size.height * 0.8f
+            drawRect(Color(0xFF0E0C16), Offset(0f, ground), androidx.compose.ui.geometry.Size(size.width, size.height - ground))
+            val n = houses.size
+            val slot = (size.width - 80f) / n
+            houses.forEachIndexed { i, (c, scale, lit) ->
+                val w = (slot * 0.7f).coerceAtMost(110f) * (0.85f + 0.15f * scale)
+                val wallH = w * 0.7f
+                val x = 40f + slot * i + (slot - w) / 2 + drift
+                val top = ground - wallH
+                val wall = androidx.compose.ui.graphics.lerp(c, Color(0xFF07060C), 0.8f)
+                drawRect(wall, Offset(x, top), androidx.compose.ui.geometry.Size(w, wallH))
+                drawPath(Path().apply { moveTo(x - w * 0.08f, top); lineTo(x + w / 2, top - wallH * 0.6f); lineTo(x + w * 1.08f, top); close() },
+                    androidx.compose.ui.graphics.lerp(c, Color(0xFF07060C), 0.88f))
+                val win = Offset(x + w * 0.18f, top + wallH * 0.22f)
+                val ws = androidx.compose.ui.geometry.Size(w * 0.32f, wallH * 0.32f)
+                // Puff's window: a faint nightlight; friends': warm until their light goes out.
+                val glow = when {
+                    i == 0 -> Color(0xFF9AB8FF).copy(alpha = 0.18f + 0.04f * sin(t / 3f))
+                    lit -> Color(0xFFFFD27A).copy(alpha = 0.55f)
+                    else -> Color(0xFF15131F)
+                }
+                drawRect(glow, win, ws)
+                if (i == 0 || lit) drawCircle(glow.copy(alpha = glow.alpha * 0.25f), ws.width * 1.2f, win + Offset(ws.width / 2, ws.height / 2))
+            }
+        }
+    }
 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
@@ -131,6 +132,17 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             drawCup(f0 + Offset(-18 * dp, s0 * 0.42f), dp)
         }
         if (scene.book) drawBook(Offset(mid.x, blob.y + 52 * dp), dp)
+        // Stargazing: the night sky over the room, tonight's moon, a telescope, shooting stars in a shower.
+        if (scene.stargaze) drawStargazing(blob, half, f0, s0, t, dp)
+        // Baking: a mixing bowl with a whisk going round.
+        if (scene.bowl) {
+            val b = Offset(mid.x, blob.y + 58 * dp)
+            val wa = t * 6f
+            drawLine(Color(0xFFBFC6D0), b + Offset(kotlin.math.cos(wa) * 6 * dp, -4 * dp), b + Offset(kotlin.math.cos(wa) * 10 * dp, -26 * dp), 2.5f * dp)
+            drawArc(Color(0xFFE8DCC8), 0f, 180f, true, Offset(b.x - 18 * dp, b.y - 14 * dp), Size(36 * dp, 28 * dp))
+            drawOval(Color(0xFFF5E6B8), Offset(b.x - 16 * dp, b.y - 3 * dp), Size(32 * dp, 6 * dp))
+            if ((t % 1.2f) < 0.6f) drawCircle(Color.White.copy(alpha = 0.6f), 2 * dp, b + Offset(sin(t * 4f) * 10 * dp, -10 * dp - (t % 0.6f) * 20 * dp))
+        }
         // Puddle jumping: a puddle under everyone, splashes on each hop, wellies on.
         if (scene.puddles) {
             drawOval(Color(0xFF5B8DB8).copy(alpha = 0.55f), Offset(blob.x - 170 * dp, blob.y + 78 * dp), Size(340 * dp, 26 * dp))
@@ -256,6 +268,37 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         val (f0, s0) = spots.first()
         drawQuilt(f0, s0, Color(friends.first().color), enter)
     }
+    // The blanket fort: a draped blanket over everyone (see-through enough to see them), lit by a torch.
+    if (scene.fort && enter > 0.3f) Canvas(Modifier.fillMaxSize()) {
+        val xs = spots.map { it.first.x } + blob.x
+        val left = xs.min() - 70 * dp
+        val right = xs.max() + 70 * dp
+        val floor = blob.y + 92 * u
+        val apex = Offset(blob.x, blob.y - half * 1.15f)
+        val cloth = Color(friends.first().color).let { androidx.compose.ui.graphics.lerp(it, Color(0xFF3A3F8F), 0.5f) }
+        val tent = Path().apply {
+            moveTo(left, floor); quadraticTo(left + 10 * dp, apex.y + 30 * dp, apex.x, apex.y)
+            quadraticTo(right - 10 * dp, apex.y + 30 * dp, right, floor); close()
+        }
+        drawPath(tent, cloth.copy(alpha = 0.32f * enter))
+        drawPath(tent, Color.White.copy(alpha = 0.35f * enter), style = androidx.compose.ui.graphics.drawscope.Stroke(2 * dp))
+        // Patches and the chair-back poking up.
+        listOf(0.3f to 0.5f, 0.7f to 0.45f, 0.5f to 0.75f).forEachIndexed { k, (fx, fy) ->
+            drawRoundRect(listOf(Color(0xFFFFC266), Color(0xFFFF9EC7), Color(0xFF7FE0A8))[k].copy(alpha = 0.25f * enter),
+                Offset(left + (right - left) * fx - 9 * dp, apex.y + (floor - apex.y) * fy - 7 * dp), Size(18 * dp, 14 * dp), CornerRadius(3 * dp))
+        }
+        drawRect(Color(0xFF7A5536).copy(alpha = 0.7f * enter), Offset(apex.x - 2 * dp, apex.y - 14 * dp), Size(4 * dp, 16 * dp))
+        // The torch's beam, swinging a little.
+        val hand = blob + Offset(-half * 0.44f, half * 0.36f)
+        val aim = Offset(apex.x + sin(t * 0.7f) * 50 * dp, apex.y + 30 * dp)
+        val dir = (aim - hand).let { it / it.getDistance() }
+        val perp = Offset(-dir.y, dir.x)
+        drawPath(Path().apply {
+            moveTo(hand.x, hand.y); lineTo(aim.x + perp.x * 34 * dp, aim.y + perp.y * 34 * dp); lineTo(aim.x - perp.x * 34 * dp, aim.y - perp.y * 34 * dp); close()
+        }, Brush.linearGradient(listOf(Color(0xFFFFE9A8).copy(alpha = 0.45f * enter), Color.Transparent), hand, aim))
+    }
+    // Puff's surprise party: the lights are off while everyone hides.
+    if (scene.lightsOff) Box(Modifier.fillMaxSize().background(Color(0xFF05040A).copy(alpha = 0.82f)))
     // Group photo: the camera's flash.
     if (scene.flashAt > 0 && now - scene.flashAt < 600) {
         val a = 1f - (now - scene.flashAt) / 600f
@@ -379,4 +422,40 @@ internal fun TripCard(actions: UiActions, modifier: Modifier) {
             }
         }
     }
+}
+
+/** Stargazing: a dark sky over the room with twinkling stars, the real moon phase, a telescope, and shooting stars on shower nights. */
+private fun DrawScope.drawStargazing(blob: Offset, half: Float, friend: Offset, fs: Float, t: Float, dp: Float) {
+    val top = blob.y - half * 1.6f
+    val skyRect = Size(half * 4.2f, half * 1.25f)
+    val skyAt = Offset(blob.x - skyRect.width / 2, top)
+    drawRoundRect(Brush.verticalGradient(listOf(Color(0xFF0B1030).copy(alpha = 0.85f), Color(0xFF1B2050).copy(alpha = 0f)), skyAt.y, skyAt.y + skyRect.height),
+        skyAt, skyRect, CornerRadius(30 * dp))
+    for (i in 0 until 28) {
+        val p = skyAt + Offset((i * 0.618034f * 997f) % skyRect.width, (i * 0.414214f * 613f) % (skyRect.height * 0.75f))
+        drawCircle(Color.White.copy(alpha = 0.35f + 0.35f * abs(sin(t * (0.5f + (i % 5) * 0.2f) + i))), if (i % 7 == 0) 2f * dp else 1.2f * dp, p)
+    }
+    val today = java.time.LocalDate.now()
+    val age = com.rusty.museecho.gadget.FriendsBrain.moonAge(today).toFloat()
+    val m = skyAt + Offset(skyRect.width * 0.82f, skyRect.height * 0.25f)
+    val r = 12 * dp
+    drawCircle(Color(0xFFF2ECD0), r, m)
+    // The shadow slides across: from the right side's light growing (waxing) to shrinking (waning).
+    val lit = if (age < 14.77f) age / 14.77f else (29.53f - age) / 14.77f
+    val shift = (if (age < 14.77f) -1f else 1f) * r * 2f * lit
+    if (lit < 0.97f) drawCircle(Color(0xFF0B1030), r * 1.02f, m + Offset(shift, 0f))
+    if (com.rusty.museecho.gadget.FriendsBrain.meteorShower(today) != null) {
+        val ph = (t % 4f) / 4f
+        if (ph < 0.3f) {
+            val s0 = skyAt + Offset(skyRect.width * (0.2f + 0.4f * ((t / 4f).toInt() % 3) / 3f), skyRect.height * 0.1f)
+            val head = s0 + Offset(ph / 0.3f * 90 * dp, ph / 0.3f * 30 * dp)
+            drawLine(Brush.linearGradient(listOf(Color.Transparent, Color.White), s0, head), s0, head, 2 * dp)
+        }
+    }
+    // A telescope on its tripod beside the friend, pointing up at the sky.
+    val base = friend + Offset(fs * 0.55f, fs * 0.42f)
+    val legTop = base + Offset(0f, -fs * 0.45f)
+    for (k in listOf(-1f, 0f, 1f)) drawLine(Color(0xFF8A7A6A), legTop, base + Offset(k * fs * 0.18f, 0f), 2 * dp)
+    drawLine(Color(0xFFD8D0E8), legTop + Offset(-fs * 0.2f, fs * 0.08f), legTop + Offset(fs * 0.15f, -fs * 0.18f), 7 * dp)
+    drawCircle(Color(0xFF9AB8FF), 3.5f * dp, legTop + Offset(fs * 0.15f, -fs * 0.18f))
 }

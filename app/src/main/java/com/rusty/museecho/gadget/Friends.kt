@@ -118,6 +118,18 @@ data class Gazette(val date: String, val headline: String, val articles: List<Ar
 @Serializable
 data class Comic(val date: String, val title: String, val panels: List<Panel>)
 
+/** Something Puff and a friend baked (Pixel's recipe; [real] when it's one Rusty could actually make). */
+@Serializable
+data class Recipe(val title: String, val ingredients: List<String>, val steps: List<String>, val cooks: String, val date: String, val real: Boolean = false)
+
+/** A constellation Puff and a friend made up while stargazing. */
+@Serializable
+data class Constellation(val name: String, val shape: String, val by: String, val date: String)
+
+/** A new house going up on the street (a week from [startDate]); [friendId] once someone's moved in. */
+@Serializable
+data class Building(val startDate: String, val friendId: String = "", val welcomed: Boolean = false)
+
 /** A postcard from a friend who's been away a while (pinned on the room's wall). */
 @Serializable
 data class Postcard(val friendId: String, val text: String, val date: String)
@@ -152,6 +164,11 @@ data class FriendsData(
     val books: List<Book> = emptyList(),
     /** Stickers earned: id to the date. */
     val stickers: Map<String, String> = emptyMap(),
+    val recipes: List<Recipe> = emptyList(),
+    val constellations: List<Constellation> = emptyList(),
+    val building: Building? = null,
+    /** Years Puff's had its birthday party ("2026"). */
+    val puffBirthdays: List<String> = emptyList(),
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -188,7 +205,8 @@ object FriendsBrain {
     /** Everything a visit can be. */
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
-        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub", "groupphoto", "cheerrusty", "cousin", "puddles", "kites", "lollies")
+        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub", "groupphoto", "cheerrusty", "cousin", "puddles", "kites", "lollies",
+        "puffbirthday", "cooking", "fort", "stargazing", "soup", "welcome")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -445,7 +463,8 @@ object FriendsBrain {
         return PenPal(name.replaceFirstChar { it.uppercase() }, place.take(60), f("bio").orEmpty().take(300))
     }
 
-    fun penpalLetterPrompt(p: PenPal, blobName: String, lastReply: String?): String =
+    fun penpalLetterPrompt(p: PenPal, blobName: String, lastReply: String?, birthday: Boolean = false): String =
+        (if (birthday) "It's $blobName's birthday, and ${p.name} is posting it a parcel with a little present from ${p.place}: say what's in it. " else "") +
         "Write a short letter (3 to 5 sentences, cute) from ${p.name}, a little blob who lives in ${p.place} (${p.bio}), to its pen pal " +
             "$blobName, the blob on my Echo Show. Describe a little moment from its life there (the season, the food, the weather, what it did). " +
             (lastReply?.let { "$blobName's last letter said: \"$it\" so answer it. " } ?: "") +
@@ -500,6 +519,114 @@ object FriendsBrain {
         Sticker("diary_7", "📔", "A week of diary", "puff"),
     )
 
+    /** What each kind of friend gives Puff on its birthday. */
+    fun presentFor(p: Personality): Pair<String, String> = when (p) {
+        Personality.BOUNCY -> "⚽" to "a super-bouncy ball"
+        Personality.SHY -> "🌿" to "a tiny moss garden in a jar"
+        Personality.SLEEPY -> "🛏️" to "the fluffiest pillow"
+        Personality.SPARKLY -> "✨" to "a jar of glitter"
+        Personality.TINY -> "🎩" to "a very very small hat"
+    }
+
+    fun recipePrompt(cook: String, blobName: String, real: Boolean, others: List<String>): String =
+        "$blobName and its friend $cook (little blobs on my Echo Show) are baking together. " +
+            (if (real) "Pick a real, simple, kid-friendly recipe a person could actually make (with real quantities), " +
+                "but describe it in a cute way. " else "Invent a cute, silly blob recipe (made-up ingredients are fine). ") +
+            (if (others.isNotEmpty()) "Not one of: ${others.joinToString()}. " else "") +
+            "Reply in exactly this format and nothing else (no commands, don't change any device):\n" +
+            "TITLE: the name\nINGREDIENTS: item; item; item\nSTEPS: step; step; step"
+
+    fun parseRecipe(reply: String, cooks: String, date: String, real: Boolean): Recipe? {
+        fun f(k: String) = Regex("""(?im)^\W*$k\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"')?.trim()
+        val title = f("title")?.takeIf { it.isNotBlank() } ?: return null
+        fun list(k: String) = f(k).orEmpty().split(';').map { it.trim().trimStart('-', '•', ' ') }.filter { it.isNotBlank() }.take(12)
+        val ing = list("ingredients")
+        val steps = list("steps")
+        if (ing.isEmpty() || steps.isEmpty()) return null
+        return Recipe(title.take(60), ing.map { it.take(80) }, steps.map { it.take(200) }, cooks, date, real)
+    }
+
+    /** A spooky-but-cute torch story in the blanket fort, if Pixel's busy. */
+    val FORT_STORIES = listOf(
+        listOf("Once upon a time, a sock went missing… 🧦", "…and it was never seen again…", "…until it turned up in the cookie jar! 🍪"),
+        listOf("There's a ghost in the attic… 👻", "…and it's REALLY scared of the dark.", "So it sleeps with a nightlight! 💡"),
+        listOf("Late one night, something went *tap tap tap*… 😨", "…closer… and closer…", "It was the rain. Just the rain! 🌧️"),
+    )
+
+    fun fortStoryPrompt(teller: String, blobName: String): String =
+        "$teller and $blobName (little blobs) are in a blanket fort with a torch on a gloomy evening. Write a tiny spooky-but-cute story " +
+            "$teller tells, as exactly 3 short lines (each under 70 characters, with an emoji), ending in a funny, not-scary twist. " +
+            "Reply with only the 3 lines, one per line: no commands, and don't change anything on any device."
+
+    fun parseLines(reply: String): List<String>? = reply.lines().map { it.trim().trimStart('-', '•', '*', ' ').replace(Regex("^\\d+[.)]\\s*"), "") }
+        .filter { it.isNotBlank() }.take(3).map { it.take(90) }.takeIf { it.size >= 2 }
+
+    fun constellationPrompt(by: String, blobName: String, taken: List<String>): String =
+        "$blobName and $by (little blobs) are stargazing and make up a new constellation. " +
+            (if (taken.isNotEmpty()) "Not one of: ${taken.joinToString()}. " else "") +
+            "Reply in exactly this format and nothing else (no commands, don't change any device):\nNAME: a cute name (2-4 words)\nSHAPE: what it looks like, one short line"
+
+    fun parseConstellation(reply: String, by: String, date: String): Constellation? {
+        fun f(k: String) = Regex("""(?im)^\W*$k\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"')?.trim()
+        val name = f("name")?.takeIf { it.isNotBlank() } ?: return null
+        return Constellation(name.take(40), f("shape").orEmpty().take(120), by, date)
+    }
+
+    /** The moon's age in days (0 = new, ~14.8 = full) on [date], and a word and emoji for it. */
+    fun moonAge(date: java.time.LocalDate): Double {
+        val ref = java.time.LocalDate.of(2000, 1, 6) // a new moon
+        val days = java.time.temporal.ChronoUnit.DAYS.between(ref, date) + 0.5
+        return ((days % 29.530588853) + 29.530588853) % 29.530588853
+    }
+
+    fun moonPhase(date: java.time.LocalDate): Pair<String, String> = moonAge(date).let { a ->
+        when {
+            a < 1.85 || a >= 27.68 -> "🌑" to "new moon"
+            a < 5.54 -> "🌒" to "waxing crescent"
+            a < 9.23 -> "🌓" to "first quarter"
+            a < 12.92 -> "🌔" to "waxing gibbous"
+            a < 16.61 -> "🌕" to "full moon"
+            a < 20.30 -> "🌖" to "waning gibbous"
+            a < 23.99 -> "🌗" to "last quarter"
+            else -> "🌘" to "waning crescent"
+        }
+    }
+
+    /** A meteor shower near its peak (within a day) on [date], if any. */
+    fun meteorShower(date: java.time.LocalDate): String? = listOf(
+        "01-03" to "the Quadrantids", "04-22" to "the Lyrids", "05-06" to "the Eta Aquariids", "08-12" to "the Perseids",
+        "10-21" to "the Orionids", "11-17" to "the Leonids", "12-14" to "the Geminids",
+    ).firstOrNull { (md, _) ->
+        val peak = java.time.MonthDay.parse("--$md").atYear(date.year)
+        kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(peak, date)) <= 1
+    }?.second
+
+    /** Souvenirs Puff brings back for Rusty from a trip. */
+    val SOUVENIRS = listOf("🐚" to "a shiny shell", "🌸" to "a pressed flower", "🖍️" to "a drawing of you", "🪨" to "a lucky pebble",
+        "⭐" to "a paper star", "🍪" to "a cookie (it only took one bite)", "🔑" to "a tiny mystery key", "🍂" to "the perfect leaf")
+
+    /** The street's festivals: the harvest fair (third weekend of October) and the winter lights parade (December Saturday evenings). */
+    enum class Festival(val label: String) { FAIR("🍎 Harvest fair today!"), PARADE("🏮 Winter lights parade tonight!") }
+
+    fun festival(date: java.time.LocalDate, hour: Int): Festival? {
+        val firstSat = date.withDayOfMonth(1).with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.SATURDAY))
+        val fairSat = firstSat.plusWeeks(2)
+        return when {
+            date.monthValue == 10 && (date == fairSat || date == fairSat.plusDays(1)) && hour in 10..18 -> Festival.FAIR
+            date.monthValue == 12 && date.dayOfWeek == java.time.DayOfWeek.SATURDAY && date.dayOfMonth <= 24 && hour in 17..21 -> Festival.PARADE
+            else -> null
+        }
+    }
+
+    /** When a friend's light goes out at night (minutes after 9pm): sleepy ones first, sparkly ones last. */
+    fun lightsOut(f: Friend): Int = when (f.p) {
+        Personality.SLEEPY -> 15
+        Personality.TINY -> 45
+        Personality.SHY -> 75
+        Personality.BOUNCY -> 105
+        Personality.SPARKLY -> 150
+    } + (f.id.hashCode() and 0x7fffffff) % 25
+
     fun reviewPrompt(blobName: String, period: String, facts: List<String>): String =
         "Write a cute \"$period in review\" for $blobName (the blob on my Echo Show) and its friends, like a special edition of their tiny " +
             "newspaper, from these real moments:\n" + facts.joinToString("\n") { "- $it" } +
@@ -538,6 +665,12 @@ object FriendsBrain {
         "puddles" -> "puddle jumping"
         "kites" -> "kite flying"
         "lollies" -> "an ice-lolly party"
+        "puffbirthday" -> "a surprise birthday party"
+        "cooking" -> "baking together"
+        "fort" -> "a blanket fort"
+        "stargazing" -> "stargazing"
+        "soup" -> "bringing soup"
+        "welcome" -> "a welcome basket"
         "nap" -> "a nap"
         else -> a
     }

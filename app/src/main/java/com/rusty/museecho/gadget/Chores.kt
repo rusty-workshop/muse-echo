@@ -571,7 +571,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette", "penpal", "book", "stickers", "review")).forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette", "penpal", "book", "stickers", "review", "sniffles", "build", "fair", "parade", "souvenir")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -620,6 +620,13 @@ class Chores(
                 "PENPAL" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.penpalLetterNow() } }
                 "BOOK" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.addBook(GadgetState.BlobCalled()) } }
                 "STICKERS" -> GadgetService.instance?.life?.friends?.checkStickers()
+                "SNIFFLES" -> GadgetService.instance?.life?.friends?.startSniffles(soonMin = 2)
+                "BUILD" -> GadgetService.instance?.life?.friends?.buildNow()
+                "FAIR", "PARADE" -> GadgetState.previewFestival(value.uppercase(), System.currentTimeMillis() + 10 * 60_000L)
+                "SOUVENIR" -> FriendsBrain.SOUVENIRS.random().let { (e, what) ->
+                    GadgetState.setSouvenir(GadgetState.Souvenir(e, what, GadgetService.instance?.life?.friends?.store?.data?.friends?.firstOrNull { it.name.isNotBlank() }?.shownName ?: "a friend",
+                        java.time.LocalDate.now().toString()))
+                }
                 "REVIEW" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.reviewNow(java.time.YearMonth.now().toString()) } }
                 "REPLY" -> GadgetService.instance?.life?.friends?.let { fl ->
                     fl.store.data.letters.lastOrNull { !it.fromBlob }?.let { l -> scope.launch { fl.replyTo(l) } }

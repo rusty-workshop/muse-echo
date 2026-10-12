@@ -86,6 +86,7 @@ internal fun BlobPage(actions: UiActions) {
             PetTapTarget(center, half)
             TreasureTapLayer(center, half)
             BookshelfTapTarget(center, half)
+            WindowTapTarget(center, half)
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(top = 64.dp, end = 40.dp, bottom = 84.dp)) {
             val blobName by GadgetState.blobName.collectAsState()
@@ -110,6 +111,8 @@ internal fun BlobPage(actions: UiActions) {
                 Tab("🗞️", tab == "gazette") { tab = "gazette" }
                 Spacer(Modifier.width(6.dp))
                 Tab("🏅", tab == "stickers") { tab = "stickers" }
+                Spacer(Modifier.width(6.dp))
+                Tab("🍳", tab == "cookbook") { tab = "cookbook" }
                 Spacer(Modifier.width(10.dp))
                 // Not a tab: Puff answers in its bubble.
                 Text("💬 How are you?", color = Palette.night, fontSize = 14.sp,
@@ -126,6 +129,7 @@ internal fun BlobPage(actions: UiActions) {
                 tab == "wardrobe" -> WardrobeContent(Modifier.fillMaxSize())
                 tab == "gazette" -> GazetteContent(actions, Modifier.fillMaxSize())
                 tab == "stickers" -> StickerBook(Modifier.fillMaxSize())
+                tab == "cookbook" -> Cookbook(Modifier.fillMaxSize())
                 else -> AlbumContent(actions, Modifier.fillMaxSize())
             }
         }
@@ -672,6 +676,38 @@ private fun StickerBook(modifier: Modifier) {
                         }
                     }
                     repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}
+
+/** Everything Puff's baked with its friends; real recipes (ones Rusty could make) are marked. Tap one for the whole recipe. */
+@Composable
+private fun Cookbook(modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    val recipes = data.recipes.reversed()
+    if (recipes.isEmpty()) {
+        Text("Nothing baked yet. Recipes show up here after Puff and a friend bake together.", color = Palette.muted, fontSize = 15.sp, modifier = modifier)
+        return
+    }
+    androidx.compose.foundation.lazy.LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(recipes.size) { i ->
+            val r = recipes[i]
+            Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(12.dp)).clickable {
+                GadgetState.show(Screen.Reader("🍳 ${r.title}", buildString {
+                    append("_Baked by ${r.cooks} · ${r.date}_")
+                    if (r.real) append("  \n**A real recipe you can make!**")
+                    append("\n\n**Ingredients**\n")
+                    r.ingredients.forEach { append("- $it\n") }
+                    append("\n**Steps**\n")
+                    r.steps.forEachIndexed { k, st -> append("${k + 1}. $st\n") }
+                }))
+            }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (r.real) "🧑‍🍳" else "🧁", fontSize = 20.sp)
+                Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                    Text(r.title, color = Palette.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${r.cooks} · ${r.date}" + if (r.real) " · real recipe" else "", color = Palette.muted, fontSize = 12.sp, maxLines = 1)
                 }
             }
         }

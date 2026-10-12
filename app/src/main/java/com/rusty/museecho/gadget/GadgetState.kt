@@ -63,6 +63,14 @@ data class FriendScene(
     /** Group photo day: everyone lined up, and when the camera flashed. */
     val groupPhoto: Boolean = false,
     val flashAt: Long = 0,
+    /** Puff's surprise party: the lights are off while everyone hides. */
+    val lightsOff: Boolean = false,
+    /** Baking: a mixing bowl between them. */
+    val bowl: Boolean = false,
+    /** A blanket fort over everyone, with a torch. */
+    val fort: Boolean = false,
+    /** Stargazing: a telescope and the night sky. */
+    val stargaze: Boolean = false,
     /** Weather adventures: splashing in puddles, kites on the wind. */
     val puddles: Boolean = false,
     val kites: Boolean = false,
@@ -616,6 +624,34 @@ object GadgetState {
     /** Today's agenda items (for the morning hello). */
     @Volatile
     var agendaToday: () -> List<com.rusty.museecho.integrations.AgendaItem> = { emptyList() }
+
+    /** A sniffly day: a rosy nose, sneezes, and (once Rusty's tucked it in) a blanket. */
+    private val _sniffles = MutableStateFlow(false)
+    val sniffles: StateFlow<Boolean> = _sniffles.asStateFlow()
+    private val _sickBlanket = MutableStateFlow(false)
+    val sickBlanket: StateFlow<Boolean> = _sickBlanket.asStateFlow()
+
+    fun setSniffles(on: Boolean, blanket: Boolean) {
+        _sniffles.value = on
+        _sickBlanket.value = on && blanket
+    }
+
+    /** Something Puff brought Rusty back from a trip (emoji, what, from whom), shown for the day. */
+    data class Souvenir(val emoji: String, val what: String, val from: String, val date: String)
+    private val _souvenir = MutableStateFlow<Souvenir?>(null)
+    val souvenir: StateFlow<Souvenir?> = _souvenir.asStateFlow()
+
+    fun setSouvenir(s: Souvenir?) {
+        _souvenir.value = s
+    }
+
+    /** A festival shown on the street for a while (the playground), until [Pair.second]. */
+    private val _festivalPreview = MutableStateFlow<Pair<String, Long>?>(null)
+    val festivalPreview: StateFlow<Pair<String, Long>?> = _festivalPreview.asStateFlow()
+
+    fun previewFestival(name: String, untilMs: Long) {
+        _festivalPreview.value = name to untilMs
+    }
 
     /** A friend's relative, over for the day (shown as friend id "guest"). */
     private val _guest = MutableStateFlow<Friend?>(null)

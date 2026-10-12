@@ -195,4 +195,27 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
         assertTrue(FriendsBrain.STICKERS.all { it.who == "puff" || it.who == "you" })
         assertTrue(Friend("guest", scaleOverride = 0.45f).scale == 0.45f)
     }
+
+    @Test
+    fun recipesStarsFestivals() {
+        val r = FriendsBrain.parseRecipe("**TITLE:** Cloud Cupcakes\nINGREDIENTS: 1 cup flour; 2 eggs; a pinch of moonlight\nSTEPS: Mix; Bake 20 min; Eat", "Puff & Pip", "2026-10-12", true)!!
+        assertEquals("Cloud Cupcakes", r.title)
+        assertEquals(3, r.ingredients.size)
+        assertEquals("Bake 20 min", r.steps[1])
+        assertNull(FriendsBrain.parseRecipe("TITLE: Nothing", "Puff", "2026-10-12", false))
+        assertEquals(3, FriendsBrain.parseLines("1. A sock went missing 🧦\n2. It was scary\n3. It was in the jar 🍪\n4. extra")!!.size)
+        assertNull(FriendsBrain.parseLines("just one line"))
+        assertEquals("The Sleepy Teapot", FriendsBrain.parseConstellation("NAME: The Sleepy Teapot\nSHAPE: a teapot having a nap", "Puff", "2026-10-12")!!.name)
+        assertEquals("full moon", FriendsBrain.moonPhase(java.time.LocalDate.of(2024, 10, 17)).second)
+        assertEquals("new moon", FriendsBrain.moonPhase(java.time.LocalDate.of(2024, 10, 2)).second)
+        assertEquals("the Orionids", FriendsBrain.meteorShower(java.time.LocalDate.of(2026, 10, 21)))
+        assertNull(FriendsBrain.meteorShower(java.time.LocalDate.of(2026, 10, 12)))
+        assertEquals(FriendsBrain.Festival.FAIR, FriendsBrain.festival(java.time.LocalDate.of(2026, 10, 17), 12))
+        assertEquals(FriendsBrain.Festival.FAIR, FriendsBrain.festival(java.time.LocalDate.of(2026, 10, 18), 12))
+        assertNull(FriendsBrain.festival(java.time.LocalDate.of(2026, 10, 10), 12))
+        assertEquals(FriendsBrain.Festival.PARADE, FriendsBrain.festival(java.time.LocalDate.of(2026, 12, 5), 18))
+        assertNull(FriendsBrain.festival(java.time.LocalDate.of(2026, 12, 5), 12))
+        assertTrue(FriendsBrain.lightsOut(Friend("a", personality = "SLEEPY")) < FriendsBrain.lightsOut(Friend("a", personality = "SPARKLY")))
+        Personality.entries.forEach { assertTrue(FriendsBrain.presentFor(it).second.isNotBlank()) }
+    }
 }
