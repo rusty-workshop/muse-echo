@@ -365,7 +365,8 @@ internal fun Blob(
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     // Things that change by the minute, worked out once a minute rather than every frame.
     val firstToday = remember(agenda, tick) { firstEventMinutes(agenda) }
-    val hasTomorrow = remember(agenda, tick) { tomorrowEvents(agenda).isNotEmpty() }
+    // Something with a time tomorrow (all-day things like holidays don't need a bag packed).
+    val hasTomorrow = remember(agenda, tick) { tomorrowEvents(agenda).any { BlobBrain.minutesOfDay(it.time) != null } }
     // Only while one of today's reminders is still to come (or has no time); not once they've all passed.
     val remindersToday = remember(reminderDay, tick) { nextReminder(reminderDay, tick) != null }
     val wetAlert = remember(alerts) { alerts.any { a -> listOf("flood", "rain", "storm", "hurricane", "wind", "tornado").any { it in a.event.lowercase() } } }
@@ -1298,10 +1299,21 @@ private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float,
             // Flash every couple of seconds.
             if ((t % 2.5f) < 0.12f) drawCircle(Color.White.copy(alpha = 0.6f), r * 0.12f, a + Offset(r * 0.1f, -r * 0.08f))
         }
-        HeldItem.BAG -> {
-            drawRoundRect(Palette.teal, Offset(a.x - r * 0.12f, a.y - r * 0.1f), Size(r * 0.24f, r * 0.22f), CornerRadius(r * 0.05f))
-            drawRoundRect(lerp(Palette.teal, Palette.night, 0.3f), Offset(a.x - r * 0.08f, a.y - r * 0.02f), Size(r * 0.16f, r * 0.08f), CornerRadius(r * 0.02f))
-            drawArc(Palette.ink, 180f, 180f, false, Offset(a.x - r * 0.06f, a.y - r * 0.17f), Size(r * 0.12f, r * 0.12f), style = Stroke(width = r * 0.02f))
+        HeldItem.BAG -> rotate(-10f + sin(t * 1.1f) * 3f, a) {
+            // A backpack held up by its top loop: rounded body, flap, front pocket with a zip, side straps.
+            val body = lerp(Palette.teal, Color(0xFF2E8C85), 0.25f)
+            val dark = lerp(body, Palette.night, 0.35f)
+            drawRoundRect(Color.Black.copy(alpha = 0.22f), Offset(a.x - r * 0.11f, a.y - r * 0.1f), Size(r * 0.25f, r * 0.29f), CornerRadius(r * 0.07f))
+            drawArc(Palette.ink.copy(alpha = 0.85f), 180f, 180f, false, Offset(a.x - r * 0.045f, a.y - r * 0.2f), Size(r * 0.09f, r * 0.09f), style = Stroke(width = r * 0.02f))
+            drawRoundRect(body, Offset(a.x - r * 0.12f, a.y - r * 0.13f), Size(r * 0.24f, r * 0.29f), CornerRadius(r * 0.07f))
+            // Flap over the top.
+            drawRoundRect(dark, Offset(a.x - r * 0.12f, a.y - r * 0.13f), Size(r * 0.24f, r * 0.09f), CornerRadius(r * 0.06f))
+            drawCircle(Palette.amber, r * 0.017f, Offset(a.x, a.y - r * 0.05f))
+            // Front pocket and its zip.
+            drawRoundRect(dark, Offset(a.x - r * 0.08f, a.y + r * 0.02f), Size(r * 0.16f, r * 0.1f), CornerRadius(r * 0.03f))
+            drawLine(Palette.ink.copy(alpha = 0.6f), Offset(a.x - r * 0.06f, a.y + r * 0.045f), Offset(a.x + r * 0.06f, a.y + r * 0.045f), r * 0.01f)
+            // Straps down the sides.
+            for (sx in listOf(-1f, 1f)) drawLine(dark, Offset(a.x + sx * r * 0.1f, a.y - r * 0.05f), Offset(a.x + sx * r * 0.1f, a.y + r * 0.13f), r * 0.02f)
         }
         HeldItem.CALENDAR -> {
             drawRect(Color.White, Offset(a.x - r * 0.11f, a.y - r * 0.1f), Size(r * 0.22f, r * 0.2f))
