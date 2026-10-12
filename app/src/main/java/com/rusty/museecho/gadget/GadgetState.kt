@@ -71,6 +71,14 @@ data class FriendScene(
     val fort: Boolean = false,
     /** Stargazing: a telescope and the night sky. */
     val stargaze: Boolean = false,
+    /** Snakes and ladders: Puff's and the friend's squares (1-30), and the last roll. */
+    val snakes: Triple<Int, Int, Int>? = null,
+    /** A puppet show: the stage up, and the play's title. */
+    val puppets: Boolean = false,
+    val playTitle: String = "",
+    /** A picnic blanket and basket; making a card with crayons. */
+    val picnic: Boolean = false,
+    val crafting: Boolean = false,
     /** Weather adventures: splashing in puddles, kites on the wind. */
     val puddles: Boolean = false,
     val kites: Boolean = false,
@@ -653,6 +661,14 @@ object GadgetState {
         _festivalPreview.value = name to untilMs
     }
 
+    /** A snowman in Puff's room since the first snow (until it thaws). */
+    private val _snowman = MutableStateFlow(false)
+    val snowman: StateFlow<Boolean> = _snowman.asStateFlow()
+
+    fun setSnowman(on: Boolean) {
+        _snowman.value = on
+    }
+
     /** A friend's relative, over for the day (shown as friend id "guest"). */
     private val _guest = MutableStateFlow<Friend?>(null)
     val guest: StateFlow<Friend?> = _guest.asStateFlow()
@@ -662,7 +678,7 @@ object GadgetState {
     }
 
     /** Puff's away visiting a friend (its id) until [Trip.untilMs]. */
-    data class Trip(val friendId: String, val untilMs: Long)
+    data class Trip(val friendId: String, val untilMs: Long, val overnight: Boolean = false)
 
     private val _trip = MutableStateFlow<Trip?>(null)
     val trip: StateFlow<Trip?> = _trip.asStateFlow()

@@ -49,6 +49,13 @@ private const val TAU = (2 * PI).toFloat()
  */
 @Composable
 internal fun NightScreen(scene: NightScene, actions: UiActions) {
+    // Sleeping over at a friend's: both asleep in the friend's room (whatever the night scene).
+    val trip by GadgetState.trip.collectAsState()
+    val friendsData by GadgetState.friends.collectAsState()
+    trip?.takeIf { it.overnight }?.let { t -> friendsData.friends.firstOrNull { it.id == t.friendId } }?.let { host ->
+        AwaySleepover(host, actions)
+        return
+    }
     if (scene == NightScene.BLACK) {
         Box(Modifier.fillMaxSize().background(Color.Black))
         return
@@ -200,6 +207,32 @@ private fun NightStreet() {
                 drawRect(glow, win, ws)
                 if (i == 0 || lit) drawCircle(glow.copy(alpha = glow.alpha * 0.25f), ws.width * 1.2f, win + Offset(ws.width / 2, ws.height / 2))
             }
+        }
+    }
+}
+
+/** Puff asleep at a friend's house: the friend's own room, dimmed, both of them snoozing; drifting slowly. */
+@Composable
+private fun AwaySleepover(host: com.rusty.museecho.gadget.Friend, actions: UiActions) {
+    var t by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        val start = System.currentTimeMillis()
+        while (true) {
+            t = (System.currentTimeMillis() - start) / 1000f
+            delay(500)
+        }
+    }
+    val c = Color(host.color)
+    val dx = (sin(t / 300f) * 30).dp
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(Modifier.align(Alignment.Center).offset(dx, 0.dp).size(620.dp, 300.dp)) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawInterior(host, c, 0)
+                drawRect(Color.Black.copy(alpha = 0.6f))
+            }
+            Blob(Modifier.align(Alignment.BottomCenter).offset((-60).dp, (-10).dp).size(120.dp), actions, mini = true, moodOverride = Mood.SLEEPY)
+            Blob(Modifier.align(Alignment.BottomCenter).offset(70.dp, (-10).dp).size((110 * host.scale).dp), actions, mini = true,
+                moodOverride = Mood.SLEEPY, tintOverride = c, ownStyle = false)
         }
     }
 }

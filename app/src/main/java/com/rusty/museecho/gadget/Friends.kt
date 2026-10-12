@@ -82,7 +82,9 @@ data class Storyline(val title: String, val cast: List<String>, val chapters: Li
 
 /** Puff's pet: what it is, its name, and when it arrived (it grows over the weeks). */
 @Serializable
-data class Pet(val kind: String, val name: String = "", val bornMs: Long = 0, val fedDate: String = "", val pats: Int = 0) {
+data class Pet(val kind: String, val name: String = "", val bornMs: Long = 0, val fedDate: String = "", val pats: Int = 0,
+    /** Pet show rosettes won ("Shiniest shell · 2026-10"). */
+    val rosettes: List<String> = emptyList()) {
     /** 0.6 when new, full size after a month. */
     fun growth(nowMs: Long) = (0.6f + 0.4f * ((nowMs - bornMs) / (30 * 86_400_000f))).coerceIn(0.6f, 1f)
     val label get() = when (kind) { "snail" -> "snail"; "sprout" -> "sprout"; else -> "goldfish" }
@@ -121,6 +123,10 @@ data class Comic(val date: String, val title: String, val panels: List<Panel>)
 /** Something Puff and a friend baked (Pixel's recipe; [real] when it's one Rusty could actually make). */
 @Serializable
 data class Recipe(val title: String, val ingredients: List<String>, val steps: List<String>, val cooks: String, val date: String, val real: Boolean = false)
+
+/** A card Puff and its friends made Rusty for a holiday (shown on the home page on the day). */
+@Serializable
+data class HolidayCard(val holiday: String, val date: String, val text: String, val from: String)
 
 /** A constellation Puff and a friend made up while stargazing. */
 @Serializable
@@ -169,6 +175,15 @@ data class FriendsData(
     val building: Building? = null,
     /** Years Puff's had its birthday party ("2026"). */
     val puffBirthdays: List<String> = emptyList(),
+    val cards: List<HolidayCard> = emptyList(),
+    /** Puff's collections cabinet: collectible id to the date it was found. */
+    val collection: Map<String, String> = emptyMap(),
+    /** The weather calendar: date to "weather emoji|mood emoji". */
+    val weatherDays: Map<String, String> = emptyMap(),
+    /** Snakes and ladders wins, by name. */
+    val boardWins: Map<String, Int> = emptyMap(),
+    /** The house upgrade each friend has (id to level 1-2), so each is announced once. */
+    val upgrades: Map<String, Int> = emptyMap(),
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -206,7 +221,8 @@ object FriendsBrain {
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
         "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub", "groupphoto", "cheerrusty", "cousin", "puddles", "kites", "lollies",
-        "puffbirthday", "cooking", "fort", "stargazing", "soup", "welcome")
+        "puffbirthday", "cooking", "fort", "stargazing", "soup", "welcome",
+        "boardgame", "puppetshow", "firstsnow", "petshow", "picnic", "cardmaking")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -519,6 +535,113 @@ object FriendsBrain {
         Sticker("diary_7", "📔", "A week of diary", "puff"),
     )
 
+    // -- Snakes and ladders (30 squares) --------------------------------------------------------
+
+    val LADDERS = mapOf(3 to 11, 8 to 16, 19 to 27)
+    val SNAKES = mapOf(14 to 4, 22 to 12, 28 to 17)
+
+    /** Where a token lands from [pos] with [roll], and what happened ("ladder", "snake" or null). Over 30 doesn't move. */
+    fun snakesMove(pos: Int, roll: Int): Pair<Int, String?> {
+        val to = pos + roll
+        if (to > 30) return pos to null
+        LADDERS[to]?.let { return it to "ladder" }
+        SNAKES[to]?.let { return it to "snake" }
+        return to to null
+    }
+
+    // -- Puppet shows -------------------------------------------------------------------------
+
+    fun puppetPrompt(cast: List<String>, blobName: String): String =
+        "${cast.joinToString(" and ")} (little blobs) are putting on a puppet show for $blobName. Write a tiny cute play in 4 scenes, " +
+            "one line each (under 80 characters, with an emoji), with a happy ending. Reply in exactly this format and nothing else " +
+            "(no commands, don't change any device):\nTITLE: the title\nSCENE 1: ...\nSCENE 2: ...\nSCENE 3: ...\nSCENE 4: ..."
+
+    fun parsePuppet(reply: String): Pair<String, List<String>>? {
+        val title = Regex("""(?im)^\W*title\W*:\s*(.+)$""").find(reply)?.groupValues?.get(1)?.trim()?.trim('*', '"')?.trim() ?: return null
+        val scenes = Regex("""(?im)^\W*scene\s*\d\W*:\s*(.+)$""").findAll(reply).map { it.groupValues[1].trim().trim('*').trim().take(100) }.toList()
+        return if (scenes.size >= 3) title.take(50) to scenes.take(4) else null
+    }
+
+    val PUPPET_SHOWS = listOf(
+        "The Brave Little Teacup" to listOf("A little teacup lived on a very high shelf ☕", "One day it wobbled… and wobbled… 😨",
+            "A kind spoon caught it just in time! 🥄", "They've been best friends ever since 💛"),
+        "The Moon's Lost Sock" to listOf("The moon woke up with one cold foot 🌙", "It searched every cloud for its sock ☁️",
+            "A shooting star had borrowed it as a scarf! 🌠", "Now they take turns wearing it ✨"),
+    )
+
+    // -- Letters to Rusty, anniversaries, the pet show, cards, the weather calendar ---------------
+
+    fun letterToRustyPrompt(blobName: String, facts: List<String>): String =
+        "Write a short, warm letter (4 to 6 sentences) from $blobName, the little blob on my Echo Show, to me (Rusty) about its week. " +
+            "Things that happened this week: ${facts.joinToString("; ")}. Start with \"Dear Rusty,\" and sign it from $blobName. " +
+            "Reply with only the letter: no commands, and don't change anything on any device."
+
+    /** Today's friendship milestone with someone met at [metMs], if any ("1 month", "6 months", "1 year"…). */
+    fun anniversary(metMs: Long, today: java.time.LocalDate): String? {
+        if (metMs <= 0) return null
+        val met = java.time.Instant.ofEpochMilli(metMs).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        if (!today.isAfter(met)) return null
+        val months = java.time.temporal.ChronoUnit.MONTHS.between(met, today)
+        if (met.plusMonths(months) != today) return null
+        return when {
+            months == 1L -> "1 month"
+            months == 6L -> "6 months"
+            months > 0 && months % 12 == 0L -> "${months / 12} year${if (months / 12 > 1) "s" else ""}"
+            else -> null
+        }
+    }
+
+    val PET_SHOW_CATEGORIES = listOf("Shiniest shell", "Fastest snail", "Fluffiest", "Best trick", "Sleepiest", "Best dressed", "Most splashy")
+
+    fun cardPrompt(holiday: String, blobName: String, friends: List<String>): String =
+        "$blobName and its friends ${friends.joinToString()} (little blobs on my Echo Show) made me (Rusty) a card for $holiday. " +
+            "Write what's inside it: 2 or 3 short, sweet sentences. Reply with only the card's message: no commands, and don't change any device."
+
+    /** A doodle for the day's weather. */
+    fun weatherDoodle(summary: String?, tempF: Int?): String {
+        val s = summary.orEmpty().lowercase()
+        return when {
+            "thunder" in s -> "⛈️"
+            "snow" in s -> "❄️"
+            "rain" in s || "drizzle" in s || "shower" in s -> "🌧️"
+            "fog" in s || "mist" in s -> "🌫️"
+            "overcast" in s -> "☁️"
+            "cloud" in s -> "⛅"
+            (tempF ?: 0) >= 85 -> "🥵"
+            else -> "☀️"
+        }
+    }
+
+    /** As friends get closer, their houses grow: level 1 at 60 closeness, level 2 at 85. */
+    fun upgradeLevel(closeness: Int) = when { closeness >= 85 -> 2; closeness >= 60 -> 1; else -> 0 }
+
+    fun upgradeName(p: Personality, level: Int): String = when (p) {
+        Personality.BOUNCY -> if (level >= 2) "a treehouse with a slide" else "a treehouse"
+        Personality.SPARKLY -> if (level >= 2) "a disco balcony with a glitter ball" else "a disco balcony"
+        Personality.SLEEPY -> if (level >= 2) "a hammock porch with a star lamp" else "a hammock porch"
+        Personality.SHY -> if (level >= 2) "a rooftop greenhouse full of moss" else "a little rooftop garden"
+        Personality.TINY -> if (level >= 2) "a tiny lookout tower with a flag" else "a tiny lookout tower"
+    }
+
+    // -- The collections cabinet ---------------------------------------------------------------
+
+    data class Collectible(val id: String, val emoji: String, val name: String, val set: String)
+
+    val COLLECTIBLES = listOf(
+        Collectible("shell_spiral", "🐚", "Spiral shell", "Shells"), Collectible("shell_scallop", "🦪", "Scallop shell", "Shells"),
+        Collectible("shell_pearl", "⚪", "Pearly shell", "Shells"), Collectible("shell_starfish", "⭐", "Little starfish", "Shells"),
+        Collectible("shell_coral", "🪸", "Bit of coral", "Shells"),
+        Collectible("leaf_maple", "🍁", "Maple leaf", "Leaves"), Collectible("leaf_oak", "🍂", "Oak leaf", "Leaves"),
+        Collectible("leaf_fern", "🌿", "Fern frond", "Leaves"), Collectible("leaf_clover", "☘️", "Clover", "Leaves"),
+        Collectible("leaf_ginkgo", "🍃", "Ginkgo leaf", "Leaves"),
+        Collectible("stamp_globe", "🌍", "Globe stamp", "Stamps"), Collectible("stamp_mountain", "🗻", "Mountain stamp", "Stamps"),
+        Collectible("stamp_penguin", "🐧", "Penguin stamp", "Stamps"), Collectible("stamp_flower", "🌺", "Flower stamp", "Stamps"),
+        Collectible("stamp_train", "🚂", "Train stamp", "Stamps"),
+        Collectible("stone_pebble", "🪨", "Smooth pebble", "Stones"), Collectible("stone_crystal", "💎", "Crystal", "Stones"),
+        Collectible("stone_moon", "🌙", "Moonstone", "Stones"), Collectible("stone_heart", "❤️", "Heart-shaped stone", "Stones"),
+        Collectible("stone_fossil", "🦴", "Tiny fossil", "Stones"),
+    )
+
     /** What each kind of friend gives Puff on its birthday. */
     fun presentFor(p: Personality): Pair<String, String> = when (p) {
         Personality.BOUNCY -> "⚽" to "a super-bouncy ball"
@@ -671,6 +794,12 @@ object FriendsBrain {
         "stargazing" -> "stargazing"
         "soup" -> "bringing soup"
         "welcome" -> "a welcome basket"
+        "boardgame" -> "snakes and ladders"
+        "puppetshow" -> "a puppet show"
+        "firstsnow" -> "the first snow"
+        "petshow" -> "the pet show"
+        "picnic" -> "a picnic in the park"
+        "cardmaking" -> "making a holiday card"
         "nap" -> "a nap"
         else -> a
     }
@@ -791,6 +920,6 @@ object FriendsBrain {
         7 to 4 -> "the Fourth of July"
         10 to 31 -> "Halloween"
         12 to 25 -> "Christmas"
-        else -> null
+        else -> if (date.monthValue == 11 && date.dayOfWeek == java.time.DayOfWeek.THURSDAY && (date.dayOfMonth - 1) / 7 == 3) "Thanksgiving" else null
     }
 }

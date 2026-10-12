@@ -218,4 +218,30 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
         assertTrue(FriendsBrain.lightsOut(Friend("a", personality = "SLEEPY")) < FriendsBrain.lightsOut(Friend("a", personality = "SPARKLY")))
         Personality.entries.forEach { assertTrue(FriendsBrain.presentFor(it).second.isNotBlank()) }
     }
+
+    @Test
+    fun boardPuppetsAnniversariesCalendar() {
+        assertEquals(11 to "ladder", FriendsBrain.snakesMove(1, 2))
+        assertEquals(4 to "snake", FriendsBrain.snakesMove(10, 4))
+        assertEquals(27 to null, FriendsBrain.snakesMove(27, 6))
+        assertEquals(30 to null, FriendsBrain.snakesMove(27, 3))
+        val play = FriendsBrain.parsePuppet("TITLE: The Lost Hat\nSCENE 1: A hat blew away 🎩\nSCENE 2: Everyone chased it 🏃\nSCENE 3: A bird wore it 🐦\nSCENE 4: They shared 💛")!!
+        assertEquals("The Lost Hat", play.first)
+        assertEquals(4, play.second.size)
+        assertNull(FriendsBrain.parsePuppet("TITLE: Too short\nSCENE 1: one"))
+        val zone = java.time.ZoneId.systemDefault()
+        val met = java.time.LocalDate.of(2026, 1, 15).atStartOfDay(zone).toInstant().toEpochMilli()
+        assertEquals("1 month", FriendsBrain.anniversary(met, java.time.LocalDate.of(2026, 2, 15)))
+        assertEquals("6 months", FriendsBrain.anniversary(met, java.time.LocalDate.of(2026, 7, 15)))
+        assertEquals("1 year", FriendsBrain.anniversary(met, java.time.LocalDate.of(2027, 1, 15)))
+        assertNull(FriendsBrain.anniversary(met, java.time.LocalDate.of(2026, 3, 15)))
+        assertNull(FriendsBrain.anniversary(met, java.time.LocalDate.of(2026, 2, 16)))
+        assertEquals("Thanksgiving", FriendsBrain.holiday(java.time.LocalDate.of(2026, 11, 26)))
+        assertNull(FriendsBrain.holiday(java.time.LocalDate.of(2026, 11, 19)))
+        assertEquals("🌧️", FriendsBrain.weatherDoodle("Light rain", 60))
+        assertEquals(2, FriendsBrain.upgradeLevel(90))
+        assertEquals(0, FriendsBrain.upgradeLevel(10))
+        assertEquals(FriendsBrain.COLLECTIBLES.size, FriendsBrain.COLLECTIBLES.map { it.id }.toSet().size)
+        assertEquals(setOf("Shells", "Leaves", "Stamps", "Stones"), FriendsBrain.COLLECTIBLES.map { it.set }.toSet())
+    }
 }

@@ -113,6 +113,8 @@ internal fun BlobPage(actions: UiActions) {
                 Tab("🏅", tab == "stickers") { tab = "stickers" }
                 Spacer(Modifier.width(6.dp))
                 Tab("🍳", tab == "cookbook") { tab = "cookbook" }
+                Spacer(Modifier.width(6.dp))
+                Tab("🗄️", tab == "cabinet") { tab = "cabinet" }
                 Spacer(Modifier.width(10.dp))
                 // Not a tab: Puff answers in its bubble.
                 Text("💬 How are you?", color = Palette.night, fontSize = 14.sp,
@@ -130,6 +132,7 @@ internal fun BlobPage(actions: UiActions) {
                 tab == "gazette" -> GazetteContent(actions, Modifier.fillMaxSize())
                 tab == "stickers" -> StickerBook(Modifier.fillMaxSize())
                 tab == "cookbook" -> Cookbook(Modifier.fillMaxSize())
+                tab == "cabinet" -> Cabinet(Modifier.fillMaxSize())
                 else -> AlbumContent(actions, Modifier.fillMaxSize())
             }
         }
@@ -285,7 +288,7 @@ private fun MailContent(modifier: Modifier) {
     androidx.compose.foundation.lazy.LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         items(letters.size) { i ->
             val l = letters[i]
-            val f = data.friends.firstOrNull { it.id == l.friendId } ?: data.penpal?.takeIf { l.friendId == com.rusty.museecho.gadget.FriendsBrain.PENPAL_ID }?.let {
+            val f = data.friends.firstOrNull { it.id == l.friendId } ?: if (l.friendId == "rusty") com.rusty.museecho.gadget.Friend("rusty", "Rusty 💌", color = 0xFFFFC266) else data.penpal?.takeIf { l.friendId == com.rusty.museecho.gadget.FriendsBrain.PENPAL_ID }?.let {
                 com.rusty.museecho.gadget.Friend(l.friendId, "${it.name} 🌍", color = it.color)
             }
             Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = if (l.read) 0.5f else 0.9f), RoundedCornerShape(12.dp))
@@ -477,6 +480,9 @@ private fun PlayContent(modifier: Modifier) {
             Spacer(Modifier.weight(1f))
             Text("You ${score.first} · $name ${score.second} · draws ${score.third}", color = Palette.muted, fontSize = 12.sp)
         }
+        val boardWins = GadgetState.friends.collectAsState().value.boardWins
+        if (boardWins.isNotEmpty()) Text("🎲 Snakes and ladders: " + boardWins.entries.sortedByDescending { it.value }.joinToString(" · ") { "${it.key} ${it.value}" },
+            color = Palette.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(8.dp))
         if (game == "tricks") TricksContent()
         else if (game == "ttt") Row(verticalAlignment = Alignment.CenterVertically) {
@@ -535,13 +541,17 @@ private fun PlayContent(modifier: Modifier) {
 @Composable
 private fun DiaryOrDreams(modifier: Modifier) {
     var dreams by remember { mutableStateOf(false) }
+    var calendar by remember { mutableStateOf(false) }
     Column(modifier) {
         Row(Modifier.padding(bottom = 4.dp)) {
-            Tab("📔 Diary", !dreams) { dreams = false }
+            Tab("📔 Diary", !dreams && !calendar) { dreams = false; calendar = false }
             Spacer(Modifier.width(6.dp))
-            Tab("💭 Dreams", dreams) { dreams = true }
+            Tab("💭 Dreams", dreams) { dreams = true; calendar = false }
+            Spacer(Modifier.width(6.dp))
+            Tab("📅 Weather", calendar) { calendar = true; dreams = false }
         }
-        if (!dreams) DiaryContent(Modifier.fillMaxSize())
+        if (calendar) WeatherCalendar(Modifier.fillMaxSize())
+        else if (!dreams) DiaryContent(Modifier.fillMaxSize())
         else {
             val data by GadgetState.friends.collectAsState()
             val list = data.dreams.reversed()
@@ -708,6 +718,71 @@ private fun Cookbook(modifier: Modifier) {
                 Column(Modifier.padding(start = 10.dp).weight(1f)) {
                     Text(r.title, color = Palette.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${r.cooks} · ${r.date}" + if (r.real) " · real recipe" else "", color = Palette.muted, fontSize = 12.sp, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+/** Puff's collections cabinet: each set on a shelf, found things in colour, gaps for the ones still out there. */
+@Composable
+private fun Cabinet(modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    val all = com.rusty.museecho.gadget.FriendsBrain.COLLECTIBLES
+    val how = mapOf("Shells" to "from trips", "Leaves" to "autumn and spring visits", "Stamps" to "pen pal letters", "Stones" to "treasure hunts")
+    Column(modifier.verticalScroll(rememberScrollState())) {
+        Text("🗄️ ${data.collection.size} of ${all.size} found", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+        all.groupBy { it.set }.forEach { (set, items) ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Text(set, color = Palette.amber, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("  ${how[set].orEmpty()}", color = Palette.muted, fontSize = 11.sp)
+            }
+            Row(Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Color(0xFF7A5536).copy(alpha = 0.25f), RoundedCornerShape(8.dp)).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items.forEach { c ->
+                    val got = data.collection[c.id]
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (got != null) c.emoji else "❔", fontSize = 22.sp, modifier = Modifier.alpha(if (got != null) 1f else 0.35f))
+                        Text(if (got != null) c.name else "???", color = if (got != null) Palette.ink else Palette.muted, fontSize = 10.sp, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The weather calendar: a month grid of Puff's doodles of each day's weather and its mood. */
+@Composable
+private fun WeatherCalendar(modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    var month by remember { mutableStateOf(java.time.YearMonth.now()) }
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("◀", color = Palette.ink, fontSize = 16.sp, modifier = Modifier.clickable { month = month.minusMonths(1) }.padding(6.dp))
+            Text(month.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US)), color = Palette.amber, fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.width(150.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Text("▶", color = Palette.ink, fontSize = 16.sp, modifier = Modifier.clickable { if (month < java.time.YearMonth.now()) month = month.plusMonths(1) }.padding(6.dp))
+        }
+        Row(Modifier.fillMaxWidth()) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { Text(it, color = Palette.muted, fontSize = 11.sp, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+        }
+        val lead = month.atDay(1).dayOfWeek.value - 1
+        val cells = List(lead) { 0 } + (1..month.lengthOfMonth()).toList()
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            cells.chunked(7).forEach { week ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    week.forEach { day ->
+                        val entry = if (day > 0) data.weatherDays[month.atDay(day).toString()] else null
+                        Column(Modifier.weight(1f).padding(1.dp).background(Palette.card.copy(alpha = if (day > 0) 0.6f else 0f), RoundedCornerShape(6.dp)).padding(2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (day > 0) {
+                                Text("$day", color = Palette.muted, fontSize = 9.sp)
+                                Text(entry?.replace("|", "") ?: " ", fontSize = 13.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                    repeat(7 - week.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }

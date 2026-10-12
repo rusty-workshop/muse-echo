@@ -132,6 +132,36 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             drawCup(f0 + Offset(-18 * dp, s0 * 0.42f), dp)
         }
         if (scene.book) drawBook(Offset(mid.x, blob.y + 52 * dp), dp)
+        scene.snakes?.let { (a, b, roll) -> drawSnakesBoard(Offset(mid.x, blob.y + 68 * dp), 54 * dp, a, b, roll, Color(friends.first().color)) }
+        // A picnic: a checked blanket and a basket under everyone.
+        if (scene.picnic) {
+            val xs = spots.map { it.first.x } + blob.x
+            val l = xs.min() - 50 * dp
+            val r = xs.max() + 50 * dp
+            val y = blob.y + 70 * dp
+            val sq = 14 * dp
+            var k = 0
+            var x = l
+            while (x < r) {
+                for (row in 0..1) drawRect(if ((k + row) % 2 == 0) Color(0xFFE04848).copy(alpha = 0.75f) else Color.White.copy(alpha = 0.75f),
+                    Offset(x, y + row * sq * 0.5f), Size(sq, sq * 0.5f))
+                x += sq; k++
+            }
+            val bk = Offset(mid.x + 30 * dp, y - 14 * dp)
+            drawRoundRect(Color(0xFFB08A5A), bk, Size(30 * dp, 18 * dp), CornerRadius(4 * dp))
+            drawArc(Color(0xFF8A6A3A), 180f, 180f, false, bk + Offset(4 * dp, -10 * dp), Size(22 * dp, 20 * dp), style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f * dp))
+        }
+        // Making a card: a folded card and crayons.
+        if (scene.crafting) {
+            val c = Offset(mid.x, blob.y + 60 * dp)
+            drawRect(Color(0xFFFFF3D6), Offset(c.x - 22 * dp, c.y - 14 * dp), Size(44 * dp, 28 * dp))
+            drawLine(Color(0xFFD8C8A8), Offset(c.x, c.y - 14 * dp), Offset(c.x, c.y + 14 * dp), 1 * dp)
+            drawHeartShape(Offset(c.x + 11 * dp, c.y), 6 * dp, Color(0xFFFF7A8A))
+            for (k in 0..2) drawCircle(Color(0xFFFFF3B0).copy(alpha = 0.4f + 0.5f * abs(sin(t * 3f + k))), 1.5f * dp, Offset(c.x - 14 * dp + k * 6 * dp, c.y - 6 * dp + k * 4 * dp))
+            listOf(Color(0xFF45D3C7), Color(0xFF8B6CFF), Color(0xFFFFC266)).forEachIndexed { k, col ->
+                drawLine(col, Offset(c.x + 28 * dp, c.y + (k * 5 - 6) * dp), Offset(c.x + 44 * dp, c.y + (k * 5 - 9) * dp), 3 * dp)
+            }
+        }
         // Stargazing: the night sky over the room, tonight's moon, a telescope, shooting stars in a shower.
         if (scene.stargaze) drawStargazing(blob, half, f0, s0, t, dp)
         // Baking: a mixing bowl with a whisk going round.
@@ -297,6 +327,29 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
             moveTo(hand.x, hand.y); lineTo(aim.x + perp.x * 34 * dp, aim.y + perp.y * 34 * dp); lineTo(aim.x - perp.x * 34 * dp, aim.y - perp.y * 34 * dp); close()
         }, Brush.linearGradient(listOf(Color(0xFFFFE9A8).copy(alpha = 0.45f * enter), Color.Transparent), hand, aim))
     }
+    // A puppet show: a little theatre around the performers, curtains open, the title on top.
+    if (scene.puppets && enter > 0.3f) {
+        val xs = spots.map { it.first.x }
+        val l = xs.min() - spots.maxOf { it.second } * 0.75f
+        val r = xs.max() + spots.maxOf { it.second } * 0.75f
+        val top = spots.minOf { it.first.y - it.second * 0.9f }
+        val bottom = spots.maxOf { it.first.y + it.second * 0.45f }
+        Canvas(Modifier.fillMaxSize()) {
+            val red = Color(0xFFB0303A)
+            drawRect(Color(0xFF7A5536), Offset(l, bottom), Size(r - l, 14 * dp))
+            drawRect(red, Offset(l - 6 * dp, top - 18 * dp), Size(r - l + 12 * dp, 18 * dp))
+            for (k in 0..7) drawCircle(Color(0xFFFFC266), 2 * dp, Offset(l + (r - l) * k / 7, top - 2 * dp))
+            for (side in listOf(0, 1)) {
+                val x0 = if (side == 0) l else r
+                val dir = if (side == 0) 1f else -1f
+                drawPath(Path().apply {
+                    moveTo(x0, top); lineTo(x0 + dir * 26 * dp, top); quadraticTo(x0 + dir * 10 * dp, (top + bottom) / 2, x0 + dir * 4 * dp, bottom); lineTo(x0, bottom); close()
+                }, red.copy(alpha = 0.95f))
+            }
+        }
+        if (scene.playTitle.isNotEmpty()) Text("🎭 ${scene.playTitle}", color = Color(0xFFFFE9A8), fontSize = 12.sp, maxLines = 1,
+            modifier = Modifier.offset { IntOffset((l + 4 * dp).toInt(), (top - 17 * dp).toInt()) }.widthIn(max = with(density) { (r - l).toDp() }))
+    }
     // Puff's surprise party: the lights are off while everyone hides.
     if (scene.lightsOff) Box(Modifier.fillMaxSize().background(Color(0xFF05040A).copy(alpha = 0.82f)))
     // Group photo: the camera's flash.
@@ -458,4 +511,61 @@ private fun DrawScope.drawStargazing(blob: Offset, half: Float, friend: Offset, 
     for (k in listOf(-1f, 0f, 1f)) drawLine(Color(0xFF8A7A6A), legTop, base + Offset(k * fs * 0.18f, 0f), 2 * dp)
     drawLine(Color(0xFFD8D0E8), legTop + Offset(-fs * 0.2f, fs * 0.08f), legTop + Offset(fs * 0.15f, -fs * 0.18f), 7 * dp)
     drawCircle(Color(0xFF9AB8FF), 3.5f * dp, legTop + Offset(fs * 0.15f, -fs * 0.18f))
+}
+
+/** A little snakes-and-ladders board (5 x 6), the two tokens, and the last roll on a die. */
+private fun DrawScope.drawSnakesBoard(c: Offset, size: Float, puff: Int, friend: Int, roll: Int, friendColor: Color) {
+    val cols = 6
+    val rows = 5
+    val cell = size / cols
+    val h = cell * rows
+    val tl = c - Offset(size / 2, h / 2)
+    for (r in 0 until rows) for (k in 0 until cols) drawRect(if ((r + k) % 2 == 0) Color(0xFFFFF3D6) else Color(0xFFBFE6F5), tl + Offset(k * cell, r * cell), Size(cell, cell))
+    // Square n (1-30) snakes back and forth from the bottom left.
+    fun at(n: Int): Offset {
+        val i = (n - 1).coerceIn(0, 29)
+        val row = i / cols
+        val col = if (row % 2 == 0) i % cols else cols - 1 - i % cols
+        return tl + Offset(col * cell + cell / 2, h - row * cell - cell / 2)
+    }
+    com.rusty.museecho.gadget.FriendsBrain.LADDERS.forEach { (a, b) ->
+        val p = at(a); val q = at(b)
+        for (o in listOf(-3f, 3f)) drawLine(Color(0xFF8A5A3C), p + Offset(o, 0f), q + Offset(o, 0f), 1.5f)
+    }
+    com.rusty.museecho.gadget.FriendsBrain.SNAKES.forEach { (a, b) ->
+        val p = at(a); val q = at(b)
+        val mid = (p + q) / 2f + Offset(cell * 0.4f, 0f)
+        drawPath(Path().apply { moveTo(p.x, p.y); quadraticTo(mid.x, mid.y, q.x, q.y) }, Color(0xFF4FA060), style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+        drawCircle(Color(0xFF4FA060), 3.5f, p)
+    }
+    drawCircle(Color(0xFF8B6CFF), cell * 0.28f, at(puff) + Offset(-cell * 0.12f, 0f))
+    drawCircle(friendColor, cell * 0.28f, at(friend) + Offset(cell * 0.12f, 0f))
+    if (roll > 0) {
+        val die = tl + Offset(size + 8f, h - cell * 1.2f)
+        drawRoundRect(Color.White, die, Size(cell, cell), CornerRadius(4f))
+        val pips = mapOf(1 to listOf(4), 2 to listOf(0, 8), 3 to listOf(0, 4, 8), 4 to listOf(0, 2, 6, 8), 5 to listOf(0, 2, 4, 6, 8), 6 to listOf(0, 2, 3, 5, 6, 8))
+        pips[roll]?.forEach { p -> drawCircle(Color(0xFF231C30), cell * 0.08f, die + Offset(cell * (0.25f + 0.25f * (p % 3)), cell * (0.25f + 0.25f * (p / 3)))) }
+    }
+}
+
+/** Home page chips: a ticket while a puppet show's on, and today's holiday card from Puff and friends. */
+@Composable
+internal fun HomeEventChips(modifier: Modifier = Modifier) {
+    val visit by GadgetState.friend.collectAsState()
+    val scene by GadgetState.friendScene.collectAsState()
+    val data by GadgetState.friends.collectAsState()
+    val today = java.time.LocalDate.now().toString()
+    val card = data.cards.lastOrNull { it.date == today }
+    val show = visit?.activity == "puppetshow"
+    if (!show && card == null) return
+    androidx.compose.foundation.layout.Row(modifier, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+        if (show) Text("🎟️ Puppet show" + if (scene.playTitle.isNotEmpty()) ": ${scene.playTitle}" else " starting!", color = Palette.night, fontSize = 13.sp, maxLines = 1,
+            modifier = Modifier.background(Color(0xFFFFC266), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 5.dp))
+        card?.let { c ->
+            Text("💌 A ${c.holiday} card for you!", color = Palette.night, fontSize = 13.sp, maxLines = 1,
+                modifier = Modifier.background(Color(0xFFFF9EC7), RoundedCornerShape(50))
+                    .clickable { GadgetState.show(com.rusty.museecho.gadget.Screen.Text("💌 Happy ${c.holiday}!", "${c.text}\n\nLove from ${c.from}")) }
+                    .padding(horizontal = 12.dp, vertical = 5.dp))
+        }
+    }
 }

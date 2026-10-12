@@ -323,6 +323,7 @@ fun MuseEchoApp(actions: UiActions) {
                 TimerChips(Modifier, actions)
                 NowPlayingChip(Modifier.padding(top = 6.dp), actions)
                 LaptopNotes()
+                HomeEventChips(Modifier.padding(top = 6.dp))
             }
             IdleFrameWatcher(actions)
             Slideshow(actions)

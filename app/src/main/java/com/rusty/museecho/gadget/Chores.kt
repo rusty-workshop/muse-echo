@@ -571,7 +571,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette", "penpal", "book", "stickers", "review", "sniffles", "build", "fair", "parade", "souvenir")).forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette", "penpal", "book", "stickers", "review", "sniffles", "build", "fair", "parade", "souvenir", "rustyletter", "overnight", "collect", "card")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -622,6 +622,16 @@ class Chores(
                 "STICKERS" -> GadgetService.instance?.life?.friends?.checkStickers()
                 "SNIFFLES" -> GadgetService.instance?.life?.friends?.startSniffles(soonMin = 2)
                 "BUILD" -> GadgetService.instance?.life?.friends?.buildNow()
+                "RUSTYLETTER" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.writeToRusty() } }
+                "OVERNIGHT" -> GadgetService.instance?.life?.friends?.let { fl ->
+                    fl.store.data.friends.filter { it.name.isNotBlank() }.randomOrNull()?.let { fl.sleepOverAt(it, testMs = 3 * 60_000L) }
+                }
+                "COLLECT" -> GadgetService.instance?.life?.friends?.collect(listOf("Shells", "Leaves", "Stamps", "Stones").random(), "from the playground")
+                "CARD" -> GadgetService.instance?.life?.friends?.store?.let { st ->
+                    val today = java.time.LocalDate.now().toString()
+                    if (st.data.cards.none { it.date == today }) st.update { it.copy(cards = it.cards + HolidayCard("Card Test", today,
+                        "Just a test card, Rusty! 💛", GadgetState.BlobCalled())) }
+                }
                 "FAIR", "PARADE" -> GadgetState.previewFestival(value.uppercase(), System.currentTimeMillis() + 10 * 60_000L)
                 "SOUVENIR" -> FriendsBrain.SOUVENIRS.random().let { (e, what) ->
                     GadgetState.setSouvenir(GadgetState.Souvenir(e, what, GadgetService.instance?.life?.friends?.store?.data?.friends?.firstOrNull { it.name.isNotBlank() }?.shownName ?: "a friend",

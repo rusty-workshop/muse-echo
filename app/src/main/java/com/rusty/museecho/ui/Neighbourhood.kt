@@ -162,7 +162,17 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                     val whereLabel = if (where == Where.VISITING) "visiting ${blobName.ifBlank { "the blob" }}" else where.label
                     val status = if (bday) "🎂 birthday!" else whereLabel + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
                     House(f.shownName, f.color, f.p.scale, where, if (marketOn && where == Where.HOME) "selling ${FriendsBrain.marketGoods(f)}" else status,
-                        hour, decor = decor, balloons = bday, stall = (marketOn || fest == FriendsBrain.Festival.FAIR) && where == Where.HOME) { inside = f.id }
+                        hour, decor = decor, balloons = bday, stall = (marketOn || fest == FriendsBrain.Festival.FAIR) && where == Where.HOME,
+                        upgrade = data.upgrades[f.id] ?: 0, personality = f.p) { inside = f.id }
+                }
+                // The park at the end of the street: a picnic there on sunny weekends.
+                val picnic = visit?.activity == "picnic"
+                Column(Modifier.width(150.dp).clickable { note = if (picnic) "Everyone's having a picnic! 🧺" else "A quiet day in the park 🌳" },
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    val who = if (picnic) listOf(Palette.violet) + visit!!.friendIds.mapNotNull { id -> data.friends.firstOrNull { it.id == id } }.map { Color(it.color) } else emptyList()
+                    Canvas(Modifier.width(146.dp).height(100.dp)) { drawPark(who, hour) }
+                    Text("The park", color = Color(0xFF7FC88A), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (picnic) "🧺 picnic!" else "quiet", color = Palette.muted, fontSize = 11.sp)
                 }
                 // A new house going up (a week of building), until someone moves in.
                 data.building?.takeIf { it.friendId.isEmpty() }?.let { b ->
@@ -191,13 +201,15 @@ internal fun NeighbourhoodPage(actions: UiActions) {
 /** One house: walls in the owner's colour, a roof, a door and a window that tells you if they're in. */
 @Composable
 private fun House(name: String, color: Long, scale: Float, where: Where, status: String, hour: Int, mailbox: Boolean = false, mailFlag: Boolean = false,
-                  decor: StreetDecor = StreetDecor.NONE, balloons: Boolean = false, garden: Int = -1, stall: Boolean = false, onTap: () -> Unit) {
+                  decor: StreetDecor = StreetDecor.NONE, balloons: Boolean = false, garden: Int = -1, stall: Boolean = false,
+                  upgrade: Int = 0, personality: com.rusty.museecho.gadget.Personality? = null, onTap: () -> Unit) {
     Column(Modifier.width(104.dp).clickable(onClick = onTap), horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(Modifier.width(96.dp).height((70 + 30 * scale).dp)) {
             drawHouse(Color(color), where, hour, mailbox, mailFlag)
             drawDecor(decor, balloons)
             if (garden >= 0) drawFrontGarden(garden)
             if (stall) drawMarketStall()
+            if (upgrade > 0 && personality != null) drawUpgrade(personality, upgrade, Color(color))
         }
         Text(name, color = Color(color), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(status, color = Palette.muted, fontSize = 11.sp, maxLines = 1, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
@@ -573,5 +585,85 @@ private fun DrawScope.drawLightsParade(now: Long, colors: List<Color>) {
         drawCircle(Brush.radialGradient(listOf(c.copy(alpha = 0.5f), Color.Transparent), Offset(x, ly - 30.dp.toPx()), 22.dp.toPx()), 22.dp.toPx(), Offset(x, ly - 30.dp.toPx()))
         drawRoundRect(c.copy(alpha = 0.9f), Offset(x - 7.dp.toPx(), ly - 38.dp.toPx()), Size(14.dp.toPx(), 16.dp.toPx()), CornerRadius(5.dp.toPx()))
         drawRect(Color(0xFFFFE9A8).copy(alpha = 0.8f), Offset(x - 3.dp.toPx(), ly - 33.dp.toPx()), Size(6.dp.toPx(), 6.dp.toPx()))
+    }
+}
+
+/** A friend's house, grown as they've got closer to Puff (level 1, then 2). */
+private fun DrawScope.drawUpgrade(p: com.rusty.museecho.gadget.Personality, level: Int, c: Color) {
+    val w = size.width * 0.78f
+    val wallH = size.height * 0.52f
+    val left = (size.width - w) / 2
+    val top = size.height - wallH
+    val apex = Offset(size.width / 2, top - size.height * 0.36f)
+    val wood = Color(0xFF8A5A3C)
+    when (p) {
+        com.rusty.museecho.gadget.Personality.BOUNCY -> {
+            // A treehouse on a little tree beside the house (and a slide down).
+            val tx = size.width * 0.97f
+            drawLine(wood, Offset(tx, size.height), Offset(tx, top - 6f), 4f)
+            drawCircle(Color(0xFF4FA060), 14f, Offset(tx, top - 14f))
+            drawRect(lerp(c, wood, 0.4f), Offset(tx - 10f, top - 18f), Size(20f, 14f))
+            drawPath(Path().apply { moveTo(tx - 12f, top - 4f); lineTo(tx - 4f, top - 18f); lineTo(tx + 12f, top - 4f); close() }, wood)
+            if (level >= 2) drawLine(Color(0xFFFF7A8A), Offset(tx - 10f, top - 4f), Offset(tx - 26f, size.height - 2f), 3f)
+        }
+        com.rusty.museecho.gadget.Personality.SPARKLY -> {
+            // A balcony under the roof, with a glitter ball.
+            val by = top + wallH * 0.12f
+            drawRect(Color(0xFFD0D6E0), Offset(left + w * 0.55f, by), Size(w * 0.5f, 3f))
+            for (k in 0..3) drawLine(Color(0xFFD0D6E0), Offset(left + w * (0.58f + k * 0.13f), by), Offset(left + w * (0.58f + k * 0.13f), by - 8f), 1.5f)
+            drawCircle(Color(0xFFE6ECF5), 5f, Offset(left + w * 0.85f, by - 16f))
+            if (level >= 2) for (k in 0..4) drawCircle(listOf(Color(0xFFFF9EC7), Color(0xFF9AB8FF), Color(0xFFFFE08A))[k % 3], 1.8f,
+                Offset(left + w * (0.6f + k * 0.1f), by - 22f - (k % 2) * 6f))
+        }
+        com.rusty.museecho.gadget.Personality.SLEEPY -> {
+            // A porch out front with a hammock (and a star lamp).
+            val px = left - w * 0.05f
+            drawLine(wood, Offset(px, size.height), Offset(px, top + wallH * 0.3f), 2.5f)
+            drawLine(wood, Offset(px, top + wallH * 0.3f), Offset(left + w * 0.5f, top + wallH * 0.3f), 2.5f)
+            drawArc(Color(0xFF6E7BCF), 0f, 180f, false, Offset(px + 2f, top + wallH * 0.4f), Size(w * 0.4f, wallH * 0.3f),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+            if (level >= 2) drawCircle(Color(0xFFFFE08A), 3f, Offset(px + 4f, top + wallH * 0.36f))
+        }
+        com.rusty.museecho.gadget.Personality.SHY -> {
+            // Moss and flowers along the roof (and a little greenhouse on top).
+            for (k in 0..4) drawCircle(Color(0xFF5FBF7F), 4f, Offset(left + w * (0.1f + k * 0.2f), top - 3f - (2 - kotlin.math.abs(k - 2)) * size.height * 0.07f))
+            if (level >= 2) {
+                drawRect(Color(0xFFBFE6F5).copy(alpha = 0.7f), Offset(apex.x - 9f, apex.y - 12f), Size(18f, 12f))
+                drawLine(Color.White.copy(alpha = 0.7f), Offset(apex.x, apex.y - 12f), Offset(apex.x, apex.y), 1f)
+            }
+        }
+        com.rusty.museecho.gadget.Personality.TINY -> {
+            // A skinny lookout tower on the roof (with a flag).
+            drawRect(lerp(c, Color(0xFF1B1526), 0.3f), Offset(apex.x - 3.5f, apex.y - 20f), Size(7f, 22f))
+            drawPath(Path().apply { moveTo(apex.x - 6f, apex.y - 20f); lineTo(apex.x, apex.y - 28f); lineTo(apex.x + 6f, apex.y - 20f); close() }, wood)
+            if (level >= 2) {
+                drawLine(Color.White.copy(alpha = 0.7f), Offset(apex.x, apex.y - 28f), Offset(apex.x, apex.y - 40f), 1f)
+                drawPath(Path().apply { moveTo(apex.x, apex.y - 40f); lineTo(apex.x + 9f, apex.y - 36f); lineTo(apex.x, apex.y - 32f); close() }, Color(0xFFFF7A8A))
+            }
+        }
+    }
+}
+
+/** The park: grass, a tree, a pond and a bench; on picnic days, a checked blanket with everyone on it. */
+private fun DrawScope.drawPark(who: List<Color>, hour: Int) {
+    val ground = size.height - 4f
+    drawRoundRect(Color(0xFF4FA060).copy(alpha = 0.55f), Offset(0f, ground - size.height * 0.28f), Size(size.width, size.height * 0.28f), CornerRadius(10f))
+    val tree = Offset(size.width * 0.18f, ground - size.height * 0.28f)
+    drawLine(Color(0xFF5A4030), tree, tree + Offset(0f, -size.height * 0.35f), 5f)
+    drawCircle(Color(0xFF4FA060), size.height * 0.2f, tree + Offset(0f, -size.height * 0.45f))
+    drawOval(Color(0xFF6FC3E8).copy(alpha = 0.7f), Offset(size.width * 0.62f, ground - size.height * 0.14f), Size(size.width * 0.32f, size.height * 0.09f))
+    val bench = Offset(size.width * 0.36f, ground - size.height * 0.3f)
+    drawRect(Color(0xFF8A5A3C), bench, Size(size.width * 0.18f, 3f))
+    for (x in listOf(0.01f, 0.16f)) drawLine(Color(0xFF8A5A3C), bench + Offset(size.width * x, 0f), bench + Offset(size.width * x, 8f), 2f)
+    if (who.isEmpty()) return
+    val bl = Offset(size.width * 0.3f, ground - size.height * 0.16f)
+    val bw = size.width * 0.45f
+    val sq = bw / 8
+    for (k in 0 until 8) for (r in 0..1) drawRect(if ((k + r) % 2 == 0) Color(0xFFE04848) else Color.White, bl + Offset(k * sq, r * sq * 0.5f), Size(sq, sq * 0.5f))
+    who.take(6).forEachIndexed { i, col ->
+        val p = bl + Offset(bw * (i + 0.5f) / who.size.coerceAtMost(6), -5f)
+        drawCircle(col, 6f, p)
+        drawCircle(Color(0xFF0E0B14), 0.9f, p + Offset(-2f, -1f))
+        drawCircle(Color(0xFF0E0B14), 0.9f, p + Offset(2f, -1f))
     }
 }

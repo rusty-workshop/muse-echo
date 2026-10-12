@@ -77,6 +77,7 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         androidx.compose.animation.core.animateFloatAsState(shifts[d.name] ?: 0f, androidx.compose.animation.core.tween(1400), label = d.name).value
     }
     val postcards by GadgetState.friends.collectAsState()
+    val snowman by GadgetState.snowman.collectAsState()
     Canvas(modifier) {
         val has = { d: Decor -> d.name in items }
         val u = radius / 110f // one "dp" of the blob's 220 dp box
@@ -101,6 +102,25 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         }
         if (has(Decor.FAIRY_LIGHTS)) drawFairyLights(blob.y - 130 * u, cx + 130 * u, u, now, dim)
         if (has(Decor.RUG)) drawOval(Palette.violet.copy(alpha = 0.16f * dim), Offset(cx - 88 * u, floor - 6 * u), Size(176 * u, 26 * u))
+        // The first snow's snowman, until it thaws.
+        if (snowman) {
+            val sm = Offset(cx + 150 * u, floor)
+            drawCircle(Color.White.copy(alpha = 0.92f * dim), 15 * u, sm + Offset(0f, -15 * u))
+            drawCircle(Color.White.copy(alpha = 0.92f * dim), 10 * u, sm + Offset(0f, -38 * u))
+            for (e in listOf(-1f, 1f)) drawCircle(Color(0xFF231C30).copy(alpha = dim), 1.4f * u, sm + Offset(e * 3.5f * u, -40 * u))
+            drawLine(Color(0xFFFF9A3C).copy(alpha = dim), sm + Offset(0f, -37 * u), sm + Offset(7 * u, -36 * u), 2 * u)
+            drawLine(Color(0xFFFF4D5E).copy(alpha = dim), sm + Offset(-9 * u, -29 * u), sm + Offset(9 * u, -29 * u), 3 * u)
+            drawRect(Color(0xFF231C30).copy(alpha = dim), Offset(sm.x - 7 * u, sm.y - 54 * u), Size(14 * u, 8 * u))
+            for (k in 0..2) drawCircle(Color(0xFF231C30).copy(alpha = dim), 1.3f * u, sm + Offset(0f, (-20 + k * 6) * u))
+        }
+        // The pet's pet-show rosette, pinned up by it.
+        if (postcards.pet?.rosettes?.isNotEmpty() == true) {
+            val ro = Offset(cx + (PET_SPOT.x - 18) * u, floor - 30 * u)
+            drawLine(Color(0xFF3E7BD8).copy(alpha = dim), ro, ro + Offset(-3 * u, 12 * u), 2.5f * u)
+            drawLine(Color(0xFF3E7BD8).copy(alpha = dim), ro, ro + Offset(3 * u, 12 * u), 2.5f * u)
+            drawCircle(Color(0xFFFFC266).copy(alpha = dim), 6 * u, ro)
+            drawCircle(Color(0xFF3E7BD8).copy(alpha = dim), 3 * u, ro)
+        }
         if (has(Decor.BOOKSHELF)) drawShelf(Offset(cx - 160 * u, floor), u, dim, trophy = has(Decor.TROPHY), globe = has(Decor.SNOW_GLOBE) && month in listOf(11, 0, 1), read = postcards.books.size)
         val sx = { d: Decor -> (moved[d] ?: 0f) * u }
         if (has(Decor.PLANT)) drawPlant(Offset(cx - 118 * u + sx(Decor.PLANT), floor), u, dim, flowers = month in 2..4)
