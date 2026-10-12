@@ -23,6 +23,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,6 +33,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -64,21 +66,38 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     val scene by GadgetState.friendScene.collectAsState()
     val data by GadgetState.friends.collectAsState()
     val laptop by GadgetState.laptopStatus.collectAsState()
-    val guest by GadgetState.guest.collectAsState()
-    val v = visit
+    val guestNow by GadgetState.guest.collectAsState()
+    val live = visit
+    var lastVisit by remember { mutableStateOf<com.rusty.museecho.gadget.FriendVisit?>(null) }
+    var lastGuest by remember { mutableStateOf<Friend?>(null) }
+    androidx.compose.runtime.SideEffect {
+        if (live != null) { lastVisit = live; lastGuest = guestNow }
+    }
+    // During the walk out, the visit that just ended.
+    val v = live ?: lastVisit
+    val guest = if (live != null) guestNow else lastGuest
+    // Two clocks: a slow one for what the layer shows (who's here, moods: rebuilding the layer is the
+    // expensive part), and a smooth ~30 fps one that only moves and redraws things (read inside the
+    // offset and draw lambdas, so it never rebuilds anything).
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    // Smooth (20 fps) only while something's actually moving; otherwise a few times a second is plenty.
-    val busyMotion = v?.activity in setOf("tag", "dance", "party", "blockparty", "danceclub", "catch", "snowball") ||
-        scene.throwAt > 0 || scene.petsPlay || scene.hug || scene.apart || scene.hidingAt != null || scene.groupPhoto
-    val fastTick = androidx.compose.runtime.rememberUpdatedState(busyMotion)
+    val clock = remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(v) {
         while (v != null) {
-            kotlinx.coroutines.delay(if (fastTick.value || System.currentTimeMillis() - v.startMs < 2_500) 50 else 250)
+            kotlinx.coroutines.delay(250)
             now = System.currentTimeMillis()
         }
     }
-    val here = v != null && now < v.untilMs
+    LaunchedEffect(v) {
+        while (v != null) {
+            androidx.compose.runtime.withFrameMillis { }
+            clock.longValue = System.currentTimeMillis()
+            kotlinx.coroutines.delay(30)
+        }
+    }
+    fun tAt(ms: Long) = (ms - (v?.startMs ?: ms)) / 1000f
+    val here = live != null && now < live.untilMs
     val enter by animateFloatAsState(if (here) 1f else 0f, tween(1600), label = "friendsIn")
+    if (enter <= 0.001f && live == null && lastVisit != null) androidx.compose.runtime.SideEffect { lastVisit = null; lastGuest = null }
     if (enter <= 0.001f || blob == Offset.Unspecified || half <= 0f) return
     val density = LocalDensity.current
     val u = half / 110f
@@ -113,6 +132,8 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
 
     // Props between them: the board, the ball, teacups, a book, a pillow, sparkles, hearts.
     Canvas(Modifier.fillMaxSize()) {
+        val now = clock.longValue
+        val t = tAt(now)
         val (f0, s0) = spots.first()
         val mid = Offset((blob.x + f0.x) / 2, blob.y + 74 * dp)
         scene.board?.let { drawBoard(it, mid, 42 * dp, Color(friends.first().color)) }
@@ -221,22 +242,28 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     friends.forEachIndexed { i, f ->
         val (pos, size) = spots[i]
         val side = if (i % 2 == 0) 1f else -1f
-        // Walking in from the side, then whatever the activity asks.
-        var x = pos.x + (1f - enter) * side * 260 * dp
-        var y = pos.y
-        when {
-            // Playing catch: stay put so the ball lands on its head.
-            scene.throwAt > 0 -> {}
-            act == "tag" && t > 2f -> { x += sin(t * 1.7f + i) * size * 1.1f; y -= abs(sin(t * 5f)) * size * 0.25f }
-            act == "dance" || (act == "party" && i == 0) -> when (vibe) {
-                "calm" -> x += sin(t * 1.3f + i) * 8 * dp
-                "hype" -> y -= (1 - abs(sin(t * PI.toFloat() * 2.3f))) * 14 * dp
-                else -> y -= abs(sin(t * PI.toFloat() * 2f + i)) * 10 * dp
+        // Walking in from the side, then whatever the activity asks (worked out every frame, at layout).
+        val baseX = pos.x + (1f - enter) * side * 260 * dp
+        val throwing = scene.throwAt > 0
+        fun place(): Offset {
+            val t = tAt(clock.longValue)
+            var x = baseX
+            var y = pos.y
+            when {
+                // Playing catch: stay put so the ball lands on its head.
+                throwing -> {}
+                act == "tag" && t > 2f -> { x += sin(t * 1.7f + i) * size * 1.1f; y -= abs(sin(t * 5f)) * size * 0.25f }
+                act == "dance" || (act == "party" && i == 0) -> when (vibe) {
+                    "calm" -> x += sin(t * 1.3f + i) * 8 * dp
+                    "hype" -> y -= (1 - abs(sin(t * PI.toFloat() * 2.3f))) * 14 * dp
+                    else -> y -= abs(sin(t * PI.toFloat() * 2f + i)) * 10 * dp
+                }
+                // Idle bobbing (not while Rusty has asked everyone to hold still).
+                GadgetState.holdingStill() -> {}
+                f.p == Personality.BOUNCY && (t % 3f) < 0.4f -> y -= sin((t % 3f) / 0.4f * PI.toFloat()) * 12 * dp
+                f.p == Personality.SLEEPY -> y += sin(t * 0.8f) * 2 * dp
             }
-            // Idle bobbing (not while Rusty has asked everyone to hold still).
-            GadgetState.holdingStill() -> {}
-            f.p == Personality.BOUNCY && (t % 3f) < 0.4f -> y -= sin((t % 3f) / 0.4f * PI.toFloat()) * 12 * dp
-            f.p == Personality.SLEEPY -> y += sin(t * 0.8f) * 2 * dp
+            return Offset(x, y)
         }
         val napping = act == "nap" && t > 3f || act == "sleepover" && GadgetState.quiet.value
         val mood = when {
@@ -266,8 +293,8 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         val sizeDp = with(density) { size.toDp() }
         // Hiding: only the top of it peeks out from behind the room item.
         Box(
-            Modifier.offset { IntOffset((x - size / 2).toInt(), (y - size / 2).toInt()) }
-                .size(sizeDp, if (hiding) sizeDp * 0.48f else sizeDp).clipToBounds()
+            Modifier.offset { place().let { (x, y) -> IntOffset((x - size / 2).toInt(), (y - size / 2).toInt()) } }
+                .size(sizeDp, if (hiding) sizeDp * 0.48f else sizeDp).clipToBounds().graphicsLayer { alpha = enter }
                 .clickable(remember { MutableInteractionSource() }, null) { GadgetService.instance?.life?.friends?.tapped(f.id) },
         ) {
             Blob(Modifier.requiredSize(sizeDp).align(Alignment.TopCenter), actions, mini = true, gaze = gaze, moodOverride = mood,
@@ -276,21 +303,24 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         // Its own speech bubble, and a name tag.
         (says[f.id] ?: says[""].takeIf { i == 0 })?.let { text ->
             Text(text, color = Palette.night, fontSize = 14.sp, maxLines = 2,
-                modifier = Modifier.offset { IntOffset((x - size * 0.4f).toInt(), (y - size * 1.05f - 8 * dp).toInt()) }
+                modifier = Modifier.offset { place().let { (x, y) -> IntOffset((x - size * 0.4f).toInt(), (y - size * 1.05f - 8 * dp).toInt()) } }
                     .widthIn(max = 200.dp).background(Color(f.color).copy(alpha = 0.92f), RoundedCornerShape(12.dp))
                     .padding(horizontal = 10.dp, vertical = 5.dp))
         }
         if (enter > 0.9f && !hiding && f.name.isNotBlank()) Text(f.name, color = Color(f.color), fontSize = 11.sp,
-            modifier = Modifier.offset { IntOffset((x - size * 0.25f).toInt(), (y + size * 0.42f).toInt()) })
+            modifier = Modifier.offset { place().let { (x, y) -> IntOffset((x - size * 0.25f).toInt(), (y + size * 0.42f).toInt()) } })
         // Its pet tags along at its feet, and runs over to Puff's pet to play now and then.
         if (f.petKind.isNotBlank() && !hiding) {
-            val petHome = Offset(x + side * size * 0.45f, y + size * 0.3f)
+            val petHome = Offset(baseX + side * size * 0.45f, pos.y + size * 0.3f)
             val miso = Offset(blob.x + PET_SPOT.x * u, blob.y + 92 * u - 10 * u)
             val to by androidx.compose.animation.core.animateOffsetAsState(if (scene.petsPlay && i == 0) miso + Offset(14 * u, 0f) else petHome,
                 androidx.compose.animation.core.tween(1200), label = "pet$i")
-            val hop = if (scene.petsPlay) kotlin.math.abs(sin(t * 6f)) * 6 * dp else 0f
+            val petsPlay = scene.petsPlay
             Text(com.rusty.museecho.gadget.FriendsBrain.petEmoji(f.petKind), fontSize = 16.sp,
-                modifier = Modifier.offset { IntOffset((to.x - 9 * dp).toInt(), (to.y - 10 * dp - hop).toInt()) })
+                modifier = Modifier.graphicsLayer { alpha = enter }.offset {
+                    val hop = if (petsPlay) kotlin.math.abs(sin(tAt(clock.longValue) * 6f)) * 6 * dp else 0f
+                    IntOffset((to.x - 9 * dp).toInt(), (to.y - 10 * dp - hop).toInt())
+                })
         }
     }
     // Sleepover: a little quilt over the friend's lower half (on top of it).
@@ -300,6 +330,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     }
     // The blanket fort: a draped blanket over everyone (see-through enough to see them), lit by a torch.
     if (scene.fort && enter > 0.3f) Canvas(Modifier.fillMaxSize()) {
+        val t = tAt(clock.longValue)
         val xs = spots.map { it.first.x } + blob.x
         val left = xs.min() - 70 * dp
         val right = xs.max() + 70 * dp
