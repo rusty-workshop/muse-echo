@@ -89,9 +89,10 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     }
     LaunchedEffect(v) {
         while (v != null) {
+            // 25 fps, on the same beat as the blobs (see awaitBeat).
+            awaitBeat(40)
             androidx.compose.runtime.withFrameMillis { }
             clock.longValue = System.currentTimeMillis()
-            kotlinx.coroutines.delay(30)
         }
     }
     fun tAt(ms: Long) = (ms - (v?.startMs ?: ms)) / 1000f

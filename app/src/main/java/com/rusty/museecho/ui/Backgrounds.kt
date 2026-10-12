@@ -62,7 +62,7 @@ internal fun AppBackgroundView(style: AppBackground, actions: UiActions) {
                 val start = System.currentTimeMillis()
                 while (true) {
                     t = (System.currentTimeMillis() - start) / 1000f
-                    delay(125)
+                    awaitBeat(120)
                 }
             }
             Canvas(Modifier.fillMaxSize()) {

@@ -63,7 +63,7 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(moving) {
         while (true) {
-            kotlinx.coroutines.delay(if (moving) 100 else 60_000)
+            if (moving) awaitBeat(120) else kotlinx.coroutines.delay(60_000)
             now = System.currentTimeMillis()
         }
     }

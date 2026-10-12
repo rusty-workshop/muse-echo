@@ -199,12 +199,15 @@ internal fun Blob(
             // Little copies (friends, page blobs, the agenda's) are small enough that 15 fps looks the
             // same; the main one breathes at 20 fps when idle (slow motion doesn't need more).
             val frameMs = when {
-                mini -> if (q) 125L else 66L
+                mini -> if (q) 160L else 80L
                 fast -> 0L
-                q -> 100L
-                else -> 50L
+                q -> 120L
+                else -> 40L
             }
-            if (frameMs > 20) delay(frameMs - 16)
+            // On a shared beat (multiples of 40 ms of wall time), so Puff, every friend and their
+            // movement all redraw in the SAME frame instead of each asking for its own: with a crowd
+            // over, unsynced timers meant a full-screen redraw nearly every vsync.
+            if (frameMs > 20) awaitBeat(frameMs)
             withFrameNanos { nanos ->
                 if (startNanos < 0) startNanos = nanos
                 t = (nanos - startNanos) / 1_000_000_000f
@@ -1816,4 +1819,9 @@ private fun holidayCalendar(name: String): Calendar? = Calendar.getInstance().ap
         "HALLOWEEN_BATS" -> { set(Calendar.MONTH, Calendar.OCTOBER); set(Calendar.DAY_OF_MONTH, 31); set(Calendar.HOUR_OF_DAY, 20) }
         else -> return null
     }
+}
+
+/** Sleep until the next multiple of [periodMs] of wall-clock time (a beat shared by every animated thing). */
+internal suspend fun awaitBeat(periodMs: Long) {
+    delay(periodMs - System.currentTimeMillis() % periodMs)
 }

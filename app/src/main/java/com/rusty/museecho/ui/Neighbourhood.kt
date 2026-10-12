@@ -69,7 +69,7 @@ internal fun NeighbourhoodPage(actions: UiActions) {
     val moving = fest == FriendsBrain.Festival.PARADE || sky == StreetWeather.RAIN || sky == StreetWeather.STORM || sky == StreetWeather.SNOW || month in 3..5 || month in 9..11
     LaunchedEffect(moving) {
         while (true) {
-            kotlinx.coroutines.delay(if (moving) 100 else 30_000)
+            if (moving) awaitBeat(120) else kotlinx.coroutines.delay(30_000)
             now = System.currentTimeMillis()
         }
     }
