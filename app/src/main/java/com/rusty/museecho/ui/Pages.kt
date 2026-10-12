@@ -8,6 +8,7 @@ enum class HomePage(val id: Int, val label: String) {
     AGENDA(1, "Schedule"),
     FORECAST(3, "Forecast"),
     BLOB(8, "Blob"),
+    NEIGHBOURHOOD(9, "Neighbourhood"),
     TV(4, "TV remote"),
     LAPTOP(5, "Laptop"),
     SPOTIFY(7, "Spotify"),

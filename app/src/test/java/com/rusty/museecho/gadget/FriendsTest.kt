@@ -48,4 +48,34 @@ class FriendsTest {
         assertEquals("Halloween", FriendsBrain.holiday(java.time.LocalDate.of(2026, 10, 31)))
         assertNull(FriendsBrain.holiday(java.time.LocalDate.of(2026, 10, 12)))
     }
+
+    @Test
+    fun bondsAreSymmetric() {
+        val d = FriendsData(friends = listOf(Friend("a", "Pip"), Friend("b", "Moss"), Friend("c", "Doze")),
+            bonds = mapOf(FriendsBrain.pair("b", "a") to 40, FriendsBrain.pair("a", "c") to 5))
+        assertEquals(40, d.bond("a", "b"))
+        assertEquals(40, d.bond("b", "a"))
+        assertEquals(listOf("Moss", "Doze"), d.buddies("a").map { it.first.name })
+        assertTrue(d.buddies("b").map { it.first.name } == listOf("Pip"))
+    }
+
+    @Test
+    fun whereaboutsMakeSense() {
+        val f = Friend("x", "Pip", lastVisitMs = 0)
+        val noon = 1_800_000_000_000L
+        assertEquals(FriendsBrain.Where.VISITING, FriendsBrain.whereabouts(f, setOf("x"), noon, 12))
+        assertEquals(FriendsBrain.Where.ASLEEP, FriendsBrain.whereabouts(f, emptySet(), noon, 2))
+        val away = f.copy(lastVisitMs = noon - 5 * 86_400_000L, postcardMs = noon - 3_600_000L)
+        assertEquals(FriendsBrain.Where.AWAY, FriendsBrain.whereabouts(away, emptySet(), noon, 12))
+        val sleepy = f.copy(personality = Personality.SLEEPY.name)
+        assertEquals(FriendsBrain.Where.ASLEEP, FriendsBrain.whereabouts(sleepy, emptySet(), noon, 14))
+    }
+
+    @Test
+    fun hangoutLinesUseTheirVoice() {
+        val moss = Friend("b", "Moss", personality = Personality.SHY.name)
+        val pip = Friend("a", "Pip")
+        assertTrue(FriendsBrain.hangoutLine(moss, pip, "built a pillow fort").startsWith("…Pip and I built a pillow fort"))
+        assertTrue(FriendsBrain.hangoutLine(pip, moss, "had a picnic").contains("Moss and I had a picnic"))
+    }
 }

@@ -43,6 +43,14 @@ data class Friend(
 @Serializable
 data class FriendDiaryEntry(val friendId: String, val date: String, val text: String, val atMs: Long)
 
+/** Something two friends did together off-screen ("Moss and Doze built a pillow fort"). */
+@Serializable
+data class Happening(val date: String, val ids: List<String>, val text: String, val told: Boolean = false)
+
+/** A letter from a friend, written by Pixel in its voice; kept in the blob's mailbox. */
+@Serializable
+data class Letter(val friendId: String, val date: String, val text: String, val atMs: Long, val read: Boolean = false)
+
 /** A postcard from a friend who's been away a while (pinned on the room's wall). */
 @Serializable
 data class Postcard(val friendId: String, val text: String, val date: String)
@@ -54,7 +62,17 @@ data class FriendsData(
     val postcards: List<Postcard> = emptyList(),
     /** Activity names done today per friend id ("2026-10-11|id" -> list), for the diaries. */
     val today: Map<String, List<String>> = emptyMap(),
-)
+    /** How close two friends are with each other ("idA|idB", ids sorted) 0..100. */
+    val bonds: Map<String, Int> = emptyMap(),
+    val happenings: List<Happening> = emptyList(),
+    val letters: List<Letter> = emptyList(),
+) {
+    fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
+
+    /** [id]'s closest friends among the others, closest first (only real bonds). */
+    fun buddies(id: String): List<Pair<Friend, Int>> = friends.filter { it.id != id }
+        .map { it to bond(id, it.id) }.filter { it.second > 0 }.sortedByDescending { it.second }
+}
 
 /** The friends, their diaries and postcards, in one small JSON file. */
 class FriendsStore(private val file: File) {
@@ -84,6 +102,45 @@ object FriendsBrain {
     /** Everything a visit can be. */
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble")
+
+    fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
+
+    /** Things friends get up to together when the blob isn't watching (past tense, after "A and B"). */
+    val HANGOUTS = listOf("built a pillow fort", "had a picnic in the garden", "went puddle jumping", "watched the stars",
+        "raced snails (the snails won)", "baked lopsided cookies", "made a blanket cape each", "had a staring contest",
+        "found a really smooth pebble", "got lost in the sock drawer", "played hide and seek for three hours",
+        "tried to catch the moon in a bucket")
+
+    /** What a friend blurts out about an adventure, in its own voice ([other] did it with them). */
+    fun hangoutLine(f: Friend, other: Friend, what: String): String = when {
+        other.p == Personality.SLEEPY && rndOf(what) == 0 -> "${other.shownName} fell asleep at my house again! 😴"
+        f.p == Personality.SPARKLY -> "Darling, ${other.shownName} and I $what. It was ICONIC. ✨"
+        f.p == Personality.SHY -> "…${other.shownName} and I $what. It was nice. ☺️"
+        f.p == Personality.TINY -> "${other.shownName} and I $what!! I was very brave! 💪"
+        f.p == Personality.SLEEPY -> "*yawn* ${other.shownName} and I $what… then I napped."
+        else -> "Guess what! ${other.shownName} and I $what! 🎉"
+    }
+
+    private fun rndOf(s: String) = s.length % 2
+
+    fun letterPrompt(f: Friend, others: List<Friend>, recent: List<String>): String =
+        "Write a short letter (3 to 5 sentences, cute and in character) from ${f.name}, a ${f.p.label} little blob " +
+            "(${f.p.blurb}; ${f.bio}), to its friend the blob who lives on my Echo Show. " +
+            (if (others.isNotEmpty()) "Its other friends are ${others.joinToString { it.name }}. " else "") +
+            (if (recent.isNotEmpty()) "Things that happened lately: ${recent.joinToString("; ")}. " else "") +
+            "Start with \"Dear Blob,\" and sign it from ${f.name}. Reply with only the letter: no commands, and don't change anything on any device."
+
+    enum class Where(val label: String) { HOME("home"), OUT("out and about"), AWAY("away on a trip"), VISITING("visiting the blob"), ASLEEP("asleep") }
+
+    /** Where a friend is right now, for the neighbourhood: a little routine of its own, steady within the hour. */
+    fun whereabouts(f: Friend, visiting: Set<String>, nowMs: Long, hour: Int): Where = when {
+        f.id in visiting -> Where.VISITING
+        f.postcardMs > f.lastVisitMs && nowMs - f.postcardMs < 2 * 86_400_000L -> Where.AWAY
+        hour >= 23 || hour < 7 -> Where.ASLEEP
+        f.p == Personality.SLEEPY -> if (hour in 13..15) Where.ASLEEP else Where.HOME
+        ((f.id.hashCode() + nowMs / 3_600_000L) % 3).toInt() == 0 -> Where.OUT
+        else -> Where.HOME
+    }
 
     fun activityLabel(a: String) = when (a) {
         "tictactoe" -> "tic-tac-toe"
@@ -131,11 +188,12 @@ object FriendsBrain {
         else -> "pastel"
     }
 
-    fun friendDiaryPrompt(f: Friend, did: List<String>, blobName: String = "the blob"): String =
+    fun friendDiaryPrompt(f: Friend, did: List<String>, blobName: String = "the blob", alsoToday: List<String> = emptyList()): String =
         "Write a short diary entry (2 to 4 sentences, first person, cute and in character) for ${f.name}, a ${f.p.label} " +
             "little blob (${f.p.blurb}; ${f.bio}) who visited its friend $blobName on my Echo Show today. " +
             "Today they did: ${did.joinToString { activityLabel(it) }}. " +
             (f.memories.lastOrNull()?.let { "Something memorable: $it. " } ?: "") +
+            (if (alsoToday.isNotEmpty()) "Also today: ${alsoToday.joinToString("; ")}. " else "") +
             "Reply with only the diary text: no title, no commands, and don't change anything on any device."
 
     /** A tic-tac-toe game played out: the moves in order (cell 0..8, X first) and the winner ('X', 'O' or null for a draw). */

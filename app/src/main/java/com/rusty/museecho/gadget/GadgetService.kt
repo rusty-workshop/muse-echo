@@ -1249,6 +1249,9 @@ class GadgetService : Service() {
     }
 
     /** Yawn, wave, tuck in, then fade the screen out over a minute and sleep until touched. */
+    /** Run [block] on the service's own scope (outlives a command's timeout). */
+    fun scopeLaunch(block: suspend () -> Unit) = scope.launch { block() }
+
     fun goodnight() = scope.launch {
         GadgetState.react(Reaction.YAWN)
         delay(Reaction.YAWN.ms)

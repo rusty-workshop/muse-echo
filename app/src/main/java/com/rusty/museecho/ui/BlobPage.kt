@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rusty.museecho.gadget.AlbumShot
+import com.rusty.museecho.gadget.GadgetService
 import com.rusty.museecho.gadget.GadgetState
 import com.rusty.museecho.gadget.Screen
 import kotlinx.coroutines.Dispatchers
@@ -86,11 +87,15 @@ internal fun BlobPage(actions: UiActions) {
                 Tab("📸 Album", tab == "album") { tab = "album" }
                 Spacer(Modifier.width(6.dp))
                 Tab("👯 Friends", tab == "friends") { tab = "friends" }
+                Spacer(Modifier.width(6.dp))
+                val unread = GadgetState.friends.collectAsState().value.letters.count { !it.read }
+                Tab(if (unread > 0) "✉️ $unread" else "✉️", tab == "mail") { tab = "mail" }
             }
             Spacer(Modifier.height(8.dp))
             when {
                 tab == "diary" && diaryOn && !guest -> DiaryContent(Modifier.fillMaxSize())
                 tab == "friends" -> FriendsContent(actions, Modifier.fillMaxSize())
+                tab == "mail" -> MailContent(Modifier.fillMaxSize())
                 else -> AlbumContent(actions, Modifier.fillMaxSize())
             }
         }
@@ -200,6 +205,45 @@ private fun FriendsContent(actions: UiActions, modifier: Modifier) {
                     Text(friendLine(f), color = Palette.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (f.bio.isNotEmpty()) Text(f.bio, color = Palette.ink, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     ClosenessBar(f.closeness)
+                    BuddiesLine(f, data)
+                }
+            }
+        }
+    }
+}
+
+/** Who a friend is closest to among the others. */
+@Composable
+private fun BuddiesLine(f: com.rusty.museecho.gadget.Friend, data: com.rusty.museecho.gadget.FriendsData) {
+    val buddies = data.buddies(f.id).take(3)
+    if (buddies.isEmpty()) return
+    Text("Close to: " + buddies.joinToString { (b, n) -> b.shownName + if (n >= 30) " 💛" else "" },
+        color = Palette.muted, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/** The blob's mailbox: letters from its friends, newest first; tap one to read it. */
+@Composable
+private fun MailContent(modifier: Modifier) {
+    val data by GadgetState.friends.collectAsState()
+    val letters = data.letters.reversed()
+    if (letters.isEmpty()) {
+        Text("No letters yet. Friends write every couple of days.", color = Palette.muted, fontSize = 15.sp, modifier = modifier)
+        return
+    }
+    androidx.compose.foundation.lazy.LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(letters.size) { i ->
+            val l = letters[i]
+            val f = data.friends.firstOrNull { it.id == l.friendId }
+            Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = if (l.read) 0.5f else 0.9f), RoundedCornerShape(12.dp))
+                .clickable {
+                    GadgetService.instance?.life?.friends?.markLetterRead(l.atMs)
+                    GadgetState.show(Screen.Text("✉️ From ${f?.shownName ?: "a friend"} · ${l.date}", l.text))
+                }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (l.read) "📭" else "📬", fontSize = 20.sp)
+                Column(Modifier.padding(start = 10.dp)) {
+                    Text("From ${f?.shownName ?: "a friend"}", color = f?.let { androidx.compose.ui.graphics.Color(it.color) } ?: Palette.ink,
+                        fontSize = 15.sp, fontWeight = if (l.read) FontWeight.Normal else FontWeight.SemiBold)
+                    Text(l.text.replace("\n", " "), color = Palette.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -238,6 +282,7 @@ private fun FriendDetail(f: com.rusty.museecho.gadget.Friend, data: com.rusty.mu
             color = Palette.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         if (f.bio.isNotEmpty()) Text(f.bio, color = Palette.ink, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
         ClosenessBar(f.closeness)
+        BuddiesLine(f, data)
         val cards = data.postcards.filter { it.friendId == f.id }
         if (cards.isNotEmpty()) {
             Text("💌 Postcards", color = Palette.amber, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))

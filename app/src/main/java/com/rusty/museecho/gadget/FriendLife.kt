@@ -34,6 +34,8 @@ class FriendLife(
         scope.launch { longingLoop() }
         scope.launch { diaryLoop() }
         scope.launch { watchEvents() }
+        scope.launch { hangoutLoop() }
+        scope.launch { letterLoop() }
     }
 
     private fun on() = Prefs(context).blobFriend
@@ -271,7 +273,7 @@ class FriendLife(
             when (a) { "tictactoe", "ttt" -> "tictactoe"; "rockpaperscissors" -> "rps"; "hideandseek" -> "hideseek"; "teatime" -> "tea"; else -> a }
         }?.takeIf { it in FriendsBrain.ACTIVITIES } ?: pickActivity(f)
         // Two at once for the sociable things, now and then.
-        val second = if (act in setOf("chat", "tea", "party", "dance", "story", "movie") && rnd.nextFloat() < 0.2f) pickFriend(f.id) else null
+        val second = if (act in setOf("chat", "tea", "party", "dance", "story", "movie") && rnd.nextFloat() < 0.3f) pickBuddy(f) else null
         val ids = listOfNotNull(f.id, second?.id)
         val base = when (act) {
             "sleepover" -> 9 * 60
@@ -301,6 +303,12 @@ class FriendLife(
                     GadgetState.react(Reaction.CELEBRATE)
                     GadgetState.say("${f.shownName}! I missed you! 🥹", 6)
                     hug(2_500)
+                }
+                // Two friends arriving together are often in the middle of something they did.
+                if (second != null) store.data.happenings.lastOrNull { !it.told && f.id in it.ids && second.id in it.ids }?.let { h ->
+                    say(f, FriendsBrain.hangoutLine(f, second, h.text.substringAfter(" and ").substringAfter(" ")), 3_800)
+                    say(second, "It's true! 😆", 2_500)
+                    told(h)
                 }
                 scope.launch { delay(6_000); life.friendSnapshot("${FriendsBrain.activityLabel(act).replaceFirstChar { it.uppercase() }} with ${names(ids)}") }
                 detail = when (act) {
@@ -358,6 +366,7 @@ class FriendLife(
                 )
             }
         }
+        if (second != null) bump(f.id, second.id, 4)
         val who = names(listOfNotNull(f.id, second?.id))
         DayLog.friendVisited("$who came over for ${FriendsBrain.activityLabel(act)}" + if (detail.isNotEmpty()) " ($detail)" else "")
     }
@@ -391,6 +400,15 @@ class FriendLife(
 
     private suspend fun chat(f: Friend, second: Friend?): String {
         GadgetState.react(Reaction.WAVE)
+        // News from its own life first: something it got up to with another friend.
+        store.data.happenings.lastOrNull { !it.told && f.id in it.ids }?.let { h ->
+            val other = h.ids.firstOrNull { it != f.id }?.let { store.friend(it) }
+            if (other != null) {
+                say(f, FriendsBrain.hangoutLine(f, other, h.what()), 4_200)
+                blob("No way! 😄", 2_500)
+                told(h)
+            }
+        }
         for ((mine, line) in FriendsBrain.chat(f, rnd)) if (mine) blob(line, 4_200) else say(f, line, 4_200)
         second?.let { s -> say(s, "Can I join? 🙋", 3_000); blob("The more the merrier! 🎈", 3_000) }
         GadgetState.setMood(Mood.HAPPY, 30)
@@ -612,6 +630,102 @@ class FriendLife(
         return "a silly squabble over a cookie, then they made up"
     }
 
+    // -- Friends with each other ------------------------------------------------------------------
+
+    private fun Happening.what() = text.substringAfter(" and ").substringAfter(" ")
+
+    /** Someone [f] gets on with (closer bonds likelier), for a visit together. */
+    private fun pickBuddy(f: Friend): Friend? {
+        val others = store.data.friends.filter { it.id != f.id }
+        if (others.isEmpty()) return null
+        val weights = others.map { 10 + store.data.bond(f.id, it.id) }
+        var roll = rnd.nextInt(weights.sum())
+        others.forEachIndexed { i, o -> roll -= weights[i]; if (roll < 0) return o }
+        return others.last()
+    }
+
+    private fun bump(a: String, b: String, by: Int) {
+        store.update { d -> d.copy(bonds = d.bonds + (FriendsBrain.pair(a, b) to ((d.bonds[FriendsBrain.pair(a, b)] ?: 0) + by).coerceAtMost(100))) }
+    }
+
+    private fun told(h: Happening) {
+        store.update { d -> d.copy(happenings = d.happenings.map { if (it == h) it.copy(told = true) else it }) }
+        DayLog.event("heard that ${h.text}", "friend")
+    }
+
+    /** Two friends get up to something together right now (the playground). */
+    fun hangoutNow(): String? {
+        val named = store.data.friends.filter { it.name.isNotBlank() }
+        if (named.size < 2) return null
+        val a = named.random()
+        val b = pickBuddy(a)?.takeIf { it.name.isNotBlank() } ?: return null
+        val what = FriendsBrain.HANGOUTS.random()
+        store.update { d -> d.copy(happenings = (d.happenings + Happening(java.time.LocalDate.now().toString(), listOf(a.id, b.id), "${a.name} and ${b.name} $what")).takeLast(40)) }
+        bump(a.id, b.id, 6)
+        return "${a.name} and ${b.name} $what"
+    }
+
+    /** Now and then, two friends get up to something on their own (once or twice a day). */
+    private suspend fun hangoutLoop() {
+        while (true) {
+            delay(30 * 60_000L)
+            val named = store.data.friends.filter { it.name.isNotBlank() }
+            if (named.size < 2 || life.hour() !in 10..20) continue
+            val today = java.time.LocalDate.now().toString()
+            if (store.data.happenings.count { it.date == today } >= 2 || rnd.nextFloat() > 0.15f) continue
+            val a = named.random()
+            val b = pickBuddy(a)?.takeIf { it.name.isNotBlank() } ?: continue
+            val what = FriendsBrain.HANGOUTS.random()
+            store.update { d -> d.copy(happenings = (d.happenings + Happening(today, listOf(a.id, b.id), "${a.name} and ${b.name} $what")).takeLast(40)) }
+            bump(a.id, b.id, 6)
+            GadgetState.log("friends hung out: ${a.name} and ${b.name} $what")
+        }
+    }
+
+    // -- Letters ------------------------------------------------------------------------------------
+
+    /** Every couple of days a friend writes the blob a letter (Pixel writes it, in the friend's voice). */
+    private suspend fun letterLoop() {
+        delay(10 * 60_000L)
+        while (true) {
+            delay(30 * 60_000L)
+            if (!on() || isQuiet() || life.hour() !in 9..20) continue
+            if (System.currentTimeMillis() - prefs.getLong("letter_last", 0L) < 36 * 3_600_000L || rnd.nextFloat() > 0.3f) continue
+            val f = store.data.friends.filter { it.name.isNotBlank() }.maxByOrNull { it.closeness + rnd.nextInt(30) } ?: continue
+            writeLetter(f)
+        }
+    }
+
+    /** A letter from [f] now. */
+    suspend fun writeLetter(f: Friend): Boolean {
+        val d = store.data
+        val recent = (f.memories.takeLast(2) + d.happenings.filter { f.id in it.ids }.takeLast(2).map { it.text } +
+            listOfNotNull(f.played.maxByOrNull { it.value }?.key?.let { "they love playing ${FriendsBrain.activityLabel(it)} together" }))
+        val text = quietAsk(FriendsBrain.letterPrompt(f, d.friends.filter { it.id != f.id && it.name.isNotBlank() }, recent)) ?: return false
+        prefs.edit().putLong("letter_last", System.currentTimeMillis()).apply()
+        store.update { it.copy(letters = (it.letters + Letter(f.id, java.time.LocalDate.now().toString(), text.take(1200), System.currentTimeMillis())).takeLast(60)) }
+        GadgetState.log("letter from ${f.name}")
+        DayLog.event("got a letter from ${f.name}", "friend")
+        if (!isQuiet() && !GadgetState.asleep.value) {
+            GadgetState.react(Reaction.HOP)
+            GadgetState.hold(HeldItem.LETTER, "✉️ Letter from ${f.name}", 60)
+            // It reads the letter out, a sentence at a time, in its bubble.
+            scope.launch {
+                delay(2_000)
+                for (part in text.split(Regex("(?<=[.!?])\\s+")).filter { it.isNotBlank() }.take(8)) {
+                    if (GadgetState.talk.value != Talk.IDLE && GadgetState.talk.value != Talk.REPLIED) break
+                    GadgetState.say(part, 5)
+                    delay(5_200)
+                }
+            }
+        }
+        return true
+    }
+
+    fun markLetterRead(atMs: Long) {
+        store.update { d -> d.copy(letters = d.letters.map { if (it.atMs == atMs) it.copy(read = true) else it }) }
+    }
+
     // -- The room ---------------------------------------------------------------------------------
 
     private fun loadShift(): Map<String, Float> = prefs.getString("room_shift", "")!!.split(',').mapNotNull { e ->
@@ -639,7 +753,8 @@ class FriendLife(
                 store.friend(id)?.takeIf { f -> f.name.isNotBlank() && d.diary.none { it.friendId == id && it.date == today } }?.let { it to acts }
             }
             val (f, acts) = due.firstOrNull() ?: continue
-            val text = quietAsk(FriendsBrain.friendDiaryPrompt(f, acts.distinct())) ?: continue
+            val also = d.happenings.filter { it.date == today && f.id in it.ids }.map { it.text }
+            val text = quietAsk(FriendsBrain.friendDiaryPrompt(f, acts.distinct(), alsoToday = also)) ?: continue
             store.update { it.copy(diary = (it.diary + FriendDiaryEntry(f.id, today, text.take(1200), System.currentTimeMillis())).takeLast(200)) }
             GadgetState.log("${f.name}'s diary written")
         }

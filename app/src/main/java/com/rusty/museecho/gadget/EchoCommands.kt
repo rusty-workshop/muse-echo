@@ -139,7 +139,12 @@ class EchoCommands(
                 "minutes" to param("integer", "How long it stays, 1 to 600."),
             ))
         spec("blob.friends",
-            "List the blob's friends: their names, personalities, bios, how close they are and their favourite games.")
+            "List the blob's friends: their names, personalities, bios, how close they are, their favourite games, " +
+                "who they're closest to among the others, and recent letters.")
+        spec("blob.letter",
+            "Have one of the blob's friends send it a letter now (you'll be asked to write it, in the friend's voice). " +
+                "The blob holds it up and reads it out; it's kept in the Blob page's mailbox.",
+            optional = mapOf("name" to param("string", "Which friend. Default: the closest one.")))
         spec("blob.say",
             "Show a short silent speech bubble beside the Echo Show's blob, e.g. \"Don't forget the trash!\". " +
                 "Nothing is spoken, so it suits quiet hours. Empty text clears it.",
@@ -190,9 +195,19 @@ class EchoCommands(
                                 put("name", f.shownName); put("personality", f.p.label); put("bio", f.bio)
                                 put("closeness", f.closeness); put("visits", f.visits)
                                 f.favourite()?.let { put("favourite_game", FriendsBrain.activityLabel(it)) }
+                                put("closest_to", kotlinx.serialization.json.JsonArray(GadgetState.friends.value.buddies(f.id).take(3)
+                                    .map { kotlinx.serialization.json.JsonPrimitive("${it.first.shownName} (${it.second})") }))
                             }
                         }))
                     })
+                }
+                "blob.letter" -> {
+                    val fl = GadgetService.instance?.life?.friends ?: return@withTimeout commandError("not ready yet")
+                    val f = fl.friendByName(params.string("name")) ?: fl.store.data.friends.filter { it.name.isNotBlank() }.maxByOrNull { it.closeness }
+                        ?: return@withTimeout commandError("no named friends yet")
+                    // Written in the background (it asks you), so this returns straight away.
+                    GadgetService.instance?.scopeLaunch { fl.writeLetter(f) }
+                    commandOk(buildJsonObject { put("status", "${f.shownName} is writing a letter") })
                 }
                 "blob.say" -> {
                     val text = params.string("text").orEmpty()

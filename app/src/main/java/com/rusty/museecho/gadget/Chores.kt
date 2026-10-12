@@ -521,7 +521,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { FriendsBrain.ACTIVITIES.forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES + listOf("letter", "hangout")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("EARS", "THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -556,7 +556,14 @@ class Chores(
                 else -> GadgetState.preview(kind, value, PREVIEW_MS)
             }
             // A real (short) visit doing that: friends can't pop in for just 5 seconds.
-            "friend" -> GadgetService.instance?.life?.visit(value.lowercase(), if (value.uppercase() == "SLEEPOVER") 2 else 1)
+            "friend" -> when (value.uppercase()) {
+                // A letter from the closest friend now, and two friends hanging out (the next chat brings it up).
+                "LETTER" -> GadgetService.instance?.life?.friends?.let { fl ->
+                    fl.store.data.friends.filter { it.name.isNotBlank() }.maxByOrNull { it.closeness }?.let { f -> scope.launch { fl.writeLetter(f) } }
+                }
+                "HANGOUT" -> GadgetService.instance?.life?.friends?.hangoutNow()?.let { GadgetState.log("friends hung out: $it") }
+                else -> GadgetService.instance?.life?.visit(value.lowercase(), if (value.uppercase() == "SLEEPOVER") 2 else 1)
+            }
             else -> GadgetState.preview(kind, value, PREVIEW_MS)
         }
     }

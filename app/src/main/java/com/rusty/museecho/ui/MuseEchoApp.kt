@@ -617,6 +617,7 @@ private fun IdlePages(actions: UiActions) {
                     4 -> TvRemotePage(actions)
                     5 -> LaptopPage(actions)
                     7 -> SpotifyPage(actions)
+                    9 -> NeighbourhoodPage(actions)
                     else -> HomelabPage(actions)
                 }
                 // The blob keeps you company here too: a little copy, same mood, peeking at the page.
