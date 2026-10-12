@@ -76,6 +76,14 @@ class MainActivity : ComponentActivity() {
             GadgetState.lastTouch = System.currentTimeMillis()
             GadgetState.lastHuman = System.currentTimeMillis()
             GadgetState.setAlertGlow(false)
+            // The first touch of the morning: a hug, the weather and what's first today.
+            val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val prefsM = getSharedPreferences("museecho", MODE_PRIVATE)
+            val todayStr = java.time.LocalDate.now().toString()
+            if (hourNow in 5..11 && !GadgetState.quiet.value && prefsM.getString("morning_hello", "") != todayStr) {
+                prefsM.edit().putString("morning_hello", todayStr).apply()
+                GadgetService.instance?.life?.friends?.morningHello()
+            } else
             // Back after a while: the blob waves hello.
             if (away > 30 * 60_000L && !GadgetState.quiet.value) {
                 GadgetState.react(com.rusty.museecho.gadget.Reaction.WAVE)

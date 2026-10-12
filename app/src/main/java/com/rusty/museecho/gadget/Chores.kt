@@ -565,7 +565,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "letter", "reply", "hangout", "comic", "dream", "gazette")).forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -609,6 +609,7 @@ class Chores(
                 "COMIC" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.comicNow() } }
                 "DREAM" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.dreamNow() } }
                 "TREASURE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.treasureNow() } }
+                "TRIP" -> GadgetService.instance?.life?.friends?.let { fl -> fl.store.data.friends.filter { it.name.isNotBlank() }.randomOrNull()?.let { fl.trip(it, 1) } }
                 "GAZETTE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.gazetteNow() } }
                 "REPLY" -> GadgetService.instance?.life?.friends?.let { fl ->
                     fl.store.data.letters.lastOrNull { !it.fromBlob }?.let { l -> scope.launch { fl.replyTo(l) } }

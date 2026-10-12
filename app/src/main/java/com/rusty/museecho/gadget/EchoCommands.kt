@@ -145,6 +145,15 @@ class EchoCommands(
             "Have one of the blob's friends send it a letter now (you'll be asked to write it, in the friend's voice). " +
                 "The blob holds it up and reads it out; it's kept in the Blob page's mailbox.",
             optional = mapOf("name" to param("string", "Which friend. Default: the closest one.")))
+        spec("blob.feelings",
+            "Tell the blob (Puff) how Rusty is doing, so it responds: when Rusty mentions a rough day, Puff holds a little heart " +
+                "and a friend comes over to cheer him up; good news gets confetti; a big day coming up (a test, an event) gets " +
+                "good luck that morning and a \"how did it go?\" in the evening.",
+            required = mapOf("feeling" to param("string", "rough, great, or big_day.")),
+            optional = mapOf(
+                "note" to param("string", "A few words, e.g. \"your maths test\" or \"the job interview\"."),
+                "date" to param("string", "For big_day: the day, yyyy-MM-dd."),
+            ))
         spec("blob.say",
             "Show a short silent speech bubble beside the Echo Show's blob, e.g. \"Don't forget the trash!\". " +
                 "Nothing is spoken, so it suits quiet hours. Empty text clears it.",
@@ -208,6 +217,11 @@ class EchoCommands(
                     // Written in the background (it asks you), so this returns straight away.
                     GadgetService.instance?.scopeLaunch { fl.writeLetter(f) }
                     commandOk(buildJsonObject { put("status", "${f.shownName} is writing a letter") })
+                }
+                "blob.feelings" -> {
+                    val fl = GadgetService.instance?.life?.friends ?: return@withTimeout commandError("not ready yet")
+                    val r = fl.rustyFeels(params.string("feeling").orEmpty(), params.string("note").orEmpty(), params.string("date"))
+                    if (r == "ok") commandOk(JsonObject(emptyMap())) else commandError(r)
                 }
                 "blob.say" -> {
                     val text = params.string("text").orEmpty()

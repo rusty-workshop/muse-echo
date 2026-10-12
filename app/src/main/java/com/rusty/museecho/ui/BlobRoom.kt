@@ -57,6 +57,7 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
     val friendsData by GadgetState.friends.collectAsState()
     val pet = friendsData.pet
     val garden by GadgetState.garden.collectAsState()
+    val theme by GadgetState.roomTheme.collectAsState()
     // A goldfish swims all the time; otherwise only weather and leaves need frames.
     val moving = ((sky != WindowWeather.NONE || autumn) && Decor.WINDOW.name in items || pet?.kind == "goldfish") && !quiet
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -160,6 +161,8 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
             drawOval(Color(0xFFFF9EC7).copy(alpha = 0.55f * dim), Offset(a.x - 8 * u, a.y - 8 * u), Size(16 * u, 10 * u))
             drawLine(Color(0xFFFF9EC7).copy(alpha = 0.55f * dim), a + Offset(7 * u, -4 * u), a + Offset(12 * u, -8 * u), 2 * u)
         }
+        // This season's (or holiday's) decorations, once Puff has put them up.
+        com.rusty.museecho.gadget.RoomTheme.entries.firstOrNull { it.name == theme }?.let { drawSeasonal(it, cx, blob.y, floor, u, dim, now) }
         // The window-box garden, under the window.
         if (has(Decor.WINDOW)) drawGarden(Offset(cx - 124 * u, blob.y - 68 * u), u, garden, dim, t)
         // The pet, on the rug.
@@ -488,5 +491,78 @@ internal fun TreasureTapLayer(blob: Offset, half: Float) {
             .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
                 com.rusty.museecho.gadget.GadgetService.instance?.life?.friends?.guess(decor.name)
             })
+    }
+}
+
+
+/** A garland along the top of the wall in the season's colours, and one thing for the occasion. */
+private fun DrawScope.drawSeasonal(th: com.rusty.museecho.gadget.RoomTheme, cx: Float, by: Float, floor: Float, u: Float, dim: Float, now: Long) {
+    val y = by - 126 * u
+    val from = cx - 150 * u
+    val to = cx + 140 * u
+    val n = 13
+    val colors = when (th) {
+        com.rusty.museecho.gadget.RoomTheme.SPRING -> listOf(Color(0xFFFF9EC7), Color(0xFFFFE08A), Color(0xFFC79BFF))
+        com.rusty.museecho.gadget.RoomTheme.SUMMER -> listOf(Color(0xFFFFC266), Color(0xFF45D3C7), Color(0xFFFF7A8A))
+        com.rusty.museecho.gadget.RoomTheme.AUTUMN -> listOf(Color(0xFFE07A3A), Color(0xFFD9A441), Color(0xFFB5523A))
+        com.rusty.museecho.gadget.RoomTheme.HALLOWEEN -> listOf(Color(0xFFFF9A3C), Color(0xFF7A4BAF), Color(0xFF2A2433))
+        com.rusty.museecho.gadget.RoomTheme.WINTER_HOLIDAYS -> listOf(Color(0xFFFF4D5E), Color(0xFF3E8E5E), Color(0xFFFFE08A))
+        com.rusty.museecho.gadget.RoomTheme.WINTER -> listOf(Color(0xFFBFE6F5), Color.White, Color(0xFF9AB8FF))
+    }
+    drawLine(Palette.ink.copy(alpha = 0.12f * dim), Offset(from, y), Offset(to, y), 1.2f * u)
+    for (i in 0 until n) {
+        val x = from + (to - from) * (i + 0.5f) / n
+        val sag = kotlin.math.sin((i + 0.5f) / n * Math.PI.toFloat()) * 8 * u
+        val c = colors[i % colors.size].copy(alpha = 0.6f * dim)
+        when (th) {
+            com.rusty.museecho.gadget.RoomTheme.WINTER_HOLIDAYS -> {
+                // Twinkling lights.
+                val on = ((now / 700L) + i) % 3 != 0L
+                drawCircle(c.copy(alpha = if (on) 0.8f * dim else 0.25f * dim), 2.6f * u, Offset(x, y + sag + 3 * u))
+            }
+            com.rusty.museecho.gadget.RoomTheme.WINTER -> drawCircle(c, 2.2f * u, Offset(x, y + sag + 4 * u), style = Stroke(0.8f * u))
+            com.rusty.museecho.gadget.RoomTheme.SPRING -> drawCircle(c, 3f * u, Offset(x, y + sag + 3 * u))
+            else -> drawPath(Path().apply { moveTo(x - 4 * u, y + sag); lineTo(x + 4 * u, y + sag); lineTo(x, y + sag + 8 * u); close() }, c)
+        }
+    }
+    when (th) {
+        com.rusty.museecho.gadget.RoomTheme.HALLOWEEN -> {
+            // A cobweb in the top corner, and a little bat.
+            val o = Offset(cx - 168 * u, by - 160 * u)
+            for (k in 0..3) drawLine(Palette.ink.copy(alpha = 0.18f * dim), o, o + Offset((10 + k * 9) * u, (36 - k * 9) * u), 0.8f * u)
+            for (r in 1..3) drawArc(Palette.ink.copy(alpha = 0.15f * dim), 0f, 90f, false, Offset(o.x - r * 10 * u, o.y - r * 10 * u),
+                Size(r * 20 * u, r * 20 * u), style = Stroke(0.8f * u))
+            val bat = Offset(cx + 70 * u, by - 120 * u + kotlin.math.sin(now / 600f) * 3 * u)
+            drawOval(Color(0xFF2A2433).copy(alpha = 0.8f * dim), Offset(bat.x - 3 * u, bat.y - 2 * u), Size(6 * u, 4 * u))
+            for (s in listOf(-1f, 1f)) drawPath(Path().apply {
+                moveTo(bat.x, bat.y); lineTo(bat.x + s * 10 * u, bat.y - 4 * u); lineTo(bat.x + s * 7 * u, bat.y + 2 * u); close()
+            }, Color(0xFF2A2433).copy(alpha = 0.8f * dim))
+        }
+        com.rusty.museecho.gadget.RoomTheme.WINTER_HOLIDAYS -> {
+            // A stocking hung on the wall.
+            val s = Offset(cx + 104 * u, by - 110 * u)
+            drawRect(Color.White.copy(alpha = 0.7f * dim), Offset(s.x - 5 * u, s.y), Size(10 * u, 4 * u))
+            drawPath(Path().apply {
+                moveTo(s.x - 5 * u, s.y + 4 * u); lineTo(s.x + 5 * u, s.y + 4 * u); lineTo(s.x + 5 * u, s.y + 16 * u)
+                lineTo(s.x + 10 * u, s.y + 20 * u); lineTo(s.x - 2 * u, s.y + 22 * u); lineTo(s.x - 5 * u, s.y + 16 * u); close()
+            }, Color(0xFFFF4D5E).copy(alpha = 0.7f * dim))
+        }
+        com.rusty.museecho.gadget.RoomTheme.SUMMER -> {
+            val b = Offset(cx + 40 * u, floor - 8 * u)
+            drawCircle(Color.White.copy(alpha = 0.7f * dim), 8 * u, b)
+            drawArc(Color(0xFFFF7A8A).copy(alpha = 0.7f * dim), 0f, 120f, true, Offset(b.x - 8 * u, b.y - 8 * u), Size(16 * u, 16 * u))
+            drawArc(Color(0xFF45D3C7).copy(alpha = 0.7f * dim), 180f, 120f, true, Offset(b.x - 8 * u, b.y - 8 * u), Size(16 * u, 16 * u))
+        }
+        com.rusty.museecho.gadget.RoomTheme.SPRING -> {
+            val v = Offset(cx + 142 * u, floor)
+            drawRoundRect(Color(0xFF9AB8FF).copy(alpha = 0.5f * dim), Offset(v.x - 6 * u, v.y - 16 * u), Size(12 * u, 16 * u), CornerRadius(4 * u))
+            for (k in -1..1) drawCircle(listOf(Color(0xFFFF9EC7), Color(0xFFFFE08A), Color(0xFFFF7A8A))[k + 1].copy(alpha = 0.7f * dim),
+                3.5f * u, Offset(v.x + k * 5 * u, v.y - 22 * u - (k % 2) * 3 * u))
+        }
+        com.rusty.museecho.gadget.RoomTheme.AUTUMN -> {
+            val a = Offset(cx + 140 * u, floor)
+            for (k in 0..2) drawOval(Color(0xFFB5523A).copy(alpha = 0.5f * dim), Offset(a.x - 8 * u + k * 6 * u, a.y - 6 * u), Size(6 * u, 6 * u))
+        }
+        com.rusty.museecho.gadget.RoomTheme.WINTER -> {}
     }
 }

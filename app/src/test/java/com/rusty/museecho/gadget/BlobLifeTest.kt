@@ -46,4 +46,13 @@ class BlobLifeTest {
     fun friendChatsAlternate() {
         LifeMath.FRIEND_CHATS.forEach { chat -> assertTrue(chat.size in 3..6) }
     }
+
+    @Test
+    fun roomThemesFollowTheCalendar() {
+        assertEquals(RoomTheme.HALLOWEEN, RoomTheme.of(java.time.LocalDate.of(2026, 10, 25)))
+        assertEquals(RoomTheme.AUTUMN, RoomTheme.of(java.time.LocalDate.of(2026, 10, 12)))
+        assertEquals(RoomTheme.WINTER_HOLIDAYS, RoomTheme.of(java.time.LocalDate.of(2026, 12, 3)))
+        assertEquals(RoomTheme.WINTER, RoomTheme.of(java.time.LocalDate.of(2027, 1, 9)))
+        assertEquals(RoomTheme.SPRING, RoomTheme.of(java.time.LocalDate.of(2027, 4, 1)))
+    }
 }

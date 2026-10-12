@@ -60,6 +60,9 @@ data class FriendScene(
     val sadId: String? = null,
     /** Market day: stalls in the room. */
     val market: Boolean = false,
+    /** Group photo day: everyone lined up, and when the camera flashed. */
+    val groupPhoto: Boolean = false,
+    val flashAt: Long = 0,
     /** The friends' pets run over to play with Puff's pet. */
     val petsPlay: Boolean = false,
     /** Halloween costumes (witch hats) and snowballs instead of a ball. */
@@ -598,6 +601,28 @@ object GadgetState {
     }
 
     fun holdingStill() = _stillUntil.value > System.currentTimeMillis()
+
+    /** The room's seasonal decorations (a RoomTheme name). */
+    private val _roomTheme = MutableStateFlow("")
+    val roomTheme: StateFlow<String> = _roomTheme.asStateFlow()
+
+    fun setRoomTheme(name: String) {
+        _roomTheme.value = name
+    }
+
+    /** Today's agenda items (for the morning hello). */
+    @Volatile
+    var agendaToday: () -> List<com.rusty.museecho.integrations.AgendaItem> = { emptyList() }
+
+    /** Puff's away visiting a friend (its id) until [Trip.untilMs]. */
+    data class Trip(val friendId: String, val untilMs: Long)
+
+    private val _trip = MutableStateFlow<Trip?>(null)
+    val trip: StateFlow<Trip?> = _trip.asStateFlow()
+
+    fun setTrip(t: Trip?) {
+        _trip.value = t
+    }
 
     /** The main blob's own name (Pixel picks it; changeable in Setup). Empty until named. */
     private val _blobName = MutableStateFlow("")

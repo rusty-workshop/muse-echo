@@ -64,9 +64,13 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     val laptop by GadgetState.laptopStatus.collectAsState()
     val v = visit
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    // Smooth (20 fps) only while something's actually moving; otherwise a few times a second is plenty.
+    val busyMotion = v?.activity in setOf("tag", "dance", "party", "blockparty", "danceclub", "catch", "snowball") ||
+        scene.throwAt > 0 || scene.petsPlay || scene.hug || scene.apart || scene.hidingAt != null || scene.groupPhoto
+    val fastTick = androidx.compose.runtime.rememberUpdatedState(busyMotion)
     LaunchedEffect(v) {
         while (v != null) {
-            kotlinx.coroutines.delay(50)
+            kotlinx.coroutines.delay(if (fastTick.value || System.currentTimeMillis() - v.startMs < 2_500) 50 else 250)
             now = System.currentTimeMillis()
         }
     }
@@ -84,10 +88,14 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
 
     // Where each friend wants to be; they glide there.
     val spots = friends.mapIndexed { i, f ->
-        val size = 80 * dp * f.p.scale
-        val side = if (i == 0) 1f else -1f
+        // Beyond the first two (group photo day), the rest stand further out, a bit smaller.
+        val far = i >= 2
+        // A back row: smaller, standing behind and above, peeking over the front row's shoulders.
+        val size = 80 * dp * f.p.scale * (if (far) 0.62f else 1f)
+        val side = if (i % 2 == 0) 1f else -1f
         val shyGap = if (f.p == Personality.SHY && f.closeness < 40) 16 * dp else 0f
-        val home = Offset(blob.x + side * (84 * dp + shyGap + (size - 80 * dp) / 2), blob.y + 20 * dp + (80 * dp - size) / 4)
+        val home = if (far) Offset(blob.x + side * (58 + (i / 4) * 34) * dp, blob.y - 72 * dp)
+            else Offset(blob.x + side * (84 * dp + shyGap + (size - 80 * dp) / 2), blob.y + 20 * dp + (80 * dp - size) / 4)
         val target = when {
             i == 0 && scene.hidingAt != null -> {
                 val (x, top) = decorSpot(Decor.valueOf(scene.hidingAt!!))
@@ -146,7 +154,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
 
     friends.forEachIndexed { i, f ->
         val (pos, size) = spots[i]
-        val side = if (i == 0) 1f else -1f
+        val side = if (i % 2 == 0) 1f else -1f
         // Walking in from the side, then whatever the activity asks.
         var x = pos.x + (1f - enter) * side * 260 * dp
         var y = pos.y
@@ -223,6 +231,11 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
     if (scene.pillow && enter > 0.5f) Canvas(Modifier.fillMaxSize()) {
         val (f0, s0) = spots.first()
         drawQuilt(f0, s0, Color(friends.first().color), enter)
+    }
+    // Group photo: the camera's flash.
+    if (scene.flashAt > 0 && now - scene.flashAt < 600) {
+        val a = 1f - (now - scene.flashAt) / 600f
+        Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.8f * a)))
     }
     // The snack in the middle of tea time, as an emoji.
     if (scene.teacups && scene.snack.isNotEmpty()) {
@@ -319,4 +332,27 @@ private fun DrawScope.drawStall(c: Offset, s: Float) {
     val stripes = 6
     for (i in 0 until stripes) drawRect((if (i % 2 == 0) Color(0xFFFF7A8A) else Color.White).copy(alpha = 0.8f),
         Offset(c.x - w / 2 + i * w / stripes, top), Size(w / stripes, s * 0.16f))
+}
+
+
+/** Puff's out at a friend's: a little window onto it there, where Puff usually sits. */
+@Composable
+internal fun TripCard(actions: UiActions, modifier: Modifier) {
+    val trip by GadgetState.trip.collectAsState()
+    val data by GadgetState.friends.collectAsState()
+    val t = trip ?: return
+    val f = data.friends.firstOrNull { it.id == t.friendId } ?: return
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    androidx.compose.foundation.layout.Column(modifier.background(Color(f.color).copy(alpha = 0.12f), RoundedCornerShape(18.dp)).padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("🧳 At ${f.shownName}'s · back soon!", color = Palette.ink, fontSize = 13.sp, maxLines = 1)
+        Box(Modifier.fillMaxSize().padding(top = 4.dp)) {
+            Canvas(Modifier.fillMaxSize()) { drawInterior(f, Color(f.color), hour) }
+            androidx.compose.foundation.layout.Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp), verticalAlignment = Alignment.Bottom) {
+                Blob(Modifier.size(64.dp), actions, mini = true, moodOverride = Mood.HAPPY, gaze = Offset(0.8f, 0f))
+                Blob(Modifier.size((56 * f.p.scale).dp), actions, mini = true, moodOverride = Mood.HAPPY, gaze = Offset(-0.8f, 0f),
+                    tintOverride = Color(f.color), ownStyle = false)
+            }
+        }
+    }
 }

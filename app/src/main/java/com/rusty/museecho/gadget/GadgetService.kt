@@ -135,6 +135,9 @@ class GadgetService : Service() {
         GadgetState.setDismissedAlerts(Prefs(this).dismissedAlerts)
         hub = com.rusty.museecho.integrations.Hub(this)
         agenda = com.rusty.museecho.integrations.Agenda(java.io.File(filesDir, "agenda.json"))
+        GadgetState.agendaToday = {
+            agenda.value.value.let { d -> if (BlobBrain.isToday(d.date, java.time.LocalDate.now())) d.items else emptyList() }
+        }
         specialDays = com.rusty.museecho.integrations.SpecialDays(java.io.File(filesDir, "countdowns.json"))
         reminders = com.rusty.museecho.integrations.Reminders(java.io.File(filesDir, "reminders.json"))
         assignments = com.rusty.museecho.integrations.Assignments(java.io.File(filesDir, "assignments.json"))
@@ -149,6 +152,7 @@ class GadgetService : Service() {
         GadgetState.setPages(Prefs(this).pageOrder, Prefs(this).pagesHidden)
         GadgetState.setBlobName(Prefs(this).blobName)
         GadgetState.setStillUntil(Prefs(this).stillUntil)
+        GadgetState.setRoomTheme(getSharedPreferences("museecho", MODE_PRIVATE).getString("room_theme", "") ?: "")
         Prefs(this).dailyThingJson?.let { j ->
             runCatching { kotlinx.serialization.json.Json.decodeFromString(DailyThing.serializer(), j) }.getOrNull()
                 ?.takeIf { Prefs(this).dailyThing }?.let(GadgetState::setDailyThing)
@@ -231,11 +235,6 @@ class GadgetService : Service() {
             }
         }
         scope.launch { applyVoiceLevel() }
-        // A silent self-check of the wake phrase (synthesized, never played), so the log shows how sure it is.
-        scope.launch {
-            delay(45_000)
-            if (Prefs(this@GadgetService).wakeWordEnabled) testWakePhrase(Prefs(this@GadgetService).wakePhrase)
-        }
         com.rusty.museecho.BootReceiver.scheduleKeepAlive(this)
         wakeWord = WakeWord(
             modelDir = java.io.File(getExternalFilesDir(null), WakeWord.MODEL_DIR_NAME),
@@ -1280,6 +1279,8 @@ class GadgetService : Service() {
     fun scopeLaunch(block: suspend () -> Unit) = scope.launch { block() }
 
     fun goodnight() = scope.launch {
+        // A one-line bedtime story first, in its bubble while it settles down.
+        if (::life.isInitialized) GadgetState.say(life.friends.bedtimeStory(), 20)
         GadgetState.react(Reaction.YAWN)
         delay(Reaction.YAWN.ms)
         GadgetState.react(Reaction.WAVE)

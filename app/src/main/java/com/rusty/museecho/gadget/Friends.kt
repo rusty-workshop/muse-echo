@@ -171,7 +171,7 @@ object FriendsBrain {
     /** Everything a visit can be. */
     val ACTIVITIES = listOf("chat", "tag", "nap", "tictactoe", "rps", "catch", "dance", "movie", "tea", "sleepover",
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
-        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub")
+        "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub", "groupphoto", "cheerrusty")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -439,6 +439,8 @@ object FriendsBrain {
         "bookclub" -> "book club"
         "danceclub" -> "dance club"
         "gardenclub" -> "garden club"
+        "groupphoto" -> "group photo day"
+        "cheerrusty" -> "cheering Rusty up"
         "nap" -> "a nap"
         else -> a
     }

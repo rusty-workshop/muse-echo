@@ -69,6 +69,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toAndroidRect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.draw.clip
@@ -460,7 +461,10 @@ private fun IdleFace(actions: UiActions) {
                 blobCenter = r.localPositionOf(it, Offset(it.size.width / 2f, it.size.height / 2f))
             }
         }, contentAlignment = Alignment.Center) {
-            Blob(Modifier.fillMaxSize(), actions, lookAt, lookAtMs, tapAt, tapAtMs)
+            // Out at a friend's: the blob keeps running (its routines) but can't be seen; a window onto the visit instead.
+            val away = GadgetState.trip.collectAsState().value != null
+            Blob(Modifier.fillMaxSize().graphicsLayer { alpha = if (away) 0f else 1f }, actions, lookAt, lookAtMs, tapAt, tapAtMs)
+            if (away) TripCard(actions, Modifier.fillMaxSize())
         }
         Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
         Column(Modifier.weight(1f)) {

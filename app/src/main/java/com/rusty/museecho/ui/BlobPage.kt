@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -76,7 +77,9 @@ internal fun BlobPage(actions: UiActions) {
                     Offset(it.size.width / 2f, it.size.height / 2f)
                 GadgetState.blobBounds[8] = it.boundsInWindow().toAndroidRect()
             }) {
-                Blob(Modifier.fillMaxSize(), actions, follower = true)
+                val away = GadgetState.trip.collectAsState().value != null
+                Blob(Modifier.fillMaxSize().graphicsLayer { alpha = if (away) 0f else 1f }, actions, follower = true)
+                if (away) TripCard(actions, Modifier.fillMaxSize())
             }
             FriendLayer(center, half, actions)
             PetTapTarget(center, half)

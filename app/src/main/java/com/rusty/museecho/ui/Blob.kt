@@ -194,10 +194,13 @@ internal fun Blob(
             val fast = isNewYearMidnight(Calendar.getInstance()) || s || reacting || musicOn.value || antsy ||
                 (previewing.value?.let { it.untilMs > now } == true) ||
                 tk == Talk.LISTENING || tk == Talk.SENDING || tk == Talk.WAITING || thinking.value > 0.02f
+            // Little copies (friends, page blobs, the agenda's) are small enough that 15 fps looks the
+            // same; the main one breathes at 20 fps when idle (slow motion doesn't need more).
             val frameMs = when {
+                mini -> if (q) 125L else 66L
                 fast -> 0L
                 q -> 100L
-                else -> 42L
+                else -> 50L
             }
             if (frameMs > 20) delay(frameMs - 16)
             withFrameNanos { nanos ->

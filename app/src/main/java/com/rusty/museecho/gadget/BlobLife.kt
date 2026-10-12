@@ -26,6 +26,23 @@ enum class Decor(val label: String, val emoji: String) {
     WIND_CHIME("a wind chime", "🎐"), TEAPOT("a teapot", "🫖"), CUSHION("a big cushion", "🛋️"), BUNTING("bunting", "🎏"), WALL_CLOCK("a wall clock", "🕰️"),
 }
 
+/** The room's seasonal decorations: a garland along the wall and something in the corner. */
+enum class RoomTheme(val label: String, val emoji: String) {
+    SPRING("spring", "🌸"), SUMMER("summer", "☀️"), AUTUMN("autumn", "🍂"), HALLOWEEN("Halloween", "🎃"),
+    WINTER_HOLIDAYS("the holidays", "🎄"), WINTER("winter", "❄️");
+
+    companion object {
+        fun of(d: java.time.LocalDate): RoomTheme = when {
+            d.monthValue == 10 && d.dayOfMonth >= 20 -> HALLOWEEN
+            d.monthValue == 12 -> WINTER_HOLIDAYS
+            d.monthValue in 1..2 -> WINTER
+            d.monthValue in 3..5 -> SPRING
+            d.monthValue in 6..8 -> SUMMER
+            else -> AUTUMN
+        }
+    }
+}
+
 /** Pure helpers (unit-tested). */
 object LifeMath {
     /**
@@ -242,6 +259,22 @@ class BlobLife(
         prefs.edit().putLong("friend_shot_last", System.currentTimeMillis()).apply()
         GadgetState.setFriendAlbum(friendAlbum.add(jpeg, caption))
         GadgetState.log("friend album: $caption")
+        scope.launch { hub.postAlbum(java.time.LocalDate.now().toString(), caption, jpeg, kind = "friends") }
+        return true
+    }
+
+    /** Group photo day: everyone, framed (bypasses the half-hour limit). */
+    suspend fun groupSnapshot(caption: String): Boolean {
+        val rect = when (GadgetState.idlePage.value) {
+            8 -> GadgetState.blobBounds[ROOM_BOUNDS]
+            0 -> GadgetState.blobBounds[0]?.let { b ->
+                android.graphics.Rect(b.left - b.width() * 2 / 3, b.top - b.height() / 3, b.right + b.width(), b.bottom + b.height() / 4)
+            }
+            else -> null
+        } ?: return false
+        val jpeg = grab(rect, 800, around = false) ?: return false
+        prefs.edit().putLong("friend_shot_last", System.currentTimeMillis()).apply()
+        GadgetState.setFriendAlbum(friendAlbum.add(jpeg, caption))
         scope.launch { hub.postAlbum(java.time.LocalDate.now().toString(), caption, jpeg, kind = "friends") }
         return true
     }

@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 
 /** Album art, loaded once per page visit. */
 private val artCache = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, android.graphics.Bitmap>(64, 0.75f, true) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>?) = size > 60
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>?) = size > 20
 })
 
 @Composable

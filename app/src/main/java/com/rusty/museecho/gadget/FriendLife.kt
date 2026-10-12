@@ -38,6 +38,7 @@ class FriendLife(
         scope.launch { storyLoop() }
         scope.launch { morningLoop() }
         scope.launch { treasureLoop() }
+        scope.launch { tripLoop() }
         // Every friend has a pet of its own.
         if (store.data.friends.any { it.petKind.isBlank() }) store.update { d ->
             d.copy(friends = d.friends.map { if (it.petKind.isBlank()) it.copy(petKind = FriendsBrain.petFor(it.p)) else it })
@@ -159,7 +160,7 @@ class FriendLife(
         while (true) {
             delay(30_000)
             if (++checks % 20 == 0) maybeNewFriend()
-            if (GadgetState.friend.value != null || soloJob?.isActive == true) {
+            if (GadgetState.friend.value != null || soloJob?.isActive == true || GadgetState.trip.value != null) {
                 // Something's on: the next one comes a little while after it ends.
                 nextAt = System.currentTimeMillis() + (4 + rnd.nextInt(9)) * 60_000L
                 continue
@@ -315,6 +316,9 @@ class FriendLife(
             }
             today.monthValue == 10 && today.dayOfMonth == 31 && h in 17..21 && once("halloween") -> visit("trickortreat")
             today.dayOfWeek == java.time.DayOfWeek.SATURDAY && h in 10..15 && once("market") -> visit("market")
+            // The first Sunday of the month, mid-afternoon: everyone comes over for the group photo.
+            today.dayOfWeek == java.time.DayOfWeek.SUNDAY && today.dayOfMonth <= 7 && h in 14..17 &&
+                store.data.friends.count { it.name.isNotBlank() } >= 2 && once("groupphoto") -> visit("groupphoto")
             FriendsBrain.Club.entries.firstOrNull { c -> c.day == today.dayOfWeek && h in c.hours }?.let { c ->
                 store.data.friends.firstOrNull { it.name.isNotBlank() && FriendsBrain.clubOf(it) == c }?.takeIf { once("club_${c.name}") }
                     ?.let { member -> c to member }
@@ -414,6 +418,7 @@ class FriendLife(
      */
     fun visit(activity: String? = null, minutes: Int? = null, name: String? = null): String {
         if (GadgetState.friend.value != null) return "already visiting"
+        if (GadgetState.trip.value != null) return "Puff's out visiting"
         val f = friendByName(name) ?: pickFriend() ?: newFriend()
         val act = activity?.lowercase()?.replace("-", "")?.replace(" ", "")?.let { a ->
             when (a) { "tictactoe", "ttt" -> "tictactoe"; "rockpaperscissors" -> "rps"; "hideandseek" -> "hideseek"; "teatime" -> "tea"; else -> a }
@@ -424,7 +429,8 @@ class FriendLife(
             it.id != f.id && it.name.isNotBlank() && FriendsBrain.clubOf(it).name.lowercase() == act.removeSuffix("club")
         } else null
         val second = clubMate ?: if (group || act in setOf("chat", "tea", "party", "dance", "story", "movie") && rnd.nextFloat() < 0.3f) pickBuddy(f) else null
-        val ids = listOfNotNull(f.id, second?.id)
+        val ids = if (act == "groupphoto") listOf(f.id) + store.data.friends.filter { it.id != f.id && it.name.isNotBlank() }.map { it.id }
+            else listOfNotNull(f.id, second?.id)
         val base = when (act) {
             "sleepover" -> 9 * 60
             "movie" -> 10
@@ -488,6 +494,8 @@ class FriendLife(
                     "bookclub" -> bookClub(f, second, v)
                     "danceclub" -> danceClub(f, second, v)
                     "gardenclub" -> gardenClub(f, second, v)
+                    "groupphoto" -> groupPhoto(f, v)
+                    "cheerrusty" -> cheerRusty(f, second)
                     else -> squabble(f)
                 }
                 // After the game or whatever it was, they stay and hang out until it's time to go.
@@ -1156,6 +1164,18 @@ class FriendLife(
         while (true) {
             val today = java.time.LocalDate.now()
             val h = life.hour()
+            // A new season or holiday: Puff decorates its room for it (and packs the old things away).
+            val theme = RoomTheme.of(today)
+            if (prefs.getString("room_theme", "") != theme.name && !isQuiet() && h in 8..20 && life.idle()) {
+                val old = prefs.getString("room_theme", "")
+                prefs.edit().putString("room_theme", theme.name).apply()
+                GadgetState.setRoomTheme(theme.name)
+                if (!old.isNullOrEmpty()) {
+                    GadgetState.react(Reaction.HOP)
+                    GadgetState.say("Decorating for ${theme.label}! ${theme.emoji}", 15)
+                    DayLog.event("decorated its room for ${theme.label}", "room")
+                }
+            }
             if (!isQuiet() && h in 6..11) {
                 // Holiday outfits join the wardrobe on their day.
                 when {
@@ -1175,6 +1195,16 @@ class FriendLife(
                     }
                 }
                 if (store.data.dreams.none { it.date == today.toString() }) dreamNow()
+                bigDayToday()?.takeIf { prefs.getString("bigday_luck", "") != today.toString() }?.let { note ->
+                    prefs.edit().putString("bigday_luck", today.toString()).apply()
+                    GadgetState.react(Reaction.CELEBRATE)
+                    GadgetState.say("Good luck with $note today, Rusty! 🍀", 60)
+                }
+            }
+            // Evening after a big day: how did it go?
+            if (!isQuiet() && h in 18..21) bigDayToday()?.takeIf { prefs.getString("bigday_ask", "") != today.toString() }?.let { note ->
+                prefs.edit().putString("bigday_ask", today.toString()).apply()
+                GadgetState.say("How did $note go? 💛", 120)
             }
             delay(15 * 60_000L)
         }
@@ -1325,6 +1355,153 @@ class FriendLife(
         untilEnd(v)
         GadgetState.scene { it.copy(market = false) }
         return "market day (came home with $bought)"
+    }
+
+    // -- Group photo day -------------------------------------------------------------------------------
+
+    private suspend fun groupPhoto(f: Friend, v: FriendVisit): String {
+        GadgetState.scene { it.copy(groupPhoto = true) }
+        blob("It's group photo day! 📸", 3_000)
+        say(f, "Everyone squeeze in! 🤗", 3_000)
+        delay(2_000)
+        blob("Say cheese! 🧀", 2_000)
+        GadgetState.scene { it.copy(flashAt = System.currentTimeMillis()) }
+        delay(400)
+        val month = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US))
+        life.groupSnapshot("Group photo · $month")
+        GadgetState.react(Reaction.CELEBRATE)
+        say(f, "Perfect! 📸", 2_500)
+        for (id in v.friendIds) store.friend(id)?.let { remember(it, "the group photo in $month") }
+        untilEnd(v)
+        GadgetState.scene { it.copy(groupPhoto = false) }
+        return "everyone came over for the $month group photo"
+    }
+
+    // -- Puff's trips ------------------------------------------------------------------------------------
+
+    /** Now and then Puff goes round to a friend's for half an hour, and comes back with a souvenir. */
+    private suspend fun tripLoop() {
+        delay(20 * 60_000L)
+        while (true) {
+            delay(15 * 60_000L)
+            val today = java.time.LocalDate.now().toString()
+            if (!on() || isQuiet() || life.hour() !in 11..17 || prefs.getString("trip_day", "") == today) continue
+            if (GadgetState.friend.value != null || !life.idle() || System.currentTimeMillis() - GadgetState.lastHuman < 10 * 60_000L) continue
+            if (rnd.nextFloat() > 0.25f) continue
+            store.data.friends.filter { it.name.isNotBlank() }.randomOrNull()?.let { trip(it) }
+        }
+    }
+
+    fun trip(f: Friend, minutes: Int = 20 + rnd.nextInt(21)) = scope.launch {
+        prefs.edit().putString("trip_day", java.time.LocalDate.now().toString()).apply()
+        GadgetState.react(Reaction.WAVE)
+        GadgetState.hold(HeldItem.SUITCASE, "", 1)
+        GadgetState.say("I'm off to ${f.shownName}'s! Back soon! 🧳", 5)
+        delay(4_000)
+        val until = System.currentTimeMillis() + minutes * 60_000L
+        GadgetState.setTrip(GadgetState.Trip(f.id, until))
+        DayLog.event("went round to ${f.shownName}'s house", "trip")
+        GadgetState.log("trip to ${f.shownName}'s")
+        val left = GadgetState.lastHuman
+        // Home on time, or straight away if Rusty needs it (a touch or talking).
+        while (System.currentTimeMillis() < until && GadgetState.lastHuman == left &&
+            (GadgetState.talk.value == Talk.IDLE || GadgetState.talk.value == Talk.REPLIED)) delay(5_000)
+        GadgetState.setTrip(null)
+        val souvenir = when {
+            FriendsBrain.MARKET.any { !life.has(it) } && rnd.nextBoolean() -> FriendsBrain.MARKET.first { !life.has(it) }.let { life.unlock(it, " from ${f.shownName}'s", quietly = true); it.label }
+            listOf("FLOWER", "BOW", "SCARF", "CROWN", "SUNGLASSES").any { it !in store.data.wardrobe } ->
+                listOf("FLOWER", "BOW", "SCARF", "CROWN", "SUNGLASSES").first { it !in store.data.wardrobe }.also { addOutfit(it) }.lowercase().let { "a $it" }
+            else -> listOf("a smooth pebble", "a pressed flower", "a tiny drawing", "a cookie for later", "a friendship bracelet").random()
+        }
+        GadgetState.react(Reaction.HOP)
+        GadgetState.hold(HeldItem.GIFT, "🎁 Souvenir from ${f.shownName}'s", 10)
+        GadgetState.say("I'm back! ${f.shownName} gave me $souvenir! 😊", 10)
+        DayLog.event("came home from ${f.shownName}'s with $souvenir", "trip")
+        remember(f, "when ${GadgetState.blobCalled()} came over to my house")
+    }
+
+    // -- Rusty's news ------------------------------------------------------------------------------------
+
+    /**
+     * Pixel tells the blob how Rusty's doing: [feeling] rough / great / big_day (with [date],
+     * yyyy-MM-dd, and a [note] like "your maths test"). Puff and friends respond.
+     */
+    fun rustyFeels(feeling: String, note: String, date: String?): String {
+        when (feeling.lowercase()) {
+            "rough", "sad", "bad" -> {
+                GadgetState.hold(HeldItem.HEART, "💛 For Rusty", 120)
+                GadgetState.setMood(Mood.WORRIED, 20)
+                GadgetState.say("Sending you a big hug, Rusty. 💛", 30)
+                DayLog.event("heard Rusty was having a rough day" + if (note.isNotBlank()) " ($note)" else "", "rusty")
+                // A friend comes over to cheer Rusty up (soon, if nobody's over).
+                scope.launch {
+                    delay(90_000)
+                    if (GadgetState.friend.value == null && !isQuiet()) visit("cheerrusty")
+                }
+            }
+            "great", "good", "happy" -> {
+                GadgetState.react(Reaction.CELEBRATE)
+                GadgetState.say("Yay, Rusty! 🎉" + if (note.isNotBlank()) " $note!" else "", 30)
+                GadgetState.setMood(Mood.HAPPY, 600)
+                DayLog.event("celebrated Rusty's good news" + if (note.isNotBlank()) " ($note)" else "", "rusty")
+            }
+            else -> {
+                val d = date?.takeIf { runCatching { java.time.LocalDate.parse(it) }.isSuccess } ?: return "date (yyyy-MM-dd) is needed for a big day"
+                val list = (prefs.getString("big_days", "")!!.split('\n').filter { it.isNotBlank() } + "$d|${note.take(60)}").takeLast(20)
+                prefs.edit().putString("big_days", list.joinToString("\n")).apply()
+                GadgetState.say("I'll remember! 📝 Good luck with ${note.ifBlank { "your big day" }}!", 15)
+            }
+        }
+        return "ok"
+    }
+
+    private suspend fun cheerRusty(f: Friend, second: Friend?): String {
+        say(f, "We heard you're having a rough day, Rusty… 💛", 4_000)
+        second?.let { say(it, "We made you a card! 💌", 3_000) }
+        hug(3_000)
+        blob("You've got this, Rusty. We're all here. 🤗", 4_000)
+        return "came over to cheer Rusty up"
+    }
+
+    /** Big days: good luck in the morning, "how did it go?" in the evening. */
+    private fun bigDayToday(): String? {
+        val today = java.time.LocalDate.now().toString()
+        return prefs.getString("big_days", "")!!.split('\n').firstOrNull { it.startsWith("$today|") }?.substringAfter('|')
+    }
+
+    // -- Mornings and bedtime ------------------------------------------------------------------------------
+
+    /** The first touch of the day: a hug, the weather in a line, and what's first on today. */
+    fun morningHello() = scope.launch {
+        val w = GadgetState.weather.value
+        val first = GadgetState.agendaToday().firstOrNull()
+        GadgetState.react(Reaction.HOP)
+        GadgetState.hold(HeldItem.HEART, "", 1)
+        val lines = listOfNotNull(
+            "Good morning, Rusty! 🤗",
+            w?.let { "Today: ${it.summary.lowercase()}, up to ${it.highF}°." },
+            bigDayToday()?.let { "Big day: $it! Good luck! 🍀" }
+                ?: first?.let { "First up: ${if (it.time.isNotBlank()) "${it.time} " else ""}${it.title}." } ?: "Nothing on the calendar today. 😌",
+        )
+        for (line in lines) {
+            GadgetState.say(line, 5)
+            delay(4_500)
+        }
+    }
+
+    /** A one-line bedtime story starring Puff's friends and pet. */
+    fun bedtimeStory(): String {
+        val friends = store.data.friends.filter { it.name.isNotBlank() }
+        val a = friends.randomOrNull()?.name ?: "a little blob"
+        val b = friends.filter { it.name != a }.randomOrNull()?.name ?: "the moon"
+        val pet = store.data.pet?.name?.ifBlank { null } ?: "a sleepy snail"
+        return listOf(
+            "Once upon a time, $pet raced the moon… and won. The end. 🌙",
+            "Once, $a found a star in the garden and gave it to $b to keep. Goodnight. ⭐",
+            "Long ago, $a and $b built a pillow fort so big the clouds came to sleep in it. 💤",
+            "Once upon a time, ${GadgetState.BlobCalled()} wished for a dream, and the night said yes. 🌌",
+            "$pet carried a tiny lantern all the way to dreamland, very slowly. 🏮",
+        ).random()
     }
 
     // -- Clubs --------------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import java.io.File
+import kotlin.concurrent.thread
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +54,38 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
     private val http = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS).build()
     private var tts: OfflineTts? = null
     private var loaded: Level? = null
+    /** The voice picked in Setup. It's loaded only when something needs to speak, and freed again after a quiet spell. */
+    @Volatile
+    private var wanted: Level? = null
+    @Volatile
+    private var lastUse = 0L
+    @Volatile
+    private var busy = false
+
+    init {
+        // The model takes ~100 MB of memory; nothing needs it most of the time.
+        thread(name = "neural-voice-unload", isDaemon = true) {
+            while (true) {
+                Thread.sleep(60_000)
+                synchronized(this) {
+                    if (tts != null && !busy && System.currentTimeMillis() - lastUse > IDLE_UNLOAD_MS) {
+                        tts?.release()
+                        tts = null
+                        loaded = null
+                        log("neural voice unloaded (idle)")
+                    }
+                }
+            }
+        }
+    }
+
+    /** The loaded engine, loading the chosen voice first if it was freed. */
+    private fun engine(): OfflineTts? = synchronized(this) {
+        lastUse = System.currentTimeMillis()
+        val w = wanted ?: return@synchronized null
+        if (tts == null || loaded != w) runCatching { load(w) }.onFailure { log("neural voice: ${it.message}") }
+        tts
+    }
 
     @Volatile
     private var cancel = false
@@ -69,7 +102,11 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
     suspend fun use(level: Level): String? = withContext(Dispatchers.IO) {
         try {
             if (!installed(level)) download(level)
-            load(level)
+            // Loaded on first use, not now.
+            synchronized(this@NeuralVoice) {
+                if (loaded != null && loaded != level) { tts?.release(); tts = null; loaded = null }
+                wanted = level
+            }
             _status.value = Status.Ready(level)
             null
         } catch (e: Exception) {
@@ -141,7 +178,7 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
         log("neural voice ${level.label} loaded")
     }
 
-    val ready: Boolean get() = tts != null && _status.value is Status.Ready
+    val ready: Boolean get() = wanted != null && _status.value is Status.Ready
 
     /**
      * Speak [text], blocking until done or [stop]ped. Generation and playback
@@ -150,7 +187,17 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
      * Calls [onStart] when the first audio plays. Returns false if stopped or it failed.
      */
     fun speakBlocking(text: String, onStart: () -> Unit): Boolean {
-        val engine = synchronized(this) { tts } ?: return false
+        busy = true
+        try {
+            return speakWith(text, onStart)
+        } finally {
+            busy = false
+            lastUse = System.currentTimeMillis()
+        }
+    }
+
+    private fun speakWith(text: String, onStart: () -> Unit): Boolean {
+        val engine = engine() ?: return false
         cancel = false
         val rate = engine.sampleRate()
         val queue = java.util.concurrent.LinkedBlockingQueue<FloatArray>()
@@ -259,7 +306,7 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
      * one second of work produces (above 1.0 = faster than real time).
      */
     fun speedTest(text: String): Double? {
-        val engine = synchronized(this) { tts } ?: return null
+        val engine = engine() ?: return null
         // Same streaming callback path as real speech, just counting instead of playing.
         val sink = java.util.concurrent.LinkedBlockingQueue<FloatArray>()
         cancel = false
@@ -272,6 +319,7 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
 
     companion object {
         private const val ENVELOPE_PER_SECOND = 25
+        private const val IDLE_UNLOAD_MS = 10 * 60_000L
 
         /** The text with its first sentence cut at the first comma (if long), so speech starts sooner. */
         fun firstChunks(text: String): List<String> {
@@ -285,7 +333,7 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
 
     /** Synthesize [text] to mono 16 kHz PCM without playing it (for wake-phrase checks). */
     fun synthesize16k(text: String): ShortArray? {
-        val engine = synchronized(this) { tts } ?: return null
+        val engine = engine() ?: return null
         val audio = engine.generate(text, 0, 1.0f)
         val src = audio.samples
         val ratio = audio.sampleRate / 16_000.0
@@ -306,6 +354,7 @@ class NeuralVoice(private val dir: File, private val log: (String) -> Unit) {
             tts?.release()
             tts = null
             loaded = null
+            wanted = null
         }
     }
 }

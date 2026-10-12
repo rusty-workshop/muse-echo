@@ -135,7 +135,10 @@ internal fun NeighbourhoodPage(actions: UiActions) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.Bottom) {
                 // The blob's own house, with its mailbox: tap to read the newest unread letter.
-                House(blobName.ifBlank { "The blob" }, Palette.violet.toArgb().toLong() and 0xFFFFFFFFL, 1.15f, Where.HOME, if (unread.isNotEmpty()) "📬 ${unread.size} new letter${if (unread.size == 1) "" else "s"}" else "home",
+                val trip by GadgetState.trip.collectAsState()
+                val tripTo = trip?.let { t -> data.friends.firstOrNull { it.id == t.friendId }?.shownName }
+                House(blobName.ifBlank { "The blob" }, Palette.violet.toArgb().toLong() and 0xFFFFFFFFL, 1.15f, if (tripTo != null) Where.OUT else Where.HOME,
+                    if (tripTo != null) "at $tripTo's" else if (unread.isNotEmpty()) "📬 ${unread.size} new letter${if (unread.size == 1) "" else "s"}" else "home",
                     hour, mailbox = true, mailFlag = unread.isNotEmpty(), decor = decor, garden = garden) {
                     val l = unread.lastOrNull()
                     if (l == null) note = "No new letters" else {
@@ -323,7 +326,7 @@ private fun HouseInside(f: Friend, where: Where, hour: Int, actions: UiActions, 
 }
 
 /** Each personality's room: Pip's trampoline, Moss's pebble shelf, Doze's huge bed, Glimmer's disco ball, Pebble's hammock. */
-private fun DrawScope.drawInterior(f: Friend, c: Color, hour: Int) {
+internal fun DrawScope.drawInterior(f: Friend, c: Color, hour: Int) {
     val w = size.width
     val h = size.height
     val floor = h * 0.86f
