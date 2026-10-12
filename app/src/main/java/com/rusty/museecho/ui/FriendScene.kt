@@ -107,8 +107,11 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         scene.board?.let { drawBoard(it, mid, 42 * dp, Color(friends.first().color)) }
         if (scene.throwAt > 0) {
             val p = ((now - scene.throwAt) / 1200f).coerceIn(0f, 1f)
-            val from = if (scene.toFriend) blob + Offset(0f, -30 * dp) else f0 + Offset(0f, -s0 * 0.35f)
-            val to = if (scene.toFriend) f0 + Offset(0f, -s0 * 0.35f) else blob + Offset(0f, -30 * dp)
+            // From the top of one head to the top of the other (the core is about half the box's radius).
+            val puffHead = blob + Offset(0f, -half * 0.5f)
+            val friendHead = f0 + Offset(0f, -s0 * 0.26f)
+            val from = if (scene.toFriend) puffHead else friendHead
+            val to = if (scene.toFriend) friendHead else puffHead
             val pos = from + (to - from) * p + Offset(0f, -60 * dp * sin(p * PI.toFloat()))
             drawCircle(if (scene.snow) Color.White else Color(0xFFFF7A8A), 6 * dp, pos)
             drawCircle(Color.White.copy(alpha = 0.6f), 2 * dp, pos + Offset(-2 * dp, -2 * dp))
@@ -148,6 +151,8 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         var x = pos.x + (1f - enter) * side * 260 * dp
         var y = pos.y
         when {
+            // Playing catch: stay put so the ball lands on its head.
+            scene.throwAt > 0 -> {}
             act == "tag" && t > 2f -> { x += sin(t * 1.7f + i) * size * 1.1f; y -= abs(sin(t * 5f)) * size * 0.25f }
             act == "dance" || (act == "party" && i == 0) -> when (vibe) {
                 "calm" -> x += sin(t * 1.3f + i) * 8 * dp

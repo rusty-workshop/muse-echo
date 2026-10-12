@@ -140,6 +140,9 @@ internal fun Blob(
     val turnActive by GadgetState.turnActive.collectAsState()
     val previewNow by GadgetState.preview.collectAsState()
     val previewing = rememberUpdatedState(previewNow)
+    // Playing catch (or a snowball fight): hold still so the ball really lands on its head.
+    val catchGame by GadgetState.friendScene.collectAsState()
+    val holdStill = catchGame.throwAt > 0
     val leaveBy by GadgetState.leaveBy.collectAsState()
     val work by GadgetState.assignments.collectAsState()
     val guest = if (mini) false else rememberGuest()
@@ -579,6 +582,9 @@ internal fun Blob(
             }
             if (gaze != null) { lookX = gaze.x; lookY = gaze.y }
 
+            // Mid-game: no wandering, hopping or bobbing (a bonk still makes it flinch).
+            if (holdStill && react != Reaction.STARTLE) { dx = 0f; dy = 0f; sx = 1f; sy = 1f }
+
             // -- Easing: nothing jumps. Each value glides toward its target at its own pace. --
             val dt = (t - sm.lastT).coerceIn(0f, 0.1f)
             sm.lastT = t
@@ -599,9 +605,9 @@ internal fun Blob(
             sm.breath += dt * TAU / (9f - 4f * energy)
             sm.drift += dt * (0.6f + 0.8f * energy) / 14f
             sm.energyAmp += ((0.04f + 0.06f * energy) - sm.energyAmp) * ease(2f)
-            val breatheNow = 0.99f + sm.energyAmp * sin(sm.breath) + 0.08f * voice + 0.12f * mic
+            val breatheNow = if (holdStill) 1f else 0.99f + sm.energyAmp * sin(sm.breath) + 0.08f * voice + 0.12f * mic
             val angle = (sm.drift % 1f) * TAU
-            val shift = Offset(cos(angle) * r * 0.18f, sin(angle) * r * 0.18f)
+            val shift = if (holdStill) Offset.Zero else Offset(cos(angle) * r * 0.18f, sin(angle) * r * 0.18f)
             val body = c + Offset(sm.dx, sm.dy)
             // Mood, accessory and prop changes cross-fade instead of popping.
             if (mood != sm.mood) { sm.prevMood = sm.mood; sm.mood = mood; sm.moodAt = t }
