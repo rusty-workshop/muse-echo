@@ -756,6 +756,7 @@ private const val HOLD_TO_TALK_MS = 380L
 private const val CLEAN_HOLD_MS = 3_000L
 private const val CLEAN_SECONDS = 30
 private const val CAPTION_ASIDE_MS = 8_000L
+private const val REPLY_CLEAR_MS = 30_000L
 
 /** The Latitude in detail: Kuma monitors with 24-hour uptime, disk, memory, load, battery, containers and the last backup. */
 @Composable
@@ -1098,6 +1099,17 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
             delay(CAPTION_ASIDE_MS)
             stepAside = true
         }
+    }
+    // A finished reply clears itself 30 seconds after it's done (and done being spoken); it's
+    // still in the history panel.
+    LaunchedEffect(reply, heard, talk, speaking) {
+        if (speaking || !(talk == Talk.REPLIED || talk == Talk.ERROR || talk == Talk.IDLE)) return@LaunchedEffect
+        if (heard.isEmpty() && reply.isEmpty()) return@LaunchedEffect
+        delay(REPLY_CLEAR_MS)
+        GadgetState.setHeard("")
+        GadgetState.setReply("")
+        GadgetState.setReplyImages(emptyList())
+        GadgetState.setTalk(Talk.IDLE)
     }
     val visible = (heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE) && !stepAside
     AnimatedVisibility(visible, modifier, enter = fadeIn(), exit = fadeOut()) {
