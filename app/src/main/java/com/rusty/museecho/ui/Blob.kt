@@ -133,6 +133,7 @@ internal fun Blob(
     val muted by GadgetState.muted.collectAsState()
     val tucked by GadgetState.tuckedIn.collectAsState()
     val sniffles by GadgetState.sniffles.collectAsState()
+    val nightLight by GadgetState.nightLight.collectAsState()
     val sickBlanket by GadgetState.sickBlanket.collectAsState()
     val presenting by GadgetState.presenting.collectAsState()
     val alerts by GadgetState.alerts.collectAsState()
@@ -425,6 +426,8 @@ internal fun Blob(
                 moodOverride != null -> moodOverride
                 pixelMood != null -> pixelMood
                 tucked || forcedState == "TUCKED_IN" || forcedState == "SLEEP" -> Mood.SLEEPY
+                // Woken by the night light: groggy, eyes half shut.
+                nightLight && !speaking && talk == Talk.IDLE -> Mood.DROWSY
                 newYear -> Mood.HAPPY
                 quiet && !upLate -> Mood.SLEEPY
                 quiet -> Mood.DROWSY

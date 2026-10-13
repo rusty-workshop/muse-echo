@@ -349,6 +349,10 @@ fun MuseEchoApp(actions: UiActions) {
             val warmth by GadgetState.warmth.collectAsState()
             val warmNow by androidx.compose.animation.core.animateFloatAsState(warmth, tween(4000), label = "warm")
             if (warmNow > 0.01f) Box(Modifier.fillMaxSize().background(Color(0xFFFF8A3D).copy(alpha = 0.11f * warmNow)))
+            // The night light: a soft warm glow over everything (fades in and out).
+            val nightLight by GadgetState.nightLight.collectAsState()
+            val nightGlow by androidx.compose.animation.core.animateFloatAsState(if (nightLight) 1f else 0f, tween(1200), label = "nightLight")
+            if (nightGlow > 0.01f) Box(Modifier.fillMaxSize().background(Color(0xFFFF9A4D).copy(alpha = 0.22f * nightGlow)))
             CleaningOverlay()
         }
     }

@@ -633,6 +633,21 @@ object GadgetState {
     @Volatile
     var agendaToday: () -> List<com.rusty.museecho.integrations.AgendaItem> = { emptyList() }
 
+    /** Night light: a tap in a dark room at night gives a soft warm glow (and a drowsy Puff) for a couple of minutes. */
+    private val _nightLight = MutableStateFlow(false)
+    val nightLight: StateFlow<Boolean> = _nightLight.asStateFlow()
+    @Volatile var nightLightStart = 0L
+    const val NIGHT_LIGHT_MS = 2 * 60_000L
+
+    fun startNightLight() {
+        nightLightStart = System.currentTimeMillis()
+        _nightLight.value = true
+    }
+
+    fun endNightLight() {
+        _nightLight.value = false
+    }
+
     /** A sniffly day: a rosy nose, sneezes, and (once Rusty's tucked it in) a blanket. */
     private val _sniffles = MutableStateFlow(false)
     val sniffles: StateFlow<Boolean> = _sniffles.asStateFlow()

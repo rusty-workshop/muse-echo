@@ -96,6 +96,12 @@ class MainActivity : ComponentActivity() {
                     else -> "Hi there! 👋"
                 }, 6)
             }
+            // Night: a tap in a dark room gives the soft night light rather than the screen (back to sleep after 2 min).
+            sleepAfterNightLight = false
+            if (GadgetState.quiet.value && GadgetState.roomDark.value != false) {
+                GadgetState.startNightLight()
+                window.attributes = window.attributes.apply { screenBrightness = NIGHT_LIGHT_LEVEL }
+            }
             // Tucked in for the night: a touch gets it up again.
             if (GadgetState.tuckedIn.value) {
                 GadgetState.setTuckedIn(false)
@@ -104,7 +110,7 @@ class MainActivity : ComponentActivity() {
             // The first tap on a sleeping screen only wakes it.
             if (GadgetState.asleep.value) {
                 GadgetState.setAsleep(false)
-                window.attributes = window.attributes.apply { screenBrightness = 0.05f }
+                window.attributes = window.attributes.apply { screenBrightness = if (GadgetState.nightLight.value) NIGHT_LIGHT_LEVEL else 0.05f }
                 return true
             }
             // The photo frame handles its own touches (a tap ends it, press and hold for favourite / hide).
@@ -164,14 +170,21 @@ class MainActivity : ComponentActivity() {
                 val offAfter = com.rusty.museecho.gadget.Prefs(this@MainActivity).nightOffMin
                 val idleMs = System.currentTimeMillis() - GadgetState.lastTouch
                 val dim = GadgetState.dim.value
+                // The night light's two minutes are up (with no touch since): back to sleep until the next tap.
+                if (GadgetState.nightLight.value && System.currentTimeMillis() - GadgetState.nightLightStart >= GadgetState.NIGHT_LIGHT_MS) {
+                    GadgetState.endNightLight()
+                    if (quiet) sleepAfterNightLight = true
+                }
                 // Asleep overnight after a while, or after saying goodnight once the fade has finished.
                 val asleep = (quiet && calm && offAfter > 0 && idleMs >= offAfter * 60_000L) ||
+                    (quiet && sleepAfterNightLight) ||
                     (GadgetState.tuckedIn.value && dim != null && dim <= com.rusty.museecho.gadget.GadgetService.GOODNIGHT_DIM)
                 if (asleep != GadgetState.asleep.value) GadgetState.setAsleep(asleep)
                 // Overrides win; otherwise the auto-brightness ticker below follows the room.
                 brightnessOverride = when {
                     // Asleep: backlight off, or the faintest glow for the night screensaver.
                     asleep -> if (GadgetState.nightScene.value == "BLACK") WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF else 0.02f
+                    GadgetState.nightLight.value -> NIGHT_LIGHT_LEVEL
                     dim != null -> dim
                     quiet && calm -> 0.05f
                     else -> null
@@ -185,6 +198,12 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private val NIGHT_LIGHT_LEVEL = 0.08f
+
+    /** The night light ran out with no touch since: asleep again until the next tap. */
+    @Volatile
+    private var sleepAfterNightLight = false
 
     /** Set by the quiet-hours / goodnight logic; null means "normal", where auto brightness applies. */
     @Volatile
