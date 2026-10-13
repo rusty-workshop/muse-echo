@@ -1996,7 +1996,8 @@ class GadgetService : Service() {
         /** Rough speaking rate of the voices, for pacing the brief's props. */
         const val BRIEF_CHARS_PER_SECOND = 14f
         const val DARK_LUX = 5f
-        const val LIGHT_LUX = 15f
+        // Rusty's room with the lights on reads only 12-13 lux at the Echo; dark is under 5.
+        const val LIGHT_LUX = 9f
         const val ACTION_PAIR = "com.rusty.museecho.PAIR"
         const val ACTION_STOP_PAIR = "com.rusty.museecho.STOP_PAIR"
         const val ACTION_RECONNECT = "com.rusty.museecho.RECONNECT"
