@@ -318,6 +318,7 @@ class GadgetService : Service() {
                 continue
             }
             val prefs = Prefs(this)
+            if (litSince > 0 && System.currentTimeMillis() - litSince >= 120_000) morningStartsEarly()
             val quiet = QuietHours.isQuiet(prefs)
             if (quiet != GadgetState.quiet.value) {
                 GadgetState.setQuiet(quiet)
@@ -1326,9 +1327,28 @@ class GadgetService : Service() {
     }
 
     /** The lights came on in the morning: wake up and stretch. */
+    /**
+     * Room sense: the lights are on on a morning that's still in quiet hours (before 7 by default). The
+     * morning starts now: quiet hours end for today (normal brightness, wake word, voice), back tonight.
+     */
+    /** Since when the room's been lit (0 = it isn't); the light sensor only reports changes, so the watchdog times it. */
+    @Volatile private var litSince = 0L
+
+    private fun morningStartsEarly() {
+        val p = Prefs(this)
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (!p.roomSense || hour !in 5..11 || !isQuietNow() || System.currentTimeMillis() < p.quietUntil) return
+        val end = QuietHours.parse(p.quietEnd) ?: return
+        val endMs = java.time.LocalDate.now().atTime(end).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        if (endMs <= System.currentTimeMillis()) return
+        p.quietSkipUntil = endMs
+        GadgetState.log("room sense: lights on before quiet hours end, the morning starts now")
+    }
+
     private fun onLightsOn() {
         if (!Prefs(this).roomSense) return
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        morningStartsEarly()
         if (hour !in 5..11 || !(GadgetState.tuckedIn.value || GadgetState.asleep.value)) return
         GadgetState.log("room sense: lights on in the morning, waking up")
         DayLog.event("the lights came on and I woke up", "wake")
@@ -1733,6 +1753,7 @@ class GadgetService : Service() {
                 val now = System.currentTimeMillis()
                 val wasDark = GadgetState.roomDark.value
                 if (lux < DARK_LUX) {
+                    litSince = 0L
                     if (darkSince == 0L) darkSince = now
                     if (wasDark != true && now - darkSince >= 60_000) {
                         GadgetState.setRoomDark(true)
@@ -1743,6 +1764,8 @@ class GadgetService : Service() {
                     }
                 } else {
                     darkSince = 0L
+                    // How long the room's been lit (the watchdog starts the morning early after a couple of minutes).
+                    if (lux > LIGHT_LUX) { if (litSince == 0L) litSince = now } else litSince = 0L
                     if (lux > LIGHT_LUX && wasDark != false) {
                         GadgetState.setRoomDark(false)
                         if (wasDark == true) {
@@ -2171,6 +2194,11 @@ class Prefs(context: Context) {
     var quietUntil: Long
         get() = prefs.getLong("quiet_until", 0L)
         set(v) = prefs.edit().putLong("quiet_until", v).apply()
+
+    /** The morning started early (the lights came on before quiet hours ended): not quiet until this (epoch ms). */
+    var quietSkipUntil: Long
+        get() = prefs.getLong("quiet_skip_until", 0L)
+        set(v) = prefs.edit().putLong("quiet_skip_until", v).apply()
 
     var blobRoom: Boolean
         get() = prefs.getBoolean("blob_room", true)
