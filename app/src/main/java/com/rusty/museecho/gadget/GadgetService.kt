@@ -1333,6 +1333,7 @@ class GadgetService : Service() {
      */
     /** Since when the room's been lit (0 = it isn't); the light sensor only reports changes, so the watchdog times it. */
     @Volatile private var litSince = 0L
+    private var lastLuxSaved = 0L
 
     private fun morningStartsEarly() {
         val p = Prefs(this)
@@ -1751,6 +1752,12 @@ class GadgetService : Service() {
                 val lux = e.values.firstOrNull() ?: return
                 GadgetState.lux = lux
                 val now = System.currentTimeMillis()
+                // Remembered across restarts: this sensor only reports changes, so a restart in a steadily
+                // lit (or dark) room would otherwise know nothing until a light is switched.
+                if (now - lastLuxSaved > 30_000) {
+                    lastLuxSaved = now
+                    getSharedPreferences("museecho", MODE_PRIVATE).edit().putFloat("last_lux", lux).putLong("last_lux_at", now).apply()
+                }
                 val wasDark = GadgetState.roomDark.value
                 if (lux < DARK_LUX) {
                     litSince = 0L
@@ -1780,6 +1787,17 @@ class GadgetService : Service() {
         }
         sensors.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
         lightListener = listener
+        // No fresh reading after a restart: start from the last one (if it's from the last 12 hours).
+        scope.launch {
+            delay(5_000)
+            val prefs = getSharedPreferences("museecho", MODE_PRIVATE)
+            val last = prefs.getFloat("last_lux", -1f)
+            if (GadgetState.lux < 0f && last >= 0f && System.currentTimeMillis() - prefs.getLong("last_lux_at", 0L) < 12 * 3600_000L) {
+                GadgetState.lux = last
+                if (last > LIGHT_LUX && litSince == 0L) litSince = System.currentTimeMillis()
+                GadgetState.log("light sensor: starting from the last reading (%.0f lux)".format(last))
+            }
+        }
     }
 
     /** Polls the Roku now and then, so the blob can watch along. Never searches the network for it. */
