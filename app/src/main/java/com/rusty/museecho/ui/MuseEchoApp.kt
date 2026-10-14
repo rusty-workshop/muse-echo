@@ -688,7 +688,11 @@ private fun AgendaPage(actions: UiActions) {
             },
         )
     Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 180.dp, top = 64.dp, bottom = 84.dp)) {
-        Text(day.date.ifEmpty { today }, color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+        // Pixel often writes the date as 2026-10-14: shown as a day.
+        val heading = day.date.ifEmpty { today }.let { d ->
+            runCatching { java.time.LocalDate.parse(d.trim().take(10)).format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.US)) }.getOrDefault(d)
+        }
+        Text(heading, color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
         if (!isToday) {
             Text("From an earlier day", color = Palette.coral, fontSize = 13.sp)
         }
