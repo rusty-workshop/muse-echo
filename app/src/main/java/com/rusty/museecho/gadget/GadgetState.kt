@@ -634,12 +634,21 @@ object GadgetState {
     var agendaToday: () -> List<com.rusty.museecho.integrations.AgendaItem> = { emptyList() }
 
     /** The look settings the screens follow (from Prefs). */
-    data class Looks(val dayNight: Boolean = true, val ambience: Boolean = true, val userName: String = "Rusty")
+    data class Looks(val dayNight: Boolean = true, val ambience: Boolean = true, val userName: String = "Rusty", val weatherAccents: Boolean = true)
     private val _looks = MutableStateFlow(Looks())
     val looks: StateFlow<Looks> = _looks.asStateFlow()
 
     fun setLooks(p: Prefs) {
-        _looks.value = Looks(p.dayNightLook, p.ambience, p.userName)
+        _looks.value = Looks(p.dayNightLook, p.ambience, p.userName, p.weatherAccents)
+    }
+
+    /** The volume / brightness popup: which ("volume" or "brightness"), the level 0..1, and when. */
+    data class LevelPopup(val kind: String, val level: Float, val atMs: Long)
+    private val _levelPopup = MutableStateFlow<LevelPopup?>(null)
+    val levelPopup: StateFlow<LevelPopup?> = _levelPopup.asStateFlow()
+
+    fun showLevel(kind: String, level: Float) {
+        _levelPopup.value = LevelPopup(kind, level.coerceIn(0f, 1f), System.currentTimeMillis())
     }
 
     /** Night light: a tap in a dark room at night gives a soft warm glow (and a drowsy Puff) for a couple of minutes. */

@@ -75,6 +75,10 @@ internal object Palette {
      */
     var lift by mutableFloatStateOf(0.5f)
 
+    /** The weather's colour the accents lean toward (bluer in rain, golden in sun, cool white in snow); null = none. */
+    var weatherTint by mutableStateOf<Color?>(null)
+    private fun tint(c: Color, by: Float) = weatherTint?.let { lerp(c, it, by) } ?: c
+
     private fun bg(c: Color, toward: Float, darken: Float): Color = when {
         lift > 0.5f -> lerp(c, lerp(c, theme.muted, toward), (lift - 0.5f) * 2f)
         else -> lerp(c, Color.Black, (0.5f - lift) * 2f * darken)
@@ -85,9 +89,9 @@ internal object Palette {
     val dusk get() = bg(theme.dusk, 0.28f, 0.5f)
     val ink get() = if (lift < 0.5f) lerp(theme.ink, theme.muted, (0.5f - lift) * 2f * 0.3f) else theme.ink
     val muted get() = soften(theme.muted, 0.15f)
-    val violet get() = soften(theme.violet, 0.2f)
+    val violet get() = tint(soften(theme.violet, 0.2f), 0.22f)
     val coral get() = soften(theme.coral, 0.2f)
-    val teal get() = soften(theme.teal, 0.2f)
-    val amber get() = soften(theme.amber, 0.2f)
+    val teal get() = tint(soften(theme.teal, 0.2f), 0.18f)
+    val amber get() = tint(soften(theme.amber, 0.2f), 0.12f)
     val card get() = bg(theme.card, 0.25f, 0.4f)
 }

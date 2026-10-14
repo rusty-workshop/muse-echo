@@ -1057,6 +1057,7 @@ class GadgetService : Service() {
         bool("day_night_look")?.let { v -> p.dayNightLook = v; GadgetState.setLooks(p); done += "day_night_look" }
         bool("ambience")?.let { v -> p.ambience = v; GadgetState.setLooks(p); done += "ambience" }
         bool("ui_sounds")?.let { v -> p.uiSounds = v; done += "ui_sounds" }
+        bool("weather_accents")?.let { v -> p.weatherAccents = v; GadgetState.setLooks(p); done += "weather_accents" }
         str("user_name")?.let { v -> p.userName = v; GadgetState.setLooks(p); done += "user_name" }
         bool("puff_sniffles")?.let { v -> p.puffSniffles = v; if (!v) life.friends.stopSniffles(); done += "puff_sniffles" }
         bool("puff_away_sleepovers")?.let { v -> p.puffAwaySleepovers = v; done += "puff_away_sleepovers" }
@@ -1680,6 +1681,7 @@ class GadgetService : Service() {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: Intent) {
                 if (i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1) != android.media.AudioManager.STREAM_MUSIC) return
+                GadgetState.showLevel("volume", fraction())
                 // Wait for the presses to stop, then react once to where it ended up.
                 settle?.cancel()
                 settle = scope.launch {
@@ -2243,6 +2245,9 @@ class Prefs(context: Context) {
     var uiSounds: Boolean
         get() = prefs.getBoolean("ui_sounds", false)
         set(v) = prefs.edit().putBoolean("ui_sounds", v).apply()
+    var weatherAccents: Boolean
+        get() = prefs.getBoolean("weather_accents", true)
+        set(v) = prefs.edit().putBoolean("weather_accents", v).apply()
     /** What the greeting calls you. */
     var userName: String
         get() = prefs.getString("user_name", null) ?: "Rusty"

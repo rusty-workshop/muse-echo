@@ -27,6 +27,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -55,6 +58,8 @@ enum class ClockFace(val label: String, val blurb: String) {
     FLIP("Flip", "Split-flap cards that roll over"),
     RINGS("Rings", "Hour, minute and second rings"),
     TERMINAL("Terminal", "A prompt with a blinking cursor"),
+    LCD("Retro LCD", "Glowing seven-segment digits, like an old alarm clock"),
+    NIXIE("Nixie tubes", "Orange glowing numerals in glass tubes"),
     ;
 
     companion object {
@@ -83,6 +88,8 @@ private fun ClockFaceBody(face: ClockFace, now: Date, modifier: Modifier, s: Flo
         ClockFace.FLIP -> FlipFace(now, modifier, s)
         ClockFace.RINGS -> RingsFace(now, modifier, s)
         ClockFace.TERMINAL -> TerminalFace(now, modifier, s)
+        ClockFace.LCD -> LcdFace(now, modifier, s)
+        ClockFace.NIXIE -> NixieFace(now, modifier, s)
     }
 }
 
@@ -278,5 +285,109 @@ private fun TerminalFace(now: Date, modifier: Modifier, s: Float) {
             Box(Modifier.padding(start = (6 * s).dp, bottom = (14 * s).dp).width((20 * s).dp).height((44 * s).dp)
                 .background(green.copy(alpha = if (now.second() % 2 == 0) 0.85f else 0f)))
         }
+    }
+}
+
+// -- Retro LCD ---------------------------------------------------------------------------
+
+/** Which of the seven segments (a top, b top-right, c bottom-right, d bottom, e bottom-left, f top-left, g middle) each digit lights. */
+private val SEGMENTS = mapOf(
+    '0' to "abcdef", '1' to "bc", '2' to "abged", '3' to "abgcd", '4' to "fgbc",
+    '5' to "afgcd", '6' to "afgedc", '7' to "abc", '8' to "abcdefg", '9' to "abcdfg", ' ' to "",
+)
+
+@Composable
+private fun LcdFace(now: Date, modifier: Modifier, s: Float) {
+    val red = androidx.compose.ui.graphics.Color(0xFFFF3B30)
+    val hh = "%2d".format(now.hour12())
+    val mm = "%02d".format(now.minute())
+    val colonOn = now.second() % 2 == 0
+    val pm = now.pm()
+    androidx.compose.foundation.Canvas(modifier.width((250 * s).dp).height((92 * s).dp)) {
+        val dw = size.width * 0.2f
+        val dh = size.height * 0.86f
+        val gap = size.width * 0.03f
+        val colonW = size.width * 0.06f
+        val t = dw * 0.14f
+        fun digit(ch: Char, x: Float) {
+            val on = SEGMENTS[ch].orEmpty()
+            val y0 = (size.height - dh) / 2
+            // Each segment: a slanted bar; unlit ones faint, lit ones bright with a glow behind.
+            val segs = mapOf(
+                'a' to (androidx.compose.ui.geometry.Offset(x + t, y0) to androidx.compose.ui.geometry.Offset(x + dw - t, y0)),
+                'd' to (androidx.compose.ui.geometry.Offset(x + t, y0 + dh) to androidx.compose.ui.geometry.Offset(x + dw - t, y0 + dh)),
+                'g' to (androidx.compose.ui.geometry.Offset(x + t, y0 + dh / 2) to androidx.compose.ui.geometry.Offset(x + dw - t, y0 + dh / 2)),
+                'f' to (androidx.compose.ui.geometry.Offset(x, y0 + t) to androidx.compose.ui.geometry.Offset(x, y0 + dh / 2 - t)),
+                'b' to (androidx.compose.ui.geometry.Offset(x + dw, y0 + t) to androidx.compose.ui.geometry.Offset(x + dw, y0 + dh / 2 - t)),
+                'e' to (androidx.compose.ui.geometry.Offset(x, y0 + dh / 2 + t) to androidx.compose.ui.geometry.Offset(x, y0 + dh - t)),
+                'c' to (androidx.compose.ui.geometry.Offset(x + dw, y0 + dh / 2 + t) to androidx.compose.ui.geometry.Offset(x + dw, y0 + dh - t)),
+            )
+            for ((k, ends) in segs) {
+                val lit = k in on
+                if (lit) drawLine(red.copy(alpha = 0.25f), ends.first, ends.second, t * 2.2f, androidx.compose.ui.graphics.StrokeCap.Round)
+                drawLine(if (lit) red else red.copy(alpha = 0.07f), ends.first, ends.second, t, androidx.compose.ui.graphics.StrokeCap.Round)
+            }
+        }
+        var x = t
+        digit(hh[0], x); x += dw + gap
+        digit(hh[1], x); x += dw + gap
+        // The blinking colon.
+        val cx = x + colonW / 2 - gap / 2
+        for (fy in listOf(0.33f, 0.67f)) {
+            val c = androidx.compose.ui.geometry.Offset(cx, size.height * fy)
+            if (colonOn) drawCircle(red.copy(alpha = 0.25f), t * 1.1f, c)
+            drawCircle(if (colonOn) red else red.copy(alpha = 0.07f), t * 0.6f, c)
+        }
+        x += colonW
+        digit(mm[0], x); x += dw + gap
+        digit(mm[1], x)
+        // The PM dot, top left, like the real thing.
+        drawCircle(if (pm) red else red.copy(alpha = 0.07f), t * 0.5f, androidx.compose.ui.geometry.Offset(t * 0.2f, size.height * 0.12f))
+    }
+}
+
+// -- Nixie tubes -------------------------------------------------------------------------
+
+@Composable
+private fun NixieTube(d: Char, s: Float) {
+    val orange = androidx.compose.ui.graphics.Color(0xFFFF8A3D)
+    Box(
+        Modifier.width((50 * s).dp).height((84 * s).dp)
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(
+                androidx.compose.ui.graphics.Color(0x33FFFFFF), androidx.compose.ui.graphics.Color(0x14FFFFFF), androidx.compose.ui.graphics.Color(0x22FFFFFF))),
+                RoundedCornerShape(topStart = (24 * s).dp, topEnd = (24 * s).dp, bottomStart = (6 * s).dp, bottomEnd = (6 * s).dp))
+            .border(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.18f),
+                RoundedCornerShape(topStart = (24 * s).dp, topEnd = (24 * s).dp, bottomStart = (6 * s).dp, bottomEnd = (6 * s).dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        // The unlit numerals stacked behind, as in a real tube.
+        Text("8", color = androidx.compose.ui.graphics.Color(0xFF5A3A2A).copy(alpha = 0.5f), fontSize = (52 * s).sp, fontWeight = FontWeight.Thin)
+        // The lit one: a soft glow under a bright core.
+        Text(d.toString(), color = orange.copy(alpha = 0.35f), fontSize = (56 * s).sp, fontWeight = FontWeight.Normal,
+            modifier = Modifier.graphicsLayer { scaleX = 1.06f; scaleY = 1.06f })
+        Text(d.toString(), color = androidx.compose.ui.graphics.Color(0xFFFFC38A), fontSize = (52 * s).sp, fontWeight = FontWeight.Light)
+        // The wire mesh across the front.
+        androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+            for (k in 1 until 6) drawLine(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.05f),
+                androidx.compose.ui.geometry.Offset(size.width * k / 6, 0f), androidx.compose.ui.geometry.Offset(size.width * k / 6, size.height), 1f)
+        }
+    }
+}
+
+@Composable
+private fun NixieFace(now: Date, modifier: Modifier, s: Float) {
+    val hh = "%02d".format(now.hour12())
+    val mm = "%02d".format(now.minute())
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy((5 * s).dp)) {
+        NixieTube(hh[0], s)
+        NixieTube(hh[1], s)
+        // A neon dot pair for the colon, blinking with the seconds.
+        Column(verticalArrangement = Arrangement.spacedBy((14 * s).dp)) {
+            repeat(2) {
+                Box(Modifier.size((7 * s).dp).background(androidx.compose.ui.graphics.Color(0xFFFF8A3D).copy(alpha = if (now.second() % 2 == 0) 0.9f else 0.2f), CircleShape))
+            }
+        }
+        NixieTube(mm[0], s)
+        NixieTube(mm[1], s)
     }
 }

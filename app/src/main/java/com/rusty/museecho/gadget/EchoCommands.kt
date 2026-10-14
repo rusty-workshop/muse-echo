@@ -330,6 +330,7 @@ class EchoCommands(
             }
             Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
             Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, (level.coerceIn(0, 100) * 255 / 100).coerceAtLeast(1))
+            GadgetState.showLevel("brightness", level / 100f)
         }
         val raw = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 128)
         return commandOk(buildJsonObject { put("level", (raw * 100 + 127) / 255) })

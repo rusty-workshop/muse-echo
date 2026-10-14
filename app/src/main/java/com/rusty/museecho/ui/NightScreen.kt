@@ -33,6 +33,9 @@ enum class NightScene(val label: String, val blurb: String) {
     STARS("Starry night", "{name} asleep among slowly drifting stars"),
     AQUARIUM("Aquarium", "{name} dozing in a dark, bubbly tank"),
     STREET("Puff's street", "The street at night, windows going dark one by one"),
+    AURORA("Aurora", "Slow green and violet curtains of light over a dark hill"),
+    CAMPFIRE("Campfire", "{name} dozing by a softly crackling fire"),
+    RAIN_WINDOW("Rain on the window", "Raindrops trickling down a dark window"),
     ;
 
     companion object {
@@ -72,9 +75,21 @@ internal fun NightScreen(scene: NightScene, actions: UiActions) {
             delay(125)
         }
     }
-    Box(Modifier.fillMaxSize().background(if (scene == NightScene.STARS) Color(0xFF05040A) else Color(0xFF02101A))) {
+    val bg = when (scene) {
+        NightScene.STARS, NightScene.AURORA -> Color(0xFF05040A)
+        NightScene.CAMPFIRE -> Color(0xFF080504)
+        NightScene.RAIN_WINDOW -> Color(0xFF05070C)
+        else -> Color(0xFF02101A)
+    }
+    Box(Modifier.fillMaxSize().background(bg)) {
         Canvas(Modifier.fillMaxSize()) {
-            if (scene == NightScene.STARS) drawStars(t) else drawTank(t)
+            when (scene) {
+                NightScene.STARS -> drawStars(t)
+                NightScene.AURORA -> { drawStars(t); drawAurora(t) }
+                NightScene.CAMPFIRE -> drawCampfire(t)
+                NightScene.RAIN_WINDOW -> drawRainWindow(t)
+                else -> drawTank(t)
+            }
         }
         // The blob, asleep, drifting slowly around the screen (about 7 minutes a lap).
         val lap = (t / 420f) * TAU
@@ -235,4 +250,87 @@ private fun AwaySleepover(host: com.rusty.museecho.gadget.Friend, actions: UiAct
                 moodOverride = Mood.SLEEPY, tintOverride = c, ownStyle = false)
         }
     }
+}
+
+/** Slow curtains of green and violet light rippling over a dark hill. Everything drifts so nothing stays put. */
+private fun DrawScope.drawAurora(t: Float) {
+    val drift = sin(t / 200f) * 30f
+    for (band in 0 until 3) {
+        val col = if (band == 1) Color(0xFF8B6CFF) else Color(0xFF3DE0A0)
+        val baseY = size.height * (0.32f + band * 0.08f)
+        val path = Path()
+        val steps = 40
+        for (k in 0..steps) {
+            val x = size.width * k / steps + drift
+            val y = baseY + sin(k * 0.35f + t * 0.12f + band) * 26f + sin(k * 0.13f - t * 0.07f) * 18f
+            if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        for (k in steps downTo 0) {
+            val x = size.width * k / steps + drift
+            path.lineTo(x, baseY + 120f + sin(k * 0.2f + t * 0.1f) * 20f)
+        }
+        path.close()
+        drawPath(path, Brush.verticalGradient(listOf(col.copy(alpha = 0.18f), Color.Transparent), baseY - 30f, baseY + 140f))
+    }
+    // The hill.
+    val hill = Path().apply {
+        moveTo(0f, size.height)
+        lineTo(0f, size.height * 0.82f)
+        quadraticTo(size.width * 0.35f + drift, size.height * 0.68f, size.width * 0.7f, size.height * 0.8f)
+        quadraticTo(size.width * 0.85f, size.height * 0.84f, size.width, size.height * 0.78f)
+        lineTo(size.width, size.height); close()
+    }
+    drawPath(hill, Color(0xFF020203))
+}
+
+/** A small fire with flickering flames and rising sparks, glowing warm on the ground. */
+private fun DrawScope.drawCampfire(t: Float) {
+    val c = Offset(size.width * (0.5f + 0.03f * sin(t / 240f)), size.height * 0.78f)
+    val flicker = 0.85f + 0.15f * sin(t * 7f) * sin(t * 3.3f)
+    drawCircle(Brush.radialGradient(listOf(Color(0xFFFF8A3D).copy(alpha = 0.22f * flicker), Color.Transparent), c, size.height * 0.5f), size.height * 0.5f, c)
+    // Logs.
+    drawLine(Color(0xFF3A2416), c + Offset(-40f, 12f), c + Offset(40f, 2f), 12f, androidx.compose.ui.graphics.StrokeCap.Round)
+    drawLine(Color(0xFF2E1C10), c + Offset(-40f, 2f), c + Offset(40f, 12f), 12f, androidx.compose.ui.graphics.StrokeCap.Round)
+    // Flames: a few teardrops swaying.
+    for (k in 0 until 3) {
+        val sway = sin(t * (2.2f + k) + k) * 6f
+        val h = (46f - k * 10f) * flicker
+        val base = c + Offset((k - 1) * 12f, 0f)
+        val flame = Path().apply {
+            moveTo(base.x - 12f + k * 2, base.y)
+            quadraticTo(base.x - 14f + sway, base.y - h * 0.6f, base.x + sway, base.y - h)
+            quadraticTo(base.x + 14f + sway, base.y - h * 0.6f, base.x + 12f - k * 2, base.y)
+            close()
+        }
+        drawPath(flame, if (k == 1) Color(0xFFFFC266).copy(alpha = 0.9f) else Color(0xFFFF6A2A).copy(alpha = 0.8f))
+    }
+    // Sparks drifting up.
+    for (k in 0 until 8) {
+        val ph = ((t * 0.25f + k * 0.137f) % 1f)
+        val p = c + Offset(sin(t + k * 2f) * 20f, -20f - ph * size.height * 0.45f)
+        drawCircle(Color(0xFFFFC266).copy(alpha = (1f - ph) * 0.7f), 1.6f, p)
+    }
+}
+
+/** Raindrops trickling down a dark window, a few city lights blurred far behind it. */
+private fun DrawScope.drawRainWindow(t: Float) {
+    // Faraway lights.
+    for (k in 0 until 9) {
+        val p = Offset((k * 0.618f * 997f + sin(t / 300f) * 20f) % size.width, size.height * (0.55f + 0.25f * ((k * 0.414f) % 1f)))
+        val col = listOf(Color(0xFFFFC266), Color(0xFF8B6CFF), Color(0xFF45D3C7))[k % 3]
+        drawCircle(Brush.radialGradient(listOf(col.copy(alpha = 0.18f), Color.Transparent), p, 40f), 40f, p)
+    }
+    // Drops: each slides down slowly, then quickly, leaving a short trail.
+    for (k in 0 until 26) {
+        val speed = 0.03f + (k % 5) * 0.012f
+        val ph = ((t * speed + k * 0.29f) % 1f)
+        val eased = ph * ph
+        val x = (k * 0.618f * 911f) % size.width
+        val y = eased * (size.height + 40f) - 20f
+        drawLine(Color(0xFFAFC8E8).copy(alpha = 0.12f), Offset(x, y - 40f * ph), Offset(x, y), 2f)
+        drawCircle(Color(0xFFCFE0F5).copy(alpha = 0.35f), 2.6f + (k % 3), Offset(x, y))
+    }
+    // The window frame's cross.
+    drawLine(Color(0xFF15131A), Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 14f)
+    drawLine(Color(0xFF15131A), Offset(0f, size.height * 0.45f), Offset(size.width, size.height * 0.45f), 14f)
 }

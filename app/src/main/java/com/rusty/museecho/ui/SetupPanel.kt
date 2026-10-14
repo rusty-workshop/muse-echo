@@ -593,6 +593,10 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 ToggleRow("Ambience", "Faint dust motes by day, fireflies in the evening, snow in winter", ambienceOn) {
                     ambienceOn = it; prefs.ambience = it; GadgetState.setLooks(prefs)
                 }
+                var weatherAccOn by remember { mutableStateOf(prefs.weatherAccents) }
+                ToggleRow("Weather colours", "Accents lean bluer in rain, golden in sun, cool white in snow", weatherAccOn) {
+                    weatherAccOn = it; prefs.weatherAccents = it; GadgetState.setLooks(prefs)
+                }
                 ToggleRow("UI sounds", "Soft clicks, a whoosh between pages, a chime for cards (never in quiet hours)", uiSoundsOn) {
                     uiSoundsOn = it; prefs.uiSounds = it
                 }

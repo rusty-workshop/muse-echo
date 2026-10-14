@@ -565,6 +565,7 @@ class Chores(
             put("day_night_look", p.dayNightLook)
             put("ambience", p.ambience)
             put("ui_sounds", p.uiSounds)
+            put("weather_accents", p.weatherAccents)
             put("user_name", p.userName)
             put("puff_sniffles", p.puffSniffles)
             put("puff_away_sleepovers", p.puffAwaySleepovers)

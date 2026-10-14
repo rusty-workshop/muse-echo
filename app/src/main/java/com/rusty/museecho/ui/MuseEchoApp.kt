@@ -231,6 +231,20 @@ fun MuseEchoApp(actions: UiActions) {
     androidx.compose.runtime.SideEffect { Palette.theme = colors }
     MaterialTheme(colorScheme = darkColorScheme(primary = Palette.violet, background = Palette.night, surface = Palette.card)) {
         val screen by GadgetState.screen.collectAsState()
+        // The accents lean toward the weather (bluer in rain, golden in sun, cool white in snow).
+        val weatherNowRoot by GadgetState.weather.collectAsState()
+        val looksRoot by GadgetState.looks.collectAsState()
+        LaunchedEffect(weatherNowRoot?.summary, looksRoot.weatherAccents) {
+            Palette.weatherTint = if (!looksRoot.weatherAccents) null else weatherNowRoot?.summary?.lowercase()?.let { w ->
+                when {
+                    "snow" in w -> Color(0xFFE6F0FF)
+                    "thunder" in w || "rain" in w || "drizzle" in w || "shower" in w -> Color(0xFF5B9BFF)
+                    "fog" in w || "overcast" in w -> Color(0xFFB8C4D6)
+                    "clear" in w || "sun" in w || "mostly clear" in w -> Color(0xFFFFC94D)
+                    else -> null
+                }
+            }
+        }
         var showSetup by remember { mutableStateOf(false) }
         var showKeyboard by remember { mutableStateOf(false) }
         var showHistory by remember { mutableStateOf(false) }
@@ -322,6 +336,7 @@ fun MuseEchoApp(actions: UiActions) {
                     Icon(Icons.Filled.Settings, "Setup", tint = Palette.muted)
                 }
             }
+            Spotlight()
             QuickActionRow(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 30.dp), actions)
             Captions(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 120.dp, bottom = 18.dp), actions)
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
@@ -363,6 +378,7 @@ fun MuseEchoApp(actions: UiActions) {
             val nightGlow by androidx.compose.animation.core.animateFloatAsState(if (nightLight) 1f else 0f, tween(1200), label = "nightLight")
             if (nightGlow > 0.01f) Box(Modifier.fillMaxSize().background(Color(0xFFFF9A4D).copy(alpha = 0.22f * nightGlow)))
             EdgeGlow()
+            LevelOverlay(Modifier.align(Alignment.TopCenter).padding(top = 64.dp))
             StartupSplash()
             CleaningOverlay()
         }
@@ -1149,18 +1165,30 @@ private fun HistoryPanel(actions: UiActions, onClose: () -> Unit) {
                 TextButton(onClick = onClose) { Text("Done") }
             }
             if (items.isEmpty()) Body("Nothing yet.", Palette.muted)
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            // As a chat: what you said on the right, Pixel's answers on the left, days as little pills.
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 var lastDay = ""
                 items.asReversed().forEach { e ->
                     val d = day.format(Date(e.at))
                     if (d != lastDay) {
-                        SectionTitle(d)
+                        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                            Text(d, color = Palette.muted, fontSize = 12.sp, modifier = Modifier.glass(RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp))
+                        }
                         lastDay = d
                     }
-                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).glass(RoundedCornerShape(12.dp)).padding(12.dp)) {
-                        Text(listOfNotNull(time.format(Date(e.at)), e.source).joinToString("  ·  "), color = Palette.muted, fontSize = 12.sp)
-                        if (e.heard.isNotEmpty()) Text("“${e.heard}”", color = Palette.muted, fontSize = 15.sp)
-                        Text(com.rusty.museecho.gadget.Markdown.toAnnotated(e.reply), color = Palette.ink, fontSize = 16.sp, lineHeight = 22.sp)
+                    val at = time.format(Date(e.at))
+                    if (e.heard.isNotEmpty()) Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                        Text(e.heard, color = Palette.ink, fontSize = 16.sp, lineHeight = 22.sp,
+                            modifier = Modifier.widthIn(max = 520.dp).background(Palette.violet.copy(alpha = 0.55f),
+                                RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp)).padding(horizontal = 14.dp, vertical = 9.dp))
+                        Text(at, color = Palette.muted, fontSize = 11.sp, modifier = Modifier.padding(end = 6.dp, top = 2.dp))
+                    }
+                    if (e.reply.isNotBlank()) Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                        Text(com.rusty.museecho.gadget.Markdown.toAnnotated(e.reply), color = Palette.ink, fontSize = 16.sp, lineHeight = 22.sp,
+                            modifier = Modifier.widthIn(max = 620.dp).glass(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp))
+                                .padding(horizontal = 14.dp, vertical = 9.dp))
+                        Text(listOfNotNull(e.source ?: GadgetState.museName.value, if (e.heard.isEmpty()) at else null).joinToString("  ·  "),
+                            color = Palette.muted, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp, top = 2.dp))
                     }
                 }
             }
@@ -1367,7 +1395,7 @@ private const val READ_MORE_CHARS = 220
 @Composable
 private fun CaptionButton(label: String, onClick: () -> Unit) {
     Text(label, color = Palette.ink, fontSize = 14.sp,
-        modifier = Modifier.background(Palette.night.copy(alpha = 0.6f), RoundedCornerShape(50)).clickable(onClick = onClick)
+        modifier = Modifier.pressable(onClick = onClick).background(Palette.night.copy(alpha = 0.6f), RoundedCornerShape(50))
             .padding(horizontal = 14.dp, vertical = 7.dp))
 }
 
@@ -1499,12 +1527,21 @@ private fun QuickActionRow(modifier: Modifier, actions: UiActions) {
     // Only over the plain home screen: never on top of a picture, a text card or a reply.
     val show = !(list.isEmpty() || talk != Talk.IDLE || heard.isNotEmpty() || reply.isNotEmpty() || link != Link.CONNECTED ||
         screen !is Screen.Idle)
-    AnimatedVisibility(show, modifier, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
+    val asleep by GadgetState.asleep.collectAsState()
+    val appear = remember { List(8) { androidx.compose.animation.core.Animatable(0f) } }
+    LaunchedEffect(show && !asleep) {
+        if (!(show && !asleep)) { appear.forEach { it.snapTo(0f) }; return@LaunchedEffect }
+        appear.take(list.size).forEachIndexed { i, a ->
+            launch { delay(i * 80L); a.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 300f)) }
+        }
+    }
+    AnimatedVisibility(show, modifier, enter = fadeIn(tween(150)), exit = fadeOut(tween(200))) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        list.forEach { a ->
+        list.forEachIndexed { i, a ->
+            val p = appear.getOrNull(i)?.value ?: 1f
             Text(a.label, color = Palette.ink, fontSize = 15.sp, maxLines = 1,
-                modifier = Modifier.glass(RoundedCornerShape(50))
-                    .clickable { actions.runQuickAction(a) }.padding(horizontal = 16.dp, vertical = 10.dp))
+                modifier = Modifier.graphicsLayer { alpha = p; translationY = (1f - p) * 18.dp.toPx() }
+                    .pressable { actions.runQuickAction(a) }.glass(RoundedCornerShape(50)).padding(horizontal = 16.dp, vertical = 10.dp))
         }
     }
     }
@@ -1671,15 +1708,12 @@ private fun QuickPanel(open: Boolean, onClose: () -> Unit) {
                             if (muted) android.media.AudioManager.ADJUST_UNMUTE else android.media.AudioManager.ADJUST_MUTE, 0)
                         muted = !muted
                     }.padding(8.dp))
-                    androidx.compose.material3.Slider(
-                        value = vol, valueRange = 0f..max.toFloat(), steps = (max - 1).coerceAtLeast(0),
-                        onValueChange = {
-                            vol = it; touched++
-                            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, it.toInt(), 0)
-                            if (muted && it > 0f) muted = false
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
+                    ChunkySlider(vol / max, onChange = { f ->
+                        val v = kotlin.math.round(f * max)
+                        vol = v; touched++
+                        audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, v.toInt(), 0)
+                        if (muted && v > 0f) muted = false
+                    }, modifier = Modifier.weight(1f))
                     Text("${(100 * vol / max).toInt()}%", color = Palette.muted, fontSize = 15.sp, modifier = Modifier.width(52.dp).padding(start = 8.dp))
                 }
                 val prefs = remember { com.rusty.museecho.gadget.Prefs(ctx) }
@@ -1687,16 +1721,12 @@ private fun QuickPanel(open: Boolean, onClose: () -> Unit) {
                 var bright by remember(open) { mutableStateOf(prefs.manualBrightness.takeIf { it >= 0f } ?: 0.6f) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("☀️", fontSize = 26.sp, modifier = Modifier.padding(8.dp))
-                    androidx.compose.material3.Slider(
-                        value = bright, valueRange = 0.04f..1f,
-                        onValueChange = {
-                            // Picking a brightness by hand turns auto off (the switch turns it back on).
-                            bright = it; touched++
-                            prefs.manualBrightness = it
-                            if (auto) { auto = false; prefs.autoBrightness = false }
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
+                    ChunkySlider((bright - 0.04f) / 0.96f, onChange = { f ->
+                        // Picking a brightness by hand turns auto off (the switch turns it back on).
+                        bright = 0.04f + f * 0.96f; touched++
+                        prefs.manualBrightness = bright
+                        if (auto) { auto = false; prefs.autoBrightness = false }
+                    }, modifier = Modifier.weight(1f), colors = listOf(Palette.amber.copy(alpha = 0.7f), Palette.amber))
                     Text("Auto", color = if (auto) Palette.teal else Palette.muted, fontSize = 15.sp, modifier = Modifier.padding(start = 8.dp))
                     androidx.compose.material3.Switch(checked = auto, onCheckedChange = { touched++; auto = it; prefs.autoBrightness = it })
                 }
