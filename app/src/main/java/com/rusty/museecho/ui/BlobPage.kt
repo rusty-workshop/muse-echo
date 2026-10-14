@@ -202,7 +202,7 @@ private fun AlbumThumb(shot: AlbumShot, actions: UiActions) {
             android.graphics.BitmapFactory.decodeFile(f.path)?.let { GadgetState.show(Screen.Image(it, "$date · ${shot.caption}")) }
         }
     }) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).glass(RoundedCornerShape(10.dp))) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).let { if (img == null) it.shimmer() else it.glass(RoundedCornerShape(10.dp)) }) {
             img?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         }
         Text("$date · ${shot.caption}", color = Palette.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

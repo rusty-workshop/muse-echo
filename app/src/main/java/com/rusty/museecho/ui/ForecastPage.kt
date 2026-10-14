@@ -59,7 +59,10 @@ internal fun ForecastPage(actions: UiActions) {
         Text("Forecast", color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
         val f = fc
         if (f == null) {
-            Text("Getting the forecast…", color = Palette.muted, fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxSize().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Box(Modifier.weight(1.45f).fillMaxHeight().shimmer())
+                ShimmerLines(7, Modifier.weight(1f))
+            }
             return@Column
         }
         Spacer(Modifier.height(8.dp))

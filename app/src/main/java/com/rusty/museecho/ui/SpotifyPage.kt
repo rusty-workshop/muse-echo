@@ -123,6 +123,8 @@ internal fun SpotifyPage(actions: UiActions) {
                     keyboardActions = KeyboardActions(onSearch = { search() }),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (searching) ShimmerLines(5, Modifier.padding(top = 10.dp))
+                else if (note == "Nothing found") EmptyState(EmptyArt.NOTHING_FOUND, "Nothing found. Try other words?", Modifier.fillMaxWidth().padding(top = 10.dp))
                 LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(results, key = { it.uri }) { item ->
                         Row(

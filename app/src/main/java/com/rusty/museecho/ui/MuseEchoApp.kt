@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -71,6 +72,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toAndroidRect
@@ -257,10 +261,12 @@ fun MuseEchoApp(actions: UiActions) {
             },
         ) {
             val bgName by GadgetState.background.collectAsState()
-            androidx.compose.animation.Crossfade(targetState = AppBackground.of(bgName), animationSpec = tween(800), label = "bg") { bg ->
+            // Parallax: the background drifts slower than the pages when you swipe, the ambience a little faster.
+            androidx.compose.animation.Crossfade(targetState = AppBackground.of(bgName), animationSpec = tween(800), label = "bg",
+                modifier = Modifier.graphicsLayer { translationX = -PagerScroll.pos * 34.dp.toPx(); scaleX = 1.09f; scaleY = 1.09f }) { bg ->
                 AppBackgroundView(bg, actions)
             }
-            AmbientLayer()
+            Box(Modifier.fillMaxSize().graphicsLayer { translationX = -PagerScroll.pos * 70.dp.toPx() }) { AmbientLayer() }
             // A soft chime when a card or picture comes up.
             LaunchedEffect(screen) { if (screen !is Screen.Idle) GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.UI_CHIME) }
             // Pictures and cards fade and grow in; the clock eases back afterwards.
@@ -287,10 +293,7 @@ fun MuseEchoApp(actions: UiActions) {
                 Modifier.align(Alignment.TopStart).padding(14.dp).padding(end = with(density) { iconsWidth.toDp() } + 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                StatusChip(Modifier)
-                val showPill by GadgetState.serverPill.collectAsState()
-                if (showPill) ServerLight(Modifier)
-                LaptopChip(Modifier.weight(1f, fill = false), actions)
+                StatusTray(actions)
             }
             UpdateChip(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp), actions)
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp).onSizeChanged { iconsWidth = it.width }) {
@@ -359,6 +362,7 @@ fun MuseEchoApp(actions: UiActions) {
             val nightLight by GadgetState.nightLight.collectAsState()
             val nightGlow by androidx.compose.animation.core.animateFloatAsState(if (nightLight) 1f else 0f, tween(1200), label = "nightLight")
             if (nightGlow > 0.01f) Box(Modifier.fillMaxSize().background(Color(0xFFFF9A4D).copy(alpha = 0.22f * nightGlow)))
+            EdgeGlow()
             StartupSplash()
             CleaningOverlay()
         }
@@ -565,16 +569,16 @@ private fun AlertBanner() {
                 val severe = a.severity.equals("Severe", true) || a.severity.equals("Extreme", true)
                 val until = if (a.endsMs > 0) " until " + SimpleDateFormat("EEE h a", Locale.US).format(Date(a.endsMs)) else ""
                 Row(
-                    Modifier.padding(bottom = 4.dp).background(if (severe) Palette.coral else Palette.amber, RoundedCornerShape(50)),
+                    Modifier.padding(bottom = 4.dp).glass(RoundedCornerShape(50)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("⚠ ${a.event}$until", color = Palette.night, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    Text("⚠ ${a.event}$until", color = if (severe) Palette.coral else Palette.amber, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.clickable {
                             GadgetState.show(Screen.Text(a.event, listOf(a.headline, a.description, a.instruction)
                                 .filter { it.isNotBlank() }.joinToString("\n\n")))
                         }.padding(start = 14.dp, top = 5.dp, bottom = 5.dp, end = 6.dp))
                     // Close: hides this chip (a third alert, if any, moves up).
-                    Text("✕", color = Palette.night.copy(alpha = 0.7f), fontSize = 14.sp,
+                    Text("✕", color = Palette.muted, fontSize = 14.sp,
                         modifier = Modifier.clickable { close(listOf(a.id)) }.padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp))
                 }
             }
@@ -627,6 +631,7 @@ private fun IdlePages(actions: UiActions) {
         var dir = 0
         val turns = ArrayDeque<Long>()
         androidx.compose.runtime.snapshotFlow { pager.currentPage + pager.currentPageOffsetFraction }.collect { pos ->
+            PagerScroll.pos = pos
             val step = pos - last
             if (kotlin.math.abs(step) < 0.02f) return@collect
             last = pos
@@ -643,6 +648,18 @@ private fun IdlePages(actions: UiActions) {
             dir = d
         }
     }
+    // Badges on the page dots: something down on the homelab, a new letter for Puff, an event within the hour.
+    val server by GadgetState.server.collectAsState()
+    val world by GadgetState.friends.collectAsState()
+    val day by actions.agenda().collectAsState()
+    val nowMinute = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
+    val badges = buildMap {
+        if (server?.overall == "down") put(2, Palette.coral)
+        if (world.letters.any { !it.read && !it.fromBlob } || world.letters.any { !it.read && it.friendId == "rusty" }) put(8, Palette.amber)
+        if (com.rusty.museecho.gadget.BlobBrain.isToday(day.date, java.time.LocalDate.now()) &&
+            day.items.any { com.rusty.museecho.gadget.BlobBrain.minutesOfDay(it.time)?.let { m -> m - nowMinute in 0..60 } == true }) put(1, Palette.teal)
+    }
+    Box(Modifier.fillMaxSize()) {
     androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
         when (val id = pages.getOrElse(page) { 0 }) {
             0 -> IdleFace(actions)
@@ -661,6 +678,8 @@ private fun IdlePages(actions: UiActions) {
                 PageBlob(Modifier.align(Alignment.BottomEnd).padding(end = 128.dp, bottom = 14.dp), actions)
             }
         }
+    }
+    if (pages.size > 1) PageDots(pages, pager.currentPage, badges, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
     }
 }
 
@@ -698,7 +717,8 @@ private fun AgendaPage(actions: UiActions) {
         }
         Spacer(Modifier.height(10.dp))
         if (day.items.isEmpty()) {
-            Body("Nothing on the agenda. $name fills this in with the morning brief, or ask \"what's on today?\"", Palette.muted)
+            EmptyState(EmptyArt.LAZY_DAY, "Nothing on today. $name fills this in with the morning brief,\nor ask \"what's on today?\"",
+                Modifier.fillMaxWidth().padding(top = 8.dp))
         }
         Column(Modifier.verticalScroll(scroll)) {
             if (day.items.isNotEmpty()) TodayTimeline(day.items, if (isToday) nowMin else null)
@@ -910,7 +930,14 @@ private fun HomelabPage(actions: UiActions) {
                         .padding(horizontal = 12.dp, vertical = 6.dp))
             }
         }
-        val h = lab ?: return@Column
+        val h = lab
+        if (h == null) {
+            if (!failed) Row(Modifier.fillMaxSize().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                ShimmerLines(5, Modifier.weight(1.1f))
+                ShimmerLines(4, Modifier.weight(1f))
+            }
+            return@Column
+        }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxSize()) {
             // Services: tap one to have Pixel look into it.
@@ -931,6 +958,8 @@ private fun HomelabPage(actions: UiActions) {
                         Text(m.uptime_24h?.let { "%.1f%%".format(it) } ?: "—", color = Palette.muted, fontSize = 16.sp)
                     }
                 }
+                if (h.overall == "up" && h.containers.all { it.state == "running" && it.health != "unhealthy" })
+                    EmptyState(EmptyArt.HAPPY_SERVER, "All quiet on the Latitude", Modifier.fillMaxWidth().padding(top = 12.dp))
             }
             Spacer(Modifier.width(24.dp))
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -1179,6 +1208,45 @@ private fun TextScreen(s: Screen.Text, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * The status chips folded into one small row of dots (Pixel link, server, laptop); tap it to open
+ * the full chips for a few seconds. A problem shows in full on its own (in colour) either way.
+ */
+@Composable
+private fun RowScope.StatusTray(actions: UiActions) {
+    var open by remember { mutableStateOf(false) }
+    LaunchedEffect(open) { if (open) { delay(10_000); open = false } }
+    val link by GadgetState.link.collectAsState()
+    val micOff by GadgetState.micOff.collectAsState()
+    val showPill by GadgetState.serverPill.collectAsState()
+    val server by GadgetState.server.collectAsState()
+    val laptop by GadgetState.laptopStatus.collectAsState()
+    val quiet by GadgetState.quiet.collectAsState()
+    val guest = rememberGuest()
+    val linkProblem = micOff || link != Link.CONNECTED
+    val serverProblem = showPill && server?.overall?.let { it != "up" } == true
+    androidx.compose.animation.AnimatedContent(open, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(200)) }, label = "tray") { full ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (full || linkProblem) StatusChip(Modifier)
+            if (showPill && (full || serverProblem)) ServerLight(Modifier)
+            if (full) LaptopChip(Modifier.weight(1f, fill = false), actions)
+            if (!full) {
+                // The folded tray: a dot each for what's fine.
+                Row(Modifier.glass(RoundedCornerShape(50)).clickable { open = true }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!linkProblem) Box(Modifier.size(8.dp).background(Palette.teal, CircleShape))
+                    if (showPill && !serverProblem) Box(Modifier.size(8.dp).background(Palette.teal, CircleShape))
+                    laptop?.takeIf { !guest && !quiet }?.let { l ->
+                        val low = l.batteryPercent != null && l.batteryPercent <= 15 && !l.charging
+                        Text("💻" + (l.batteryPercent?.let { " $it%" } ?: ""), color = if (low) Palette.coral else Palette.ink, fontSize = 12.sp)
+                    }
+                    Text("⋯", color = Palette.muted, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StatusChip(modifier: Modifier) {
     val link by GadgetState.link.collectAsState()
@@ -1257,7 +1325,7 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
                 Row(verticalAlignment = Alignment.Top) {
                     if (reply.isNotEmpty()) {
                         Column(Modifier.weight(1f).heightIn(max = if (compact) 56.dp else 150.dp).verticalScroll(rememberScrollState())) {
-                            Text(com.rusty.museecho.gadget.Markdown.toAnnotated(reply),
+                            Text(rememberReveal(remember(reply) { com.rusty.museecho.gadget.Markdown.toAnnotated(reply) }, Palette.ink.copy(alpha = 0.4f)),
                                 color = if (talk == Talk.ERROR) Palette.coral else Palette.ink,
                                 fontSize = if (compact) 15.sp else 20.sp, lineHeight = if (compact) 20.sp else 27.sp,
                                 maxLines = if (compact) 2 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
@@ -1344,8 +1412,25 @@ private fun TalkButton(modifier: Modifier, actions: UiActions) {
     val micOff by GadgetState.micOff.collectAsState()
     // Works offline too: the Echo answers the basics itself.
     val enabled = (link != Link.NOT_PAIRED && !micOff) || listening
+    val thinking = talk == Talk.SENDING || talk == Talk.WAITING
+    // The voice ring: waves rippling out with your voice while listening, a shimmer going round while Pixel thinks.
+    val ringPhase = if (listening || thinking) androidx.compose.animation.core.rememberInfiniteTransition(label = "ring")
+        .animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(tween(if (listening) 1400 else 1800, easing = androidx.compose.animation.core.LinearEasing)), label = "ringP").value
+        else 0f
     Box(
-        modifier.size(84.dp).scale(1f + level * 0.35f).clip(CircleShape)
+        modifier.size(84.dp).drawBehind {
+            val c = center
+            val r = size.minDimension / 2
+            if (listening) for (k in 0 until 3) {
+                val p = (ringPhase + k / 3f) % 1f
+                val rr = r * (1.02f + p * (0.25f + level * 0.9f))
+                drawCircle(Palette.coral.copy(alpha = (1f - p) * (0.35f + level * 0.5f)), rr, c, style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx()))
+            }
+            if (thinking) rotate(ringPhase * 360f) {
+                drawArc(Brush.sweepGradient(listOf(Color.Transparent, Palette.teal.copy(alpha = 0.9f), Palette.violet.copy(alpha = 0.9f), Color.Transparent), c),
+                    0f, 300f, false, c - Offset(r * 1.12f, r * 1.12f), Size(r * 2.24f, r * 2.24f), style = androidx.compose.ui.graphics.drawscope.Stroke(4.dp.toPx()))
+            }
+        }.scale(1f + level * 0.35f).clip(CircleShape)
             .background(if (listening) Palette.coral else if (enabled) Palette.violet else Palette.card)
             .clickable(enabled = enabled, onClick = actions::toggleTalk),
         contentAlignment = Alignment.Center,
@@ -1677,8 +1762,8 @@ private fun InternetBanner() {
     val internet by GadgetState.internet.collectAsState()
     AnimatedVisibility(internet == false, enter = fadeIn() + androidx.compose.animation.expandVertically(),
         exit = fadeOut() + androidx.compose.animation.shrinkVertically()) {
-        Text("📡 No internet: answering offline", color = Palette.night, fontSize = 14.sp,
-            modifier = Modifier.padding(bottom = 4.dp).background(Palette.muted, RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 5.dp))
+        Text("📡 No internet: answering offline", color = Palette.amber, fontSize = 14.sp,
+            modifier = Modifier.padding(bottom = 4.dp).glass(RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 5.dp))
     }
 }
 

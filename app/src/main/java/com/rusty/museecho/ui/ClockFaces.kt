@@ -37,6 +37,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,6 +70,11 @@ enum class ClockFace(val label: String, val blurb: String) {
 @Composable
 fun ClockFaceView(face: ClockFace, now: Date, modifier: Modifier = Modifier, scale: Float = 1f, compact: Boolean = false) {
     val s = if (compact) scale * 0.86f else scale
+    HourSparkle(now.cal().get(Calendar.HOUR_OF_DAY)) { ClockFaceBody(face, now, modifier, s) }
+}
+
+@Composable
+private fun ClockFaceBody(face: ClockFace, now: Date, modifier: Modifier, s: Float) {
     when (face) {
         ClockFace.CLASSIC -> ClassicFace(now, modifier, s)
         ClockFace.ANALOG -> AnalogFace(now, modifier, s)
@@ -90,7 +96,7 @@ private fun Date.pm(): Boolean = cal().get(Calendar.AM_PM) == Calendar.PM
 
 @Composable
 private fun ClassicFace(now: Date, modifier: Modifier, s: Float) {
-    Text("${now.hour12()}:%02d".format(now.minute()), modifier, color = Palette.ink, fontSize = (84 * s).sp, fontWeight = FontWeight.Light)
+    RollingText("${now.hour12()}:%02d".format(now.minute()), TextStyle(color = Palette.ink, fontSize = (84 * s).sp, fontWeight = FontWeight.Light), modifier)
 }
 
 // -- Analog ------------------------------------------------------------------------------
@@ -166,7 +172,10 @@ private fun WordsFace(now: Date, modifier: Modifier, s: Float) {
         }
     }
     Column(modifier) {
-        Text(styled, fontSize = (40 * s).sp, lineHeight = (46 * s).sp, fontWeight = FontWeight.Light)
+        // The words cross-fade when they change.
+        androidx.compose.animation.Crossfade(styled, animationSpec = androidx.compose.animation.core.tween(700), label = "words") { st ->
+            Text(st, fontSize = (40 * s).sp, lineHeight = (46 * s).sp, fontWeight = FontWeight.Light)
+        }
         Text("${now.hour12()}:%02d".format(now.minute()), color = Palette.amber.copy(alpha = 0.8f), fontSize = (16 * s).sp,
             modifier = Modifier.padding(top = (4 * s).dp))
     }
@@ -178,9 +187,9 @@ private fun WordsFace(now: Date, modifier: Modifier, s: Float) {
 private fun StackedFace(now: Date, modifier: Modifier, s: Float) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Column {
-            Text("%02d".format(now.hour12()), color = Palette.ink, fontSize = (70 * s).sp, lineHeight = (64 * s).sp, fontWeight = FontWeight.Thin)
-            Text("%02d".format(now.minute()), color = Palette.violet.copy(alpha = 0.95f).let { androidx.compose.ui.graphics.lerp(it, Palette.ink, 0.25f) },
-                fontSize = (70 * s).sp, lineHeight = (64 * s).sp, fontWeight = FontWeight.Light)
+            RollingText("%02d".format(now.hour12()), TextStyle(color = Palette.ink, fontSize = (70 * s).sp, lineHeight = (64 * s).sp, fontWeight = FontWeight.Thin))
+            RollingText("%02d".format(now.minute()), TextStyle(color = Palette.violet.copy(alpha = 0.95f).let { androidx.compose.ui.graphics.lerp(it, Palette.ink, 0.25f) },
+                fontSize = (70 * s).sp, lineHeight = (64 * s).sp, fontWeight = FontWeight.Light))
         }
         Column(Modifier.padding(start = (10 * s).dp), verticalArrangement = Arrangement.spacedBy((4 * s).dp)) {
             Text(if (now.pm()) "PM" else "AM", color = Palette.amber, fontSize = (14 * s).sp, fontWeight = FontWeight.SemiBold)

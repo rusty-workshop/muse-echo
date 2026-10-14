@@ -167,7 +167,7 @@ internal fun LaptopPage(actions: UiActions) {
                 Text("Shortcuts", color = Palette.muted, fontSize = 13.sp)
                 val list = shortcuts
                 when {
-                    list == null -> Text("Loading…", color = Palette.muted, fontSize = 14.sp)
+                    list == null -> ShimmerLines(3, Modifier.padding(top = 8.dp))
                     list.isEmpty() -> Text("No shortcuts (or the laptop is away).", color = Palette.muted, fontSize = 14.sp)
                     else -> FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         list.forEach { (key, label) ->
