@@ -77,6 +77,11 @@ internal object Palette {
 
     /** The weather's colour the accents lean toward (bluer in rain, golden in sun, cool white in snow); null = none. */
     var weatherTint by mutableStateOf<Color?>(null)
+
+    /** Awake in the dark at night: everything turns dim red (easy on the eyes, keeps night vision). */
+    var nightRed by mutableStateOf(false)
+    private val RedInk = Color(0xFFB8463A)
+    private val RedMuted = Color(0xFF6E2A24)
     private fun tint(c: Color, by: Float) = weatherTint?.let { lerp(c, it, by) } ?: c
 
     private fun bg(c: Color, toward: Float, darken: Float): Color = when {
@@ -87,11 +92,11 @@ internal object Palette {
 
     val night get() = bg(theme.night, 0.30f, 0.6f)
     val dusk get() = bg(theme.dusk, 0.28f, 0.5f)
-    val ink get() = if (lift < 0.5f) lerp(theme.ink, theme.muted, (0.5f - lift) * 2f * 0.3f) else theme.ink
-    val muted get() = soften(theme.muted, 0.15f)
-    val violet get() = tint(soften(theme.violet, 0.2f), 0.22f)
-    val coral get() = soften(theme.coral, 0.2f)
-    val teal get() = tint(soften(theme.teal, 0.2f), 0.18f)
-    val amber get() = tint(soften(theme.amber, 0.2f), 0.12f)
+    val ink get() = if (nightRed) RedInk else if (lift < 0.5f) lerp(theme.ink, theme.muted, (0.5f - lift) * 2f * 0.3f) else theme.ink
+    val muted get() = if (nightRed) RedMuted else soften(theme.muted, 0.15f)
+    val violet get() = if (nightRed) Color(0xFF8E3328) else tint(soften(theme.violet, 0.2f), 0.22f)
+    val coral get() = if (nightRed) Color(0xFFC4473A) else soften(theme.coral, 0.2f)
+    val teal get() = if (nightRed) Color(0xFF9A3D31) else tint(soften(theme.teal, 0.2f), 0.18f)
+    val amber get() = if (nightRed) Color(0xFFA8432F) else tint(soften(theme.amber, 0.2f), 0.12f)
     val card get() = bg(theme.card, 0.25f, 0.4f)
 }

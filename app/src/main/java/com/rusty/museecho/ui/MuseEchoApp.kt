@@ -337,6 +337,7 @@ fun MuseEchoApp(actions: UiActions) {
                 }
             }
             Spotlight()
+            HoldRingOverlay()
             QuickActionRow(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 30.dp), actions)
             Captions(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 120.dp, bottom = 18.dp), actions)
             TalkButton(Modifier.align(Alignment.BottomEnd).padding(18.dp), actions)
@@ -377,6 +378,12 @@ fun MuseEchoApp(actions: UiActions) {
             val nightLight by GadgetState.nightLight.collectAsState()
             val nightGlow by androidx.compose.animation.core.animateFloatAsState(if (nightLight) 1f else 0f, tween(1200), label = "nightLight")
             if (nightGlow > 0.01f) Box(Modifier.fillMaxSize().background(Color(0xFFFF9A4D).copy(alpha = 0.22f * nightGlow)))
+            // Awake in the dark at night: everything turns dim red.
+            val quietNow by GadgetState.quiet.collectAsState()
+            val darkRoom by GadgetState.roomDark.collectAsState()
+            val asleepNow by GadgetState.asleep.collectAsState()
+            LaunchedEffect(quietNow, darkRoom, asleepNow) { Palette.nightRed = quietNow && darkRoom == true && !asleepNow }
+            Vignette()
             EdgeGlow()
             LevelOverlay(Modifier.align(Alignment.TopCenter).padding(top = 64.dp))
             StartupSplash()
@@ -435,6 +442,7 @@ private fun IdleFace(actions: UiActions) {
                             val c = Offset(blob.size.width / 2f, blob.size.height / 2f)
                             if ((inBlob - c).getDistance() < blob.size.width * 0.34f) {
                                 val start = change.position
+                                HoldRing.startMs = System.currentTimeMillis()
                                 val early = withTimeoutOrNull(HOLD_TO_TALK_MS) {
                                     while (true) {
                                         val c2 = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.firstOrNull() ?: continue
@@ -442,6 +450,7 @@ private fun IdleFace(actions: UiActions) {
                                     }
                                     @Suppress("UNREACHABLE_CODE") null
                                 }
+                                HoldRing.startMs = 0L
                                 if (early == null) {
                                     if (GadgetState.talk.value != Talk.LISTENING) actions.toggleTalk()
                                     do {
@@ -537,12 +546,19 @@ private fun IdleFace(actions: UiActions) {
             Spacer(Modifier.height(10.dp))
             // The how-to line fills the space only when there are no chips there.
             val hasThing = thingNow?.date == java.time.LocalDate.now().toString()
-            if (chipsShowing.isEmpty() && !hasThing || link != Link.CONNECTED) Text(
-                when (link) {
-                    Link.CONNECTED -> "Tap the mic to talk to $name"
-                    Link.NOT_PAIRED, Link.NO_TOKEN -> "Open setup (top right) to pair with $name"
-                    else -> "Connecting to $name…"
-                },
+            val internetUp by GadgetState.internet.collectAsState()
+            // Brief reconnects don't count: only after 20 seconds without Pixel.
+            var linkDownLong by remember { mutableStateOf(false) }
+            LaunchedEffect(link) { linkDownLong = false; if (link != Link.CONNECTED) { delay(20_000); linkDownLong = true } }
+            val trouble = when {
+                link == Link.NOT_PAIRED || link == Link.NO_TOKEN -> Trouble.NOT_PAIRED
+                link != Link.CONNECTED && linkDownLong -> Trouble.NO_PIXEL
+                internetUp == false -> Trouble.NO_INTERNET
+                else -> null
+            }
+            if (trouble != null) TroubleCard(trouble, name)
+            else if (chipsShowing.isEmpty() && !hasThing || link != Link.CONNECTED) Text(
+                if (link == Link.CONNECTED) "Tap the mic to talk to $name" else "Connecting to $name…",
                 color = Palette.muted.copy(alpha = 0.8f), fontSize = 15.sp,
             )
             BlobCards()
@@ -1222,16 +1238,32 @@ private fun ImageScreen(s: Screen.Image, onDismiss: () -> Unit) {
 
 @Composable
 private fun TextScreen(s: Screen.Text, onDismiss: () -> Unit) {
+    // A sheet of paper lifted off the dimmed screen: soft grain, a serif title, ink-dark text.
+    val paper = if (Palette.nightRed) Color(0xFF2A1210) else Color(0xFFF4EEE2)
+    val ink = if (Palette.nightRed) Palette.ink else Color(0xFF2B2622)
+    val grain = remember { List(260) { Triple(Math.random().toFloat(), Math.random().toFloat(), Math.random().toFloat()) } }
     Box(
-        Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Palette.dusk, Palette.night))).clickable(onClick = onDismiss)
-            .padding(start = 40.dp, end = 120.dp, top = 56.dp, bottom = 40.dp),
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable(onClick = onDismiss)
+            .padding(start = 48.dp, end = 130.dp, top = 52.dp, bottom = 36.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            if (s.title.isNotEmpty()) {
-                Text(s.title, color = Palette.amber, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(10.dp))
+        Box(
+            Modifier.widthIn(max = 700.dp).fillMaxWidth()
+                .graphicsLayer { rotationZ = -0.6f; shadowElevation = 18.dp.toPx(); shape = RoundedCornerShape(6.dp); clip = true }
+                .background(paper).drawBehind {
+                    // The paper's grain: faint flecks, the same every time.
+                    grain.forEach { (gx, gy, ga) -> drawCircle(Color(0xFF8A7A62).copy(alpha = 0.05f + 0.06f * ga), 1.1f, Offset(gx * size.width, gy * size.height)) }
+                }.padding(horizontal = 30.dp, vertical = 24.dp),
+        ) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (s.title.isNotEmpty()) {
+                    Text(s.title, color = if (Palette.nightRed) Palette.amber else Color(0xFF7A4A1E), fontSize = 28.sp,
+                        fontWeight = FontWeight.SemiBold, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif)
+                    Box(Modifier.padding(vertical = 10.dp).width(60.dp).height(2.dp).background(Color(0xFF7A4A1E).copy(alpha = 0.4f)))
+                }
+                Text(s.body, color = ink, fontSize = if (s.body.length < 120) 30.sp else 22.sp, lineHeight = if (s.body.length < 120) 38.sp else 30.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif)
             }
-            Text(s.body, color = Palette.ink, fontSize = if (s.body.length < 120) 34.sp else 24.sp, lineHeight = if (s.body.length < 120) 42.sp else 32.sp)
         }
     }
 }
@@ -1334,7 +1366,16 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
     val visible = (heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE) && !stepAside
     AnimatedVisibility(visible, modifier, enter = fadeIn(), exit = fadeOut()) {
         Column(
-            Modifier.then(if (compact) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()).animateContentSize().glass(RoundedCornerShape(18.dp))
+            Modifier.then(if (compact) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()).animateContentSize()
+                .then(if (!compact) Modifier.drawBehind {
+                    // The bubble's tail, up toward Puff (above and to the left on the home screen).
+                    val tail = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(46.dp.toPx(), 1.dp.toPx()); lineTo(30.dp.toPx(), -18.dp.toPx()); lineTo(72.dp.toPx(), 1.dp.toPx()); close()
+                    }
+                    drawPath(tail, Palette.card.copy(alpha = 0.55f))
+                    drawPath(tail, Color.White.copy(alpha = 0.14f), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                } else Modifier)
+                .glass(RoundedCornerShape(18.dp))
                 .clickable(onClick = actions::clearCaptions).padding(horizontal = 18.dp, vertical = 12.dp),
         ) {
             val name = GadgetState.museName.value
@@ -1441,6 +1482,16 @@ private fun TalkButton(modifier: Modifier, actions: UiActions) {
     // Works offline too: the Echo answers the basics itself.
     val enabled = (link != Link.NOT_PAIRED && !micOff) || listening
     val thinking = talk == Talk.SENDING || talk == Talk.WAITING
+    var holdStart by remember { mutableStateOf(0L) }
+    var holdP by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(holdStart) {
+        holdP = 0f
+        if (holdStart == 0L) return@LaunchedEffect
+        while (holdP < 1f) {
+            androidx.compose.runtime.withFrameMillis { }
+            holdP = ((System.currentTimeMillis() - holdStart) / HOLD_TO_TALK_MS.toFloat()).coerceIn(0f, 1f)
+        }
+    }
     // The voice ring: waves rippling out with your voice while listening, a shimmer going round while Pixel thinks.
     val ringPhase = if (listening || thinking) androidx.compose.animation.core.rememberInfiniteTransition(label = "ring")
         .animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(tween(if (listening) 1400 else 1800, easing = androidx.compose.animation.core.LinearEasing)), label = "ringP").value
@@ -1458,9 +1509,27 @@ private fun TalkButton(modifier: Modifier, actions: UiActions) {
                 drawArc(Brush.sweepGradient(listOf(Color.Transparent, Palette.teal.copy(alpha = 0.9f), Palette.violet.copy(alpha = 0.9f), Color.Transparent), c),
                     0f, 300f, false, c - Offset(r * 1.12f, r * 1.12f), Size(r * 2.24f, r * 2.24f), style = androidx.compose.ui.graphics.drawscope.Stroke(4.dp.toPx()))
             }
+            // Holding: the ring fills, then it listens until you let go.
+            if (holdP > 0f && holdP < 1f) drawArc(Color.White.copy(alpha = 0.9f), -90f, 360f * holdP, false,
+                c - Offset(r * 1.1f, r * 1.1f), Size(r * 2.2f, r * 2.2f), style = androidx.compose.ui.graphics.drawscope.Stroke(4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
         }.scale(1f + level * 0.35f).clip(CircleShape)
             .background(if (listening) Palette.coral else if (enabled) Palette.violet else Palette.card)
-            .clickable(enabled = enabled, onClick = actions::toggleTalk),
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown()
+                    holdStart = System.currentTimeMillis()
+                    val up = withTimeoutOrNull(HOLD_TO_TALK_MS) { waitForUpOrCancellation() }
+                    holdStart = 0L
+                    if (up != null) actions.toggleTalk()
+                    else {
+                        // Held: talk while held, send on letting go (walkie-talkie, like holding Puff).
+                        if (GadgetState.talk.value != Talk.LISTENING) actions.toggleTalk()
+                        waitForUpOrCancellation()
+                        if (GadgetState.talk.value == Talk.LISTENING) actions.toggleTalk()
+                    }
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(if (listening) Icons.Filled.Stop else if (micOff) Icons.Filled.MicOff else Icons.Filled.Mic, if (listening) "Send" else "Talk",

@@ -39,6 +39,7 @@ enum class AppBackground(val label: String, val blurb: String) {
     CLOUDS("Clouds", "Faint clouds sliding across"),
     PHOTO("Photo", "One of your frame photos, blurred and dimmed, changing hourly"),
     LAPTOP_WALLPAPER("Laptop wallpaper", "The laptop's current wallpaper, blurred and dimmed"),
+    LAVA("Lava lamp", "Big soft blobs of colour slowly rising, merging and sinking"),
     ;
 
     companion object {
@@ -56,7 +57,7 @@ private const val TAU = (2 * PI).toFloat()
 internal fun AppBackgroundView(style: AppBackground, actions: UiActions) {
     when (style) {
         AppBackground.PLAIN -> {}
-        AppBackground.AURORA, AppBackground.CLOUDS -> {
+        AppBackground.AURORA, AppBackground.CLOUDS, AppBackground.LAVA -> {
             var t by remember { mutableFloatStateOf(0f) }
             LaunchedEffect(style) {
                 val start = System.currentTimeMillis()
@@ -66,7 +67,20 @@ internal fun AppBackgroundView(style: AppBackground, actions: UiActions) {
                 }
             }
             Canvas(Modifier.fillMaxSize()) {
-                if (style == AppBackground.AURORA) {
+                if (style == AppBackground.LAVA) {
+                    // Blobs rising and sinking on slow cycles; where they overlap they glow together.
+                    val cols = listOf(Palette.violet, Palette.coral, Palette.amber, Palette.teal, Palette.violet)
+                    cols.forEachIndexed { i, col ->
+                        val cycle = 0.006f + i * 0.0013f
+                        val ph = (t * cycle + i * 0.23f) % 1f
+                        // Up and back down, lingering at the ends like warm wax.
+                        val h = (1f - cos(ph * TAU)) / 2f
+                        val x = size.width * (0.15f + 0.7f * ((i * 0.618f) % 1f)) + sin(t * 0.03f + i) * 40f
+                        val y = size.height * (1.05f - 1.1f * h)
+                        val r = size.minDimension * (0.28f + 0.08f * sin(t * 0.05f + i * 2f))
+                        drawCircle(Brush.radialGradient(listOf(col.copy(alpha = 0.26f), col.copy(alpha = 0.10f), Color.Transparent), Offset(x, y), r), r, Offset(x, y))
+                    }
+                } else if (style == AppBackground.AURORA) {
                     // Three big, soft glows on slow, different orbits.
                     val glows = listOf(
                         Triple(Palette.violet, 0.021f, 0f),

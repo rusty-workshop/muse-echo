@@ -133,3 +133,102 @@ internal fun Spotlight() {
         }
     }
 }
+
+// -- Friendly trouble screens --------------------------------------------------------------
+
+internal enum class Trouble { NOT_PAIRED, NO_PIXEL, NO_INTERNET }
+
+/** A calm card for when something's wrong: a small drawing, what's happening, and what still works. */
+@Composable
+internal fun TroubleCard(kind: Trouble, name: String) {
+    val clock = rememberIconClock()
+    val (title, body) = when (kind) {
+        Trouble.NOT_PAIRED -> "Not paired with $name yet" to "Open Setup (the gear, top right) to pair. The clock, timers and pages all work meanwhile."
+        Trouble.NO_PIXEL -> "Can't reach $name right now" to "It keeps trying by itself. The clock, timers and offline answers still work."
+        Trouble.NO_INTERNET -> "No internet" to "The Wi-Fi is up but the internet isn't. Offline answers still work."
+    }
+    Row(Modifier.padding(top = 4.dp).glass(RoundedCornerShape(16.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Canvas(Modifier.width(64.dp).height(48.dp)) {
+            val t = clock.value
+            if (kind == Trouble.NO_INTERNET) {
+                // A cloud with a dotted, broken line under it.
+                val c = Offset(size.width / 2, size.height * 0.38f)
+                for ((dx, r) in listOf(-10f to 9f, 2f to 12f, 13f to 8f)) drawCircle(Palette.muted.copy(alpha = 0.7f), r.dp.toPx() * 0.9f, c + Offset(dx.dp.toPx(), 0f))
+                for (k in 0 until 4) if ((t * 2).toInt() % 4 != k) drawCircle(Palette.amber, 2.dp.toPx(), Offset(size.width * (0.2f + k * 0.2f), size.height * 0.85f))
+            } else {
+                // Two plugs reaching for each other, a little spark trying to jump the gap.
+                val gap = 6.dp.toPx() + 3.dp.toPx() * kotlin.math.sin(t * 2f)
+                val mid = size.height / 2
+                drawRoundRect(Palette.muted, Offset(0f, mid - 7.dp.toPx()), androidx.compose.ui.geometry.Size(size.width / 2 - gap, 14.dp.toPx()),
+                    androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
+                drawRoundRect(Palette.muted, Offset(size.width / 2 + gap, mid - 7.dp.toPx()), androidx.compose.ui.geometry.Size(size.width / 2 - gap, 14.dp.toPx()),
+                    androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
+                for (k in listOf(-1f, 1f)) drawLine(Palette.muted, Offset(size.width / 2 - gap, mid + k * 3.dp.toPx()), Offset(size.width / 2 - gap + 4.dp.toPx(), mid + k * 3.dp.toPx()), 2.dp.toPx())
+                if ((t * 3).toInt() % 3 == 0) drawCircle(Palette.amber, 2.5f.dp.toPx(), Offset(size.width / 2, mid))
+            }
+        }
+        Column(Modifier.padding(start = 12.dp)) {
+            Text(title, color = Palette.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(body, color = Palette.muted, fontSize = 13.sp, lineHeight = 17.sp)
+        }
+    }
+}
+
+// -- Breathing vignette --------------------------------------------------------------------
+
+/** When nothing's happening for a minute, the corners darken very slightly and breathe. */
+@Composable
+internal fun Vignette() {
+    val asleep by GadgetState.asleep.collectAsState()
+    val talk by GadgetState.talk.collectAsState()
+    var idle by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            idle = System.currentTimeMillis() - GadgetState.lastTouch > 60_000 && talk == Talk.IDLE
+            delay(5_000)
+        }
+    }
+    val on by animateFloatAsState(if (idle && !asleep) 1f else 0f, tween(3_000), label = "vignette")
+    if (on <= 0.01f) return
+    // Slow breathing (8 s), stepped on the shared 200 ms beat: smooth enough at this speed, and cheap.
+    var t by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) { while (true) { awaitBeat(200); t = System.currentTimeMillis() / 1000f } }
+    Canvas(Modifier.fillMaxSize()) {
+        val breath = 0.5f + 0.5f * kotlin.math.sin(t * (2 * Math.PI.toFloat() / 8f))
+        val a = on * (0.16f + 0.10f * breath)
+        drawRect(Brush.radialGradient(0f to Color.Transparent, 0.62f to Color.Transparent, 1f to Color.Black.copy(alpha = a),
+            center = Offset(size.width / 2, size.height / 2), radius = size.maxDimension * 0.62f))
+    }
+}
+
+// -- Hold-to-talk ring -----------------------------------------------------------------------
+
+/** When a press-and-hold on Puff started (0 = none), for the ring that fills before it listens. */
+internal object HoldRing {
+    var startMs by androidx.compose.runtime.mutableLongStateOf(0L)
+    const val HOLD_MS = 380L
+}
+
+/** The ring filling around Puff while you hold it, until it starts listening. */
+@Composable
+internal fun HoldRingOverlay() {
+    val start = HoldRing.startMs
+    var p by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(start) {
+        p = 0f
+        if (start == 0L) return@LaunchedEffect
+        while (p < 1f) {
+            androidx.compose.runtime.withFrameMillis { }
+            p = ((System.currentTimeMillis() - start) / HoldRing.HOLD_MS.toFloat()).coerceIn(0f, 1f)
+        }
+    }
+    val puff = GadgetState.blobBounds[0] ?: return
+    if (start == 0L) return
+    Canvas(Modifier.fillMaxSize()) {
+        val c = Offset(puff.exactCenterX(), puff.exactCenterY())
+        val r = puff.width() * 0.36f
+        drawCircle(Color.White.copy(alpha = 0.12f), r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(5.dp.toPx()))
+        drawArc(Palette.coral, -90f, 360f * p, false, c - Offset(r, r), androidx.compose.ui.geometry.Size(r * 2, r * 2),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+    }
+}

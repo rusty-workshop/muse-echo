@@ -27,6 +27,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
@@ -60,6 +62,7 @@ enum class ClockFace(val label: String, val blurb: String) {
     TERMINAL("Terminal", "A prompt with a blinking cursor"),
     LCD("Retro LCD", "Glowing seven-segment digits, like an old alarm clock"),
     NIXIE("Nixie tubes", "Orange glowing numerals in glass tubes"),
+    SUNPATH("Sun path", "The sun (or moon) where it really is on its arc today, with the time"),
     ;
 
     companion object {
@@ -75,7 +78,17 @@ enum class ClockFace(val label: String, val blurb: String) {
 @Composable
 fun ClockFaceView(face: ClockFace, now: Date, modifier: Modifier = Modifier, scale: Float = 1f, compact: Boolean = false) {
     val s = if (compact) scale * 0.86f else scale
-    HourSparkle(now.cal().get(Calendar.HOUR_OF_DAY)) { ClockFaceBody(face, now, modifier, s) }
+    HourSparkle(now.cal().get(Calendar.HOUR_OF_DAY)) {
+        // Switching faces: the old one fades and grows away as the new one settles in.
+        AnimatedContent(
+            targetState = face,
+            transitionSpec = {
+                (fadeIn(tween(600)) + androidx.compose.animation.scaleIn(tween(600), initialScale = 0.85f)) togetherWith
+                    (fadeOut(tween(400)) + androidx.compose.animation.scaleOut(tween(400), targetScale = 1.12f))
+            },
+            label = "face",
+        ) { f -> ClockFaceBody(f, now, modifier, s) }
+    }
 }
 
 @Composable
@@ -90,6 +103,7 @@ private fun ClockFaceBody(face: ClockFace, now: Date, modifier: Modifier, s: Flo
         ClockFace.TERMINAL -> TerminalFace(now, modifier, s)
         ClockFace.LCD -> LcdFace(now, modifier, s)
         ClockFace.NIXIE -> NixieFace(now, modifier, s)
+        ClockFace.SUNPATH -> SunPathFace(now, modifier, s)
     }
 }
 
@@ -389,5 +403,69 @@ private fun NixieFace(now: Date, modifier: Modifier, s: Float) {
         }
         NixieTube(mm[0], s)
         NixieTube(mm[1], s)
+    }
+}
+
+// -- Sun path ----------------------------------------------------------------------------
+
+/**
+ * Today's arc from sunrise to sunset with the sun where it really is along it (at night, the
+ * moon along a lower arc from sunset to sunrise), the two times at the ends and the time below.
+ */
+@Composable
+private fun SunPathFace(now: Date, modifier: Modifier, s: Float) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val today = java.time.LocalDate.now()
+    val sun = remember(today) {
+        val p = com.rusty.museecho.gadget.Prefs(ctx)
+        com.rusty.museecho.gadget.LifeMath.sunTimes(p.weatherLat, p.weatherLon, today, java.time.ZoneId.systemDefault()) ?: (6 * 60 + 30 to 19 * 60)
+    }
+    val (rise, set) = sun
+    val nowMin = now.cal().let { it.get(Calendar.HOUR_OF_DAY) * 60 + it.get(Calendar.MINUTE) }
+    val day = nowMin in rise until set
+    val frac = if (day) (nowMin - rise).toFloat() / (set - rise)
+        else ((nowMin - set + 1440) % 1440).toFloat() / (1440 - (set - rise))
+    fun hm(m: Int) = "%d:%02d".format(((m / 60) % 12).let { if (it == 0) 12 else it }, m % 60)
+    val tm = androidx.compose.ui.text.rememberTextMeasurer()
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        androidx.compose.foundation.Canvas(Modifier.width((280 * s).dp).height((96 * s).dp)) {
+            val left = androidx.compose.ui.geometry.Offset(size.width * 0.06f, size.height * 0.92f)
+            val right = androidx.compose.ui.geometry.Offset(size.width * 0.94f, size.height * 0.92f)
+            val peak = size.height * 0.08f
+            fun arcAt(f: Float): androidx.compose.ui.geometry.Offset {
+                val x = left.x + (right.x - left.x) * f
+                // A smooth hump: highest at noon.
+                val y = left.y - (left.y - peak) * kotlin.math.sin(f * Math.PI.toFloat())
+                return androidx.compose.ui.geometry.Offset(x, y)
+            }
+            // The horizon and the day's arc (the part already travelled brighter).
+            drawLine(Palette.muted.copy(alpha = 0.4f), androidx.compose.ui.geometry.Offset(0f, left.y), androidx.compose.ui.geometry.Offset(size.width, left.y), 1.5f.dp.toPx())
+            val steps = 40
+            for (k in 0 until steps) {
+                val f0 = k / steps.toFloat(); val f1 = (k + 1) / steps.toFloat()
+                val done = day && f1 <= frac
+                drawLine((if (done) Palette.amber else Palette.muted).copy(alpha = if (done) 0.85f else 0.3f), arcAt(f0), arcAt(f1), 2.dp.toPx(),
+                    pathEffect = if (done) null else androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+            }
+            if (day) {
+                val p = arcAt(frac)
+                drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(listOf(androidx.compose.ui.graphics.Color(0xFFFFC94D).copy(alpha = 0.45f), androidx.compose.ui.graphics.Color.Transparent), p, 26.dp.toPx()), 26.dp.toPx(), p)
+                drawCircle(androidx.compose.ui.graphics.Color(0xFFFFC94D), 9.dp.toPx(), p)
+            } else {
+                // The moon on a shallow arc below the horizon line's height.
+                val x = left.x + (right.x - left.x) * frac
+                val y = left.y - (left.y - size.height * 0.45f) * kotlin.math.sin(frac * Math.PI.toFloat())
+                val p = androidx.compose.ui.geometry.Offset(x, y)
+                drawCircle(androidx.compose.ui.graphics.Color(0xFFE8E2C8), 8.dp.toPx(), p)
+                drawCircle(Palette.night, 7.dp.toPx(), p + androidx.compose.ui.geometry.Offset(4.dp.toPx(), -2.dp.toPx()))
+            }
+            val small = androidx.compose.ui.text.TextStyle(color = Palette.muted, fontSize = (12 * s).sp)
+            val r1 = tm.measure("↑ " + hm(rise), small)
+            val r2 = tm.measure("↓ " + hm(set), small)
+            drawText(r1, topLeft = androidx.compose.ui.geometry.Offset(0f, left.y - r1.size.height - 4.dp.toPx()))
+            drawText(r2, topLeft = androidx.compose.ui.geometry.Offset(size.width - r2.size.width, left.y - r2.size.height - 4.dp.toPx()))
+        }
+        RollingText("${now.hour12()}:%02d".format(now.minute()) + if (now.pm()) " pm" else " am",
+            TextStyle(color = Palette.ink, fontSize = (40 * s).sp, fontWeight = FontWeight.Light))
     }
 }
