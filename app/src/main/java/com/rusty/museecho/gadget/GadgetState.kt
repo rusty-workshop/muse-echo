@@ -633,6 +633,15 @@ object GadgetState {
     @Volatile
     var agendaToday: () -> List<com.rusty.museecho.integrations.AgendaItem> = { emptyList() }
 
+    /** The look settings the screens follow (from Prefs). */
+    data class Looks(val dayNight: Boolean = true, val ambience: Boolean = true, val userName: String = "Rusty")
+    private val _looks = MutableStateFlow(Looks())
+    val looks: StateFlow<Looks> = _looks.asStateFlow()
+
+    fun setLooks(p: Prefs) {
+        _looks.value = Looks(p.dayNightLook, p.ambience, p.userName)
+    }
+
     /** Night light: a tap in a dark room at night gives a soft warm glow (and a drowsy Puff) for a couple of minutes. */
     private val _nightLight = MutableStateFlow(false)
     val nightLight: StateFlow<Boolean> = _nightLight.asStateFlow()

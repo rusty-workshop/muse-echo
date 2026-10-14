@@ -165,7 +165,7 @@ class Weather(private val http: OkHttpClient = OkHttpClient.Builder().callTimeou
                     if (ms < now - 3_600_000L) return@mapNotNull null
                     HourPoint(ms, start.hour, Math.round(num(temps.getOrNull(i)) ?: return@mapNotNull null).toInt(),
                         (num(rain.getOrNull(i)) ?: 0.0).toInt(), (num(codes.getOrNull(i)) ?: -1.0).toInt())
-                }.take(25)
+                }.take(49)
                 val daily = root["daily"] as JsonObject
                 val days = arr(daily, "time").mapIndexed { i, d ->
                     DayPoint((d as JsonPrimitive).content,

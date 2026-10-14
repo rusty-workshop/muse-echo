@@ -8,7 +8,9 @@ import kotlin.math.exp
 import kotlin.math.sin
 
 /** The blob's little noises. */
-enum class BlobSound { TAP, HOP, YAWN, CELEBRATE, WAVE, STARTLE, NOD, SHAKE, WINK, HICCUP, EARS }
+enum class BlobSound { TAP, HOP, YAWN, CELEBRATE, WAVE, STARTLE, NOD, SHAKE, WINK, HICCUP, EARS,
+    /** Soft UI sounds (their own switch): a touch, a page swipe, a card appearing. */
+    UI_TAP, UI_WHOOSH, UI_CHIME }
 
 /**
  * Tiny synthesized chirps and boops (no sound files): short sine sweeps with a
@@ -65,6 +67,9 @@ class BlobSounds {
             BlobSound.WINK -> listOf(Note(1300.0, 1500.0, 60))
             BlobSound.HICCUP -> listOf(Note(700.0, 1100.0, 45))
             BlobSound.EARS -> listOf(Note(700.0, 950.0, 70, gap = 20), Note(950.0, 1150.0, 60))
+            BlobSound.UI_TAP -> listOf(Note(1150.0, 1000.0, 22))
+            BlobSound.UI_WHOOSH -> listOf(Note(900.0, 260.0, 170, wobble = 0.02))
+            BlobSound.UI_CHIME -> listOf(Note(880.0, 880.0, 90, gap = 10), Note(1320.0, 1330.0, 220))
         }
 
         /** Renders a sound to 16-bit PCM (pure: unit-testable). */

@@ -61,7 +61,7 @@ internal fun DiaryContent(modifier: Modifier) {
         }.getOrDefault(e.date)
         Text("Dear diary · $date", color = Palette.muted, fontSize = 14.sp, fontStyle = FontStyle.Italic,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
-        Box(Modifier.fillMaxWidth().weight(1f).background(Palette.card.copy(alpha = 0.7f), RoundedCornerShape(18.dp))) {
+        Box(Modifier.fillMaxWidth().weight(1f).glass(RoundedCornerShape(18.dp))) {
             Text(e.text, color = Palette.ink, fontSize = 16.sp, lineHeight = 23.sp,
                 modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp))
         }
@@ -87,7 +87,7 @@ internal fun DailyThingSign() {
     // Short on the chip (the icon says which kind it is); tap for the whole thing on a card.
     Text("${DayWriting.thingIcon(t.kind)} ${t.title}", color = Palette.teal, fontSize = 13.sp, maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50))
+        modifier = Modifier.glass(RoundedCornerShape(50))
             .clickable {
                 GadgetState.react(com.rusty.museecho.gadget.Reaction.HOP)
                 GadgetState.show(com.rusty.museecho.gadget.Screen.Text("${DayWriting.thingIcon(t.kind)} $kind: ${t.title}", t.text))

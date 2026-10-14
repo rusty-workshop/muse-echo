@@ -2,6 +2,8 @@ package com.rusty.museecho.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
@@ -65,13 +67,27 @@ internal fun desktopTheme(c: Map<String, String>): ThemeColors? {
  */
 internal object Palette {
     var theme by mutableStateOf(AppTheme.MIDNIGHT.colors)
-    val night get() = theme.night
-    val dusk get() = theme.dusk
-    val ink get() = theme.ink
-    val muted get() = theme.muted
-    val violet get() = theme.violet
-    val coral get() = theme.coral
-    val teal get() = theme.teal
-    val amber get() = theme.amber
-    val card get() = theme.card
+
+    /**
+     * The day / night look, from the room's light: 0.5 is the theme as designed, toward 1 (a bright
+     * room) the backgrounds lift and get airier, toward 0 (a dim room) everything gets deeper and
+     * lower-glare. Set by MainActivity from the light sensor.
+     */
+    var lift by mutableFloatStateOf(0.5f)
+
+    private fun bg(c: Color, toward: Float, darken: Float): Color = when {
+        lift > 0.5f -> lerp(c, lerp(c, theme.muted, toward), (lift - 0.5f) * 2f)
+        else -> lerp(c, Color.Black, (0.5f - lift) * 2f * darken)
+    }
+    private fun soften(c: Color, by: Float) = if (lift < 0.5f) lerp(c, theme.night, (0.5f - lift) * 2f * by) else c
+
+    val night get() = bg(theme.night, 0.30f, 0.6f)
+    val dusk get() = bg(theme.dusk, 0.28f, 0.5f)
+    val ink get() = if (lift < 0.5f) lerp(theme.ink, theme.muted, (0.5f - lift) * 2f * 0.3f) else theme.ink
+    val muted get() = soften(theme.muted, 0.15f)
+    val violet get() = soften(theme.violet, 0.2f)
+    val coral get() = soften(theme.coral, 0.2f)
+    val teal get() = soften(theme.teal, 0.2f)
+    val amber get() = soften(theme.amber, 0.2f)
+    val card get() = bg(theme.card, 0.25f, 0.4f)
 }

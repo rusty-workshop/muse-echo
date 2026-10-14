@@ -562,6 +562,10 @@ class Chores(
                 com.rusty.museecho.ui.HomePage.entries.forEach { put(it.name, if (it == com.rusty.museecho.ui.HomePage.BLOB) GadgetState.BlobCalled() else it.label) }
             })
             put("blob_friend", p.blobFriend)
+            put("day_night_look", p.dayNightLook)
+            put("ambience", p.ambience)
+            put("ui_sounds", p.uiSounds)
+            put("user_name", p.userName)
             put("puff_sniffles", p.puffSniffles)
             put("puff_away_sleepovers", p.puffAwaySleepovers)
             put("puff_house_build", p.puffHouseBuild)

@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
         // Screen-cleaning mode: every touch is ignored until it ends.
         if (GadgetState.cleaning()) return true
         if (ev.action == android.view.MotionEvent.ACTION_DOWN) {
+            if (!GadgetState.asleep.value) GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.UI_TAP)
             val away = System.currentTimeMillis() - GadgetState.lastTouch
             GadgetState.lastTouch = System.currentTimeMillis()
             GadgetState.lastHuman = System.currentTimeMillis()
@@ -238,6 +239,10 @@ class MainActivity : ComponentActivity() {
                     continue
                 }
                 smoothedLux = if (smoothedLux < 0f) lux else smoothedLux + (lux - smoothedLux) * 0.15f
+                // The day / night look: deep under ~6 lux (lamp-lit evenings read 12), airy by ~150 (daylight).
+                val lift = if (!GadgetState.looks.value.dayNight) 0.5f
+                    else ((kotlin.math.log10(smoothedLux + 1f) - kotlin.math.log10(6f)) / (kotlin.math.log10(150f) - kotlin.math.log10(6f))).coerceIn(0f, 1f)
+                if (kotlin.math.abs(lift - com.rusty.museecho.ui.Palette.lift) > 0.05f) com.rusty.museecho.ui.Palette.lift = lift
                 val target = (0.06f + 0.94f * (kotlin.math.log10(smoothedLux + 1f) / kotlin.math.log10(400f))).coerceIn(0.06f, 1f)
                 autoLevel = if (autoLevel < 0f) target else autoLevel + (target - autoLevel) * 0.12f
                 if (brightnessOverride == null) applyBrightness()

@@ -223,6 +223,7 @@ class GadgetService : Service() {
         scope.launch { reminders.value.collect { GadgetState.setReminders(it) } }
         scope.launch { assignments.value.collect { GadgetState.setAssignments(it.items) } }
         GadgetState.setGuestUntil(Prefs(this).guestUntil)
+        GadgetState.setLooks(Prefs(this))
         GadgetState.setFrameMarks(Prefs(this).frameFavs, Prefs(this).frameHidden)
         scope.launch { watchAlerts() }
         scope.launch { watchReminders() }
@@ -998,7 +999,8 @@ class GadgetService : Service() {
 
     /** Very quiet, and never while it could get in the way: quiet hours, talking, listening, music, ringing. */
     private fun playBlobSound(sound: BlobSound) {
-        if (!Prefs(this).blobSounds || isQuietNow() || GadgetState.speaking.value || GadgetState.ringing.value ||
+        val ui = sound.name.startsWith("UI_")
+        if (!(if (ui) Prefs(this).uiSounds else Prefs(this).blobSounds) || isQuietNow() || GadgetState.speaking.value || GadgetState.ringing.value ||
             GadgetState.talk.value == Talk.LISTENING || GadgetState.nowPlaying.value != null
         ) return
         blobSounds.play(sound)
@@ -1052,6 +1054,10 @@ class GadgetService : Service() {
         str("blob_name")?.let { v -> p.blobName = v; GadgetState.setBlobName(p.blobName); done += "blob_name" }
         bool("blob_room")?.let { v -> p.blobRoom = v; life.loadRoom(); done += "blob_room" }
         bool("blob_friend")?.let { v -> p.blobFriend = v; if (!v) life.endVisit(); done += "blob_friend" }
+        bool("day_night_look")?.let { v -> p.dayNightLook = v; GadgetState.setLooks(p); done += "day_night_look" }
+        bool("ambience")?.let { v -> p.ambience = v; GadgetState.setLooks(p); done += "ambience" }
+        bool("ui_sounds")?.let { v -> p.uiSounds = v; done += "ui_sounds" }
+        str("user_name")?.let { v -> p.userName = v; GadgetState.setLooks(p); done += "user_name" }
         bool("puff_sniffles")?.let { v -> p.puffSniffles = v; if (!v) life.friends.stopSniffles(); done += "puff_sniffles" }
         bool("puff_away_sleepovers")?.let { v -> p.puffAwaySleepovers = v; done += "puff_away_sleepovers" }
         bool("puff_house_build")?.let { v -> p.puffHouseBuild = v; done += "puff_house_build" }
@@ -2226,6 +2232,21 @@ class Prefs(context: Context) {
     var blobFriend: Boolean
         get() = prefs.getBoolean("blob_friend", true)
         set(v) = prefs.edit().putBoolean("blob_friend", v).apply()
+
+    /** Looks: the room's light shifts the UI lighter / deeper; faint drifting ambience; soft UI sounds. */
+    var dayNightLook: Boolean
+        get() = prefs.getBoolean("day_night_look", true)
+        set(v) = prefs.edit().putBoolean("day_night_look", v).apply()
+    var ambience: Boolean
+        get() = prefs.getBoolean("ambience", true)
+        set(v) = prefs.edit().putBoolean("ambience", v).apply()
+    var uiSounds: Boolean
+        get() = prefs.getBoolean("ui_sounds", false)
+        set(v) = prefs.edit().putBoolean("ui_sounds", v).apply()
+    /** What the greeting calls you. */
+    var userName: String
+        get() = prefs.getString("user_name", null) ?: "Rusty"
+        set(v) = prefs.edit().putString("user_name", v.trim().take(20)).apply()
 
     /** Puff's world extras that can be switched off: sniffly days, overnight stays at friends', new friends via a week-long house build. */
     var puffSniffles: Boolean

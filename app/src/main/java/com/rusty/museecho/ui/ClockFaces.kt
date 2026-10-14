@@ -185,7 +185,7 @@ private fun StackedFace(now: Date, modifier: Modifier, s: Float) {
         Column(Modifier.padding(start = (10 * s).dp), verticalArrangement = Arrangement.spacedBy((4 * s).dp)) {
             Text(if (now.pm()) "PM" else "AM", color = Palette.amber, fontSize = (14 * s).sp, fontWeight = FontWeight.SemiBold)
             // A thin bar filling up through the minute.
-            Box(Modifier.width((3 * s).dp).height((60 * s).dp).background(Palette.card, RoundedCornerShape(50))) {
+            Box(Modifier.width((3 * s).dp).height((60 * s).dp).glass(RoundedCornerShape(50))) {
                 Box(Modifier.width((3 * s).dp).height((60 * s * now.second() / 59f).dp).background(Palette.teal, RoundedCornerShape(50)))
             }
         }

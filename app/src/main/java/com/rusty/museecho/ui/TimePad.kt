@@ -83,7 +83,7 @@ private fun PadCard(actions: UiActions, onClose: () -> Unit) {
 
     Row(
         // The Echo's screen is about 800 x 400 dp: leave a margin of dimmed background to tap to close.
-        Modifier.width(680.dp).height(352.dp).background(Palette.card, RoundedCornerShape(26.dp))
+        Modifier.width(680.dp).height(352.dp).glass(RoundedCornerShape(26.dp))
             .clickable(enabled = false) {}.padding(18.dp),
         horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {

@@ -15,6 +15,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -69,6 +71,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toAndroidRect
 import androidx.compose.ui.layout.boundsInWindow
@@ -257,6 +260,9 @@ fun MuseEchoApp(actions: UiActions) {
             androidx.compose.animation.Crossfade(targetState = AppBackground.of(bgName), animationSpec = tween(800), label = "bg") { bg ->
                 AppBackgroundView(bg, actions)
             }
+            AmbientLayer()
+            // A soft chime when a card or picture comes up.
+            LaunchedEffect(screen) { if (screen !is Screen.Idle) GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.UI_CHIME) }
             // Pictures and cards fade and grow in; the clock eases back afterwards.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen,
@@ -353,6 +359,7 @@ fun MuseEchoApp(actions: UiActions) {
             val nightLight by GadgetState.nightLight.collectAsState()
             val nightGlow by androidx.compose.animation.core.animateFloatAsState(if (nightLight) 1f else 0f, tween(1200), label = "nightLight")
             if (nightGlow > 0.01f) Box(Modifier.fillMaxSize().background(Color(0xFFFF9A4D).copy(alpha = 0.22f * nightGlow)))
+            StartupSplash()
             CleaningOverlay()
         }
     }
@@ -474,6 +481,14 @@ private fun IdleFace(actions: UiActions) {
         Spacer(Modifier.width(if (hasNote) 20.dp else 36.dp))
         Column(Modifier.weight(1f)) {
             val faceName by GadgetState.clockFace.collectAsState()
+            // "Good evening, Rusty" and the date, set above the clock.
+            val looks by GadgetState.looks.collectAsState()
+            val hourNow = java.util.Calendar.getInstance().apply { time = now }.get(java.util.Calendar.HOUR_OF_DAY)
+            val greeting = when (hourNow) { in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; in 17..21 -> "Good evening"; else -> "Hello, night owl" }
+            Text(if (hourNow in 5..21) "$greeting, ${looks.userName}" else "$greeting 🌙", color = Palette.ink, fontSize = if (hasNote) 17.sp else 20.sp,
+                fontWeight = FontWeight.Medium)
+            Text(SimpleDateFormat("EEEE  ·  MMMM d", Locale.US).format(now).uppercase(), color = Palette.amber.copy(alpha = 0.85f), fontSize = 12.sp,
+                letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 4.dp))
             // Hold the clock for 3 seconds: the screen ignores touches for 30, so it can be wiped.
             ClockFaceView(ClockFace.of(faceName), now, compact = hasNote, modifier = Modifier.pointerInput(Unit) {
                 awaitEachGesture {
@@ -488,10 +503,11 @@ private fun IdleFace(actions: UiActions) {
                 }
             })
             if (faceName != ClockFace.CLASSIC.name) Spacer(Modifier.height(8.dp))
-            Text(SimpleDateFormat("EEEE, MMMM d", Locale.US).format(now), color = Palette.muted, fontSize = 20.sp)
             weather?.let { w ->
-                Text("${w.tempF}° ${w.summary}  ·  H ${w.highF}° L ${w.lowF}°", color = Palette.ink.copy(alpha = 0.85f), fontSize = 17.sp,
-                    modifier = Modifier.padding(top = 4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    WeatherIcon(skyOf(w.summary, hourNow !in 7..18), 28.dp)
+                    Text("  ${w.tempF}° ${w.summary}  ·  H ${w.highF}° L ${w.lowF}°", color = Palette.ink.copy(alpha = 0.85f), fontSize = 17.sp)
+                }
             }
             val line = glanceLine.text.takeIf { glanceLine.untilMs == 0L || now.time < glanceLine.untilMs }.orEmpty()
             if (line.isNotEmpty()) {
@@ -590,6 +606,12 @@ private fun IdlePages(actions: UiActions) {
     }
     val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { pages.size })
     LaunchedEffect(pager.currentPage, guest) { GadgetState.setIdlePage(pages.getOrElse(pager.currentPage) { 0 }) }
+    // A soft whoosh when a swipe lands on another page (not on start-up).
+    var lastSettled by remember { mutableStateOf(-1) }
+    LaunchedEffect(pager.settledPage) {
+        if (lastSettled >= 0 && lastSettled != pager.settledPage) GadgetState.chirp(com.rusty.museecho.gadget.BlobSound.UI_WHOOSH)
+        lastSettled = pager.settledPage
+    }
     val talk by GadgetState.talk.collectAsState()
     // Anything happening brings the clock back.
     LaunchedEffect(talk) { if (talk != Talk.IDLE) pager.animateScrollToPage(0) }
@@ -675,12 +697,7 @@ private fun AgendaPage(actions: UiActions) {
             Body("Nothing on the agenda. $name fills this in with the morning brief, or ask \"what's on today?\"", Palette.muted)
         }
         Column(Modifier.verticalScroll(scroll)) {
-            day.items.forEach { item ->
-                Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
-                    Text(item.time, color = Palette.teal, fontSize = 18.sp, modifier = Modifier.width(110.dp))
-                    Text(item.title, color = Palette.ink, fontSize = 20.sp, lineHeight = 26.sp)
-                }
-            }
+            if (day.items.isNotEmpty()) TodayTimeline(day.items, if (isToday) nowMin else null)
             // Schoolwork due soon.
             val work by GadgetState.assignments.collectAsState()
             if (work.isNotEmpty()) {
@@ -711,6 +728,57 @@ private fun AgendaPage(actions: UiActions) {
             }
         }
     }
+    }
+}
+
+/**
+ * Today as a timeline: a line down the left with a dot for each event, events that are over faded,
+ * and a glowing "now" marker between the last one that's started and the next.
+ */
+@Composable
+private fun TodayTimeline(items: List<com.rusty.museecho.integrations.AgendaItem>, nowMin: Int?) {
+    val mins = items.map { com.rusty.museecho.gadget.BlobBrain.minutesOfDay(it.time) }
+    // Where "now" goes: after the last event that has started (timed events only).
+    val nowAfter = if (nowMin == null) -2 else mins.indexOfLast { it != null && it <= nowMin }
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "now").animateFloat(0.45f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(tween(1400), androidx.compose.animation.core.RepeatMode.Reverse), label = "nowPulse")
+    @Composable
+    fun NowMarker() {
+        Row(Modifier.height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+            Canvas(Modifier.width(24.dp).fillMaxHeight()) {
+                drawCircle(Palette.amber.copy(alpha = 0.25f * pulse), 11.dp.toPx(), center)
+                drawCircle(Palette.amber, 5.dp.toPx(), center)
+            }
+            Box(Modifier.weight(1f).height(2.dp).background(Brush.horizontalGradient(listOf(Palette.amber.copy(alpha = pulse), Color.Transparent))))
+            Text("  Now · " + SimpleDateFormat("h:mm a", Locale.US).format(Date()), color = Palette.amber, fontSize = 14.sp)
+        }
+    }
+    Column {
+        if (nowAfter == -1) NowMarker()
+        items.forEachIndexed { i, item ->
+            val past = nowMin != null && mins[i]?.let { m ->
+                // Over once the next event has started (or an hour on, for the last one).
+                val next = mins.drop(i + 1).firstOrNull { it != null }
+                nowMin >= (next ?: (m + 60))
+            } == true
+            val alpha = if (past) 0.45f else 1f
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
+                // The line and this event's dot.
+                Canvas(Modifier.width(24.dp).fillMaxHeight()) {
+                    val x = size.width / 2
+                    drawLine(Palette.muted.copy(alpha = 0.35f), Offset(x, if (i == 0) 16.dp.toPx() else 0f),
+                        Offset(x, if (i == items.lastIndex) 16.dp.toPx() else size.height), 2.dp.toPx())
+                    drawCircle(if (past) Palette.muted else Palette.teal, 6.dp.toPx(), Offset(x, 16.dp.toPx()))
+                    if (!past) drawCircle(Palette.night, 2.5f.dp.toPx(), Offset(x, 16.dp.toPx()))
+                }
+                Column(Modifier.padding(start = 8.dp, top = 4.dp, bottom = 10.dp).alpha(alpha)) {
+                    Text(item.time.ifBlank { "All day" }, color = Palette.teal, fontSize = 15.sp)
+                    Text(item.title, color = Palette.ink, fontSize = 20.sp, lineHeight = 26.sp)
+                    if (item.location.isNotBlank()) Text("📍 ${item.location}", color = Palette.muted, fontSize = 13.sp)
+                }
+            }
+            if (i == nowAfter) NowMarker()
+        }
     }
 }
 
@@ -777,6 +845,7 @@ private fun HomelabPage(actions: UiActions) {
     val lab by GadgetState.homelab.collectAsState()
     var confirmRestart by remember { mutableStateOf<String?>(null) }
     var restartNote by remember { mutableStateOf<String?>(null) }
+    var restarting by remember { mutableStateOf(emptySet<String>()) }
     val scope = rememberCoroutineScope()
     // "Restart <container>?" — only after a press and hold, and only once confirmed.
     confirmRestart?.let { name ->
@@ -788,8 +857,11 @@ private fun HomelabPage(actions: UiActions) {
                 androidx.compose.material3.TextButton(onClick = {
                     confirmRestart = null
                     restartNote = "Restarting $name…"
+                    restarting = restarting + name
                     scope.launch {
                         val (ok, msg) = actions.restartContainer(name)
+                        delay(4_000)
+                        restarting = restarting - name
                         restartNote = if (ok) "✓ $name restarted" else "✗ $msg"
                         actions.homelab()?.let { GadgetState.setHomelab(it) }
                     }
@@ -829,7 +901,7 @@ private fun HomelabPage(actions: UiActions) {
                 Spacer(Modifier.weight(1f))
                 val day = java.text.SimpleDateFormat("MMM d", Locale.US).format(Date(at))
                 Text("📰 This week ($day)", color = Palette.ink, fontSize = 14.sp,
-                    modifier = Modifier.background(Palette.card, RoundedCornerShape(50))
+                    modifier = Modifier.glass(RoundedCornerShape(50))
                         .clickable { GadgetState.show(Screen.Text("This week on the Latitude", text)) }
                         .padding(horizontal = 12.dp, vertical = 6.dp))
             }
@@ -864,7 +936,7 @@ private fun HomelabPage(actions: UiActions) {
                     val color = when { p >= 0.9f -> Palette.coral; p >= 0.75f -> Palette.amber; else -> Palette.teal }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(label, color = Palette.muted, fontSize = 14.sp, modifier = Modifier.width(70.dp))
-                        Box(Modifier.weight(1f).height(8.dp).background(Palette.card, RoundedCornerShape(50))) {
+                        Box(Modifier.weight(1f).height(8.dp).glass(RoundedCornerShape(50))) {
                             Box(Modifier.fillMaxWidth(p).height(8.dp).background(color, RoundedCornerShape(50)))
                         }
                         Text(detail, color = Palette.ink, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp).width(80.dp))
@@ -888,14 +960,49 @@ private fun HomelabPage(actions: UiActions) {
 
                 Text("Containers  (press and hold to restart)", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
                 restartNote?.let { Text(it, color = Palette.teal, fontSize = 13.sp) }
-                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    h.containers.forEach { c ->
-                        val bad = c.state != "running" || c.health == "unhealthy"
-                        Text(c.name, color = Palette.night, fontSize = 12.sp,
-                            modifier = Modifier.background(if (bad) Palette.coral else Palette.teal.copy(alpha = 0.85f), RoundedCornerShape(50))
-                                .pointerInput(c.name) { detectTapGestures(onLongPress = { confirmRestart = c.name }) }
-                                .padding(horizontal = 9.dp, vertical = 3.dp))
+                ServerRack(h.containers, restarting) { confirmRestart = it }
+            }
+        }
+    }
+}
+
+/**
+ * The containers as a little server rack: one unit each, with a status light (green and flickering
+ * like activity when up, pulsing red when down or unhealthy, blinking amber while restarting).
+ * Press and hold a unit to restart it.
+ */
+@Composable
+private fun ServerRack(containers: List<com.rusty.museecho.integrations.HomelabContainer>, restarting: Set<String>, onRestart: (String) -> Unit) {
+    val clock = rememberIconClock()
+    Column(Modifier.fillMaxWidth().background(Color(0xFF15131C), RoundedCornerShape(8.dp))
+        .border(2.dp, Color(0xFF2E2A38), RoundedCornerShape(8.dp)).padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        containers.forEachIndexed { i, c ->
+            val state = when {
+                c.name in restarting || c.state == "restarting" || c.health == "starting" -> 2
+                c.state != "running" || c.health == "unhealthy" -> 1
+                else -> 0
+            }
+            Row(Modifier.fillMaxWidth().height(24.dp).background(Color(0xFF221F2C), RoundedCornerShape(3.dp))
+                .pointerInput(c.name) { detectTapGestures(onLongPress = { onRestart(c.name) }) }.padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Canvas(Modifier.size(width = 36.dp, height = 24.dp)) {
+                    val t = clock.value + i * 0.77f
+                    // Rack screws, then the light.
+                    drawCircle(Color(0xFF4A4458), 2.dp.toPx(), Offset(3.dp.toPx(), size.height / 2))
+                    val led = Offset(size.width - 8.dp.toPx(), size.height / 2)
+                    val (col, a) = when (state) {
+                        1 -> Palette.coral to (0.45f + 0.55f * kotlin.math.abs(kotlin.math.sin(t * 3f)))
+                        2 -> Palette.amber to (if ((t * 2.5f).toInt() % 2 == 0) 1f else 0.2f)
+                        else -> Color(0xFF5FE08A) to (if (kotlin.math.sin(t * 7.3f) * kotlin.math.sin(t * 3.1f) > 0.6f) 0.45f else 1f)
                     }
+                    drawCircle(col.copy(alpha = 0.25f * a), 6.dp.toPx(), led)
+                    drawCircle(col.copy(alpha = a), 3.dp.toPx(), led)
+                }
+                Text(c.name, color = if (state == 1) Palette.coral else Palette.ink.copy(alpha = 0.9f), fontSize = 13.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                // Vent slots on the right of each unit.
+                Canvas(Modifier.size(width = 30.dp, height = 24.dp)) {
+                    for (k in 0 until 4) drawLine(Color(0xFF3A3546), Offset(k * 7.dp.toPx() + 2.dp.toPx(), 7.dp.toPx()), Offset(k * 7.dp.toPx() + 2.dp.toPx(), size.height - 7.dp.toPx()), 2.dp.toPx())
                 }
             }
         }
@@ -916,7 +1023,7 @@ private fun ServerLight(modifier: Modifier) {
     }
     Column(modifier) {
         Row(
-            Modifier.background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50)).clickable { open = !open }
+            Modifier.glass(RoundedCornerShape(50)).clickable { open = !open }
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -925,7 +1032,7 @@ private fun ServerLight(modifier: Modifier) {
             Text(label, color = Palette.ink, fontSize = 13.sp)
         }
         if (open) {
-            Column(Modifier.padding(top = 6.dp).background(Palette.card, RoundedCornerShape(12.dp)).padding(10.dp)) {
+            Column(Modifier.padding(top = 6.dp).glass(RoundedCornerShape(12.dp)).padding(10.dp)) {
                 s.monitors.forEach { m ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(7.dp).background(when (m.status) {
@@ -960,7 +1067,7 @@ private fun UpdateChip(modifier: Modifier, actions: UiActions) {
 @Composable
 private fun NoteCard(note: com.rusty.museecho.integrations.PinnedNote, actions: UiActions) {
     Column(
-        Modifier.width(220.dp).heightIn(max = 300.dp).background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(16.dp))
+        Modifier.width(220.dp).heightIn(max = 300.dp).glass(RoundedCornerShape(16.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         if (note.title.isNotEmpty()) {
@@ -981,7 +1088,7 @@ private fun NowPlayingChip(modifier: Modifier, actions: UiActions) {
     val playing by GadgetState.nowPlaying.collectAsState()
     val title = playing ?: return
     Row(
-        modifier.background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50)).padding(start = 12.dp, end = 4.dp),
+        modifier.glass(RoundedCornerShape(50)).padding(start = 12.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("♪  $title", color = Palette.ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -1017,7 +1124,7 @@ private fun HistoryPanel(actions: UiActions, onClose: () -> Unit) {
                         SectionTitle(d)
                         lastDay = d
                     }
-                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).background(Palette.card, RoundedCornerShape(12.dp)).padding(12.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).glass(RoundedCornerShape(12.dp)).padding(12.dp)) {
                         Text(listOfNotNull(time.format(Date(e.at)), e.source).joinToString("  ·  "), color = Palette.muted, fontSize = 12.sp)
                         if (e.heard.isNotEmpty()) Text("“${e.heard}”", color = Palette.muted, fontSize = 15.sp)
                         Text(com.rusty.museecho.gadget.Markdown.toAnnotated(e.reply), color = Palette.ink, fontSize = 16.sp, lineHeight = 22.sp)
@@ -1082,7 +1189,7 @@ private fun StatusChip(modifier: Modifier) {
         Link.NO_TOKEN -> Palette.coral to "Needs SDK token"
     }
     Row(
-        modifier.background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp),
+        modifier.glass(RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(8.dp).background(color, CircleShape))
@@ -1127,7 +1234,7 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
     val visible = (heard.isNotEmpty() || reply.isNotEmpty() || talk != Talk.IDLE) && !stepAside
     AnimatedVisibility(visible, modifier, enter = fadeIn(), exit = fadeOut()) {
         Column(
-            Modifier.then(if (compact) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()).animateContentSize().background(Palette.card.copy(alpha = 0.92f), RoundedCornerShape(18.dp))
+            Modifier.then(if (compact) Modifier.fillMaxWidth(0.62f) else Modifier.fillMaxWidth()).animateContentSize().glass(RoundedCornerShape(18.dp))
                 .clickable(onClick = actions::clearCaptions).padding(horizontal = 18.dp, vertical = 12.dp),
         ) {
             val name = GadgetState.museName.value
@@ -1205,10 +1312,10 @@ private fun ReaderScreen(s: Screen.Reader, actions: UiActions) {
         }
         Column(Modifier.align(Alignment.TopEnd).padding(top = 64.dp, end = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.size(56.dp).background(Palette.card, CircleShape).clickable(onClick = actions::dismissScreen),
+            Box(Modifier.size(56.dp).glass(CircleShape).clickable(onClick = actions::dismissScreen),
                 contentAlignment = Alignment.Center) { Text("✕", color = Palette.ink, fontSize = 22.sp) }
             if (actions.canSendToLaptop()) {
-                Box(Modifier.size(56.dp).background(Palette.card, CircleShape).clickable {
+                Box(Modifier.size(56.dp).glass(CircleShape).clickable {
                     sent = "…"
                     actions.sendToLaptop(com.rusty.museecho.gadget.Markdown.toAnnotated(s.markdown).text) { ok -> sent = if (ok) "✓" else "✗" }
                 }, contentAlignment = Alignment.Center) { Text(sent ?: "💻", color = Palette.ink, fontSize = 22.sp) }
@@ -1249,7 +1356,7 @@ private fun TypeSheet(onSend: (String) -> Unit, onClose: () -> Unit) {
     var text by remember { mutableStateOf("") }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable(onClick = onClose), contentAlignment = Alignment.TopCenter) {
         Row(
-            Modifier.padding(top = 30.dp).widthIn(max = 640.dp).fillMaxWidth().background(Palette.card, RoundedCornerShape(16.dp))
+            Modifier.padding(top = 30.dp).widthIn(max = 640.dp).fillMaxWidth().glass(RoundedCornerShape(16.dp))
                 .clickable(enabled = false) {}.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1275,7 +1382,7 @@ private fun TimerChips(modifier: Modifier, actions: UiActions) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         shown.forEach { item ->
             Row(
-                Modifier.background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50))
+                Modifier.glass(RoundedCornerShape(50))
                     .clickable { actions.cancelTimer(item.id) }.padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1307,7 +1414,7 @@ private fun QuickActionRow(modifier: Modifier, actions: UiActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         list.forEach { a ->
             Text(a.label, color = Palette.ink, fontSize = 15.sp, maxLines = 1,
-                modifier = Modifier.background(Palette.card.copy(alpha = 0.92f), RoundedCornerShape(50))
+                modifier = Modifier.glass(RoundedCornerShape(50))
                     .clickable { actions.runQuickAction(a) }.padding(horizontal = 16.dp, vertical = 10.dp))
         }
     }
@@ -1384,7 +1491,7 @@ private fun LaptopChip(modifier: Modifier = Modifier, actions: UiActions) {
             Text(listOfNotNull("💻", battery, playing).joinToString("  "),
                 color = if (s.batteryPercent != null && s.batteryPercent <= 15 && !s.charging) Palette.coral else Palette.ink,
                 fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(50))
+                modifier = Modifier.glass(RoundedCornerShape(50))
                     .clickable { open = !open }
                     .padding(horizontal = 12.dp, vertical = 6.dp))
             if (open) LaptopMusicPopup(s, actions) { open = false }
@@ -1405,7 +1512,7 @@ private fun LaptopMusicPopup(s: com.rusty.museecho.integrations.LaptopStatus, ac
         onDismissRequest = onClose,
     ) {
         Column(
-            Modifier.width(320.dp).background(Palette.card, RoundedCornerShape(18.dp)).padding(16.dp),
+            Modifier.width(320.dp).glass(RoundedCornerShape(18.dp)).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(if (s.track.isNotBlank()) s.track else "Nothing playing", color = Palette.ink, fontSize = 16.sp,
@@ -1462,7 +1569,7 @@ private fun QuickPanel(open: Boolean, onClose: () -> Unit) {
         exit = androidx.compose.animation.slideOutVertically(tween(220)) { -it } + fadeOut(tween(200))) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             Column(
-                Modifier.padding(top = 10.dp).width(560.dp).background(Palette.card, RoundedCornerShape(22.dp))
+                Modifier.padding(top = 10.dp).width(560.dp).glass(RoundedCornerShape(22.dp))
                     .clickable(enabled = false) {}.padding(horizontal = 22.dp, vertical = 16.dp),
             ) {
                 val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -1548,7 +1655,7 @@ private fun LaptopNotes() {
                     Text("💻 ${n.app}: ${n.title.ifBlank { n.text }}", color = Palette.ink, fontSize = 13.sp, maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 4.dp).widthIn(max = 420.dp)
-                            .background(Palette.card.copy(alpha = 0.9f), RoundedCornerShape(50))
+                            .glass(RoundedCornerShape(50))
                             .clickable {
                                 GadgetState.dismissLaptopNote(n.id)
                                 GadgetState.show(Screen.Text("💻 ${n.app}", listOf(n.title, n.text).filter { it.isNotBlank() }.joinToString("\n\n")))

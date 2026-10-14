@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,7 +54,7 @@ private val artCache = java.util.Collections.synchronizedMap(object : LinkedHash
 private fun Art(url: String, size: Dp, actions: UiActions) {
     var bmp by remember(url) { mutableStateOf(artCache[url]) }
     LaunchedEffect(url) { if (bmp == null && url.isNotEmpty()) actions.spotifyImage(url)?.let { artCache[url] = it; bmp = it } }
-    Box(Modifier.size(size).background(Palette.card, RoundedCornerShape(6.dp))) {
+    Box(Modifier.size(size).glass(RoundedCornerShape(6.dp))) {
         bmp?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
     }
 }
@@ -97,8 +98,17 @@ internal fun SpotifyPage(actions: UiActions) {
         queueTick++
     }
 
+    // While something's playing (and you're not searching), the page is a big now-playing screen.
+    var browsing by remember { mutableStateOf(false) }
+    val c0 = current
+    if (c0 != null && !browsing && results.isEmpty()) {
+        NowPlaying(c0, next, actions) { browsing = true }
+        return
+    }
     Column(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = 64.dp, bottom = 84.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (c0 != null) Text("← Now playing", color = Palette.teal, fontSize = 14.sp,
+                modifier = Modifier.clickable { browsing = false; results = emptyList(); query = "" }.padding(end = 14.dp))
             Text("Spotify", color = Palette.amber, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
             if (note.isNotEmpty()) Text("   $note", color = if (note.startsWith("Couldn't") || note == "Nothing found") Palette.coral else Palette.teal,
                 fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -116,7 +126,7 @@ internal fun SpotifyPage(actions: UiActions) {
                 LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(results, key = { it.uri }) { item ->
                         Row(
-                            Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
+                            Modifier.fillMaxWidth().glass(RoundedCornerShape(10.dp))
                                 .clickable { play(item, queue = false) }.padding(6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -158,6 +168,46 @@ internal fun SpotifyPage(actions: UiActions) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Now playing: the album art big, over a blurred copy of itself filling the page, the song in
+ * large type, and what's next underneath. "Search" goes to the search view.
+ */
+@Composable
+private fun NowPlaying(c: SpotifyItem, next: List<SpotifyItem>, actions: UiActions, onSearch: () -> Unit) {
+    var bmp by remember(c.image) { mutableStateOf(artCache[c.image]) }
+    LaunchedEffect(c.image) { if (bmp == null && c.image.isNotEmpty()) actions.spotifyImage(c.image)?.let { artCache[c.image] = it; bmp = it } }
+    // The blur: the art shrunk to a few pixels and stretched back up (smooth, and cheap for the Echo).
+    val blurred = remember(bmp) { bmp?.let { android.graphics.Bitmap.createScaledBitmap(it, 12, 12, true).asImageBitmap() } }
+    val fade by androidx.compose.animation.core.animateFloatAsState(if (blurred != null) 1f else 0f, androidx.compose.animation.core.tween(800), label = "artIn")
+    Box(Modifier.fillMaxSize()) {
+        blurred?.let {
+            Image(it, null, Modifier.fillMaxSize().graphicsLayer { alpha = 0.55f * fade }, contentScale = ContentScale.Crop,
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Palette.night.copy(alpha = 0.35f), Palette.night.copy(alpha = 0.75f)))))
+        }
+        Row(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 64.dp, bottom = 84.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(220.dp).background(Palette.card, RoundedCornerShape(16.dp))) {
+                bmp?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize().graphicsLayer { alpha = fade; clip = true; shape = RoundedCornerShape(16.dp) }, contentScale = ContentScale.Crop) }
+            }
+            Column(Modifier.weight(1f).padding(start = 32.dp)) {
+                Text("Now playing", color = Palette.muted, fontSize = 14.sp)
+                Text(c.title, color = Palette.ink, fontSize = 32.sp, fontWeight = FontWeight.SemiBold, lineHeight = 36.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(c.sub, color = Palette.ink.copy(alpha = 0.75f), fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (next.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("Up next", color = Palette.muted, fontSize = 13.sp)
+                    next.take(3).forEach { n ->
+                        Text("${n.title} · ${n.sub}", color = Palette.ink.copy(alpha = 0.8f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Text("🔍 Search", color = Palette.ink, fontSize = 15.sp,
+                    modifier = Modifier.glass(RoundedCornerShape(50)).clickable(onClick = onSearch).padding(horizontal = 18.dp, vertical = 9.dp))
             }
         }
     }

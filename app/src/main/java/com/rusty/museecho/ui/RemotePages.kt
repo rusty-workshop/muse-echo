@@ -104,7 +104,7 @@ internal fun TvRemotePage(actions: UiActions) {
                     else -> FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         list.take(16).forEach { (id, name) ->
                             Text(name, color = Palette.ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.background(Palette.card, RoundedCornerShape(50))
+                                modifier = Modifier.glass(RoundedCornerShape(50))
                                     .clickable { scope.launch { if (!actions.tvLaunch(id)) status = "Couldn't open $name" } }
                                     .padding(horizontal = 12.dp, vertical = 7.dp))
                         }
@@ -172,7 +172,7 @@ internal fun LaptopPage(actions: UiActions) {
                     else -> FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         list.forEach { (key, label) ->
                             Text(label, color = Palette.ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.background(Palette.card, RoundedCornerShape(50))
+                                modifier = Modifier.glass(RoundedCornerShape(50))
                                     .clickable { scope.launch { note = actions.laptopShortcut(key) } }
                                     .padding(horizontal = 12.dp, vertical = 7.dp))
                         }

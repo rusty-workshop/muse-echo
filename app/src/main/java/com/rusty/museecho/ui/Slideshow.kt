@@ -179,7 +179,7 @@ internal fun SlideshowContent(actions: UiActions, now: Date) {
             val name = s?.file?.name.orEmpty()
             val isFav = name in favs
             Column(
-                Modifier.width(300.dp).background(Palette.card.copy(alpha = 0.96f), RoundedCornerShape(20.dp)).padding(18.dp),
+                Modifier.width(300.dp).glass(RoundedCornerShape(20.dp)).padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {

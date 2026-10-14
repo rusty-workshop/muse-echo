@@ -202,7 +202,7 @@ private fun AlbumThumb(shot: AlbumShot, actions: UiActions) {
             android.graphics.BitmapFactory.decodeFile(f.path)?.let { GadgetState.show(Screen.Image(it, "$date · ${shot.caption}")) }
         }
     }) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).background(Palette.card, RoundedCornerShape(10.dp))) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).glass(RoundedCornerShape(10.dp))) {
             img?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         }
         Text("$date · ${shot.caption}", color = Palette.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -251,7 +251,7 @@ private fun FriendsContent(actions: UiActions, modifier: Modifier) {
         }
         items(data.friends.size) { i ->
             val f = data.friends[i]
-            Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(14.dp)).clickable { open = f.id }.padding(10.dp),
+            Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(14.dp)).clickable { open = f.id }.padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Blob(Modifier.size(52.dp), actions, mini = true, moodOverride = com.rusty.museecho.gadget.Mood.HAPPY,
                     tintOverride = androidx.compose.ui.graphics.Color(f.color), ownStyle = false)
@@ -491,7 +491,7 @@ private fun PlayContent(modifier: Modifier) {
                     for (c in 0 until 3) {
                         val i = r * 3 + c
                         val ch = board[i]
-                        Box(Modifier.size(58.dp).background(Palette.card, RoundedCornerShape(8.dp)).clickable(enabled = ch == ' ' && result.isEmpty()) {
+                        Box(Modifier.size(58.dp).glass(RoundedCornerShape(8.dp)).clickable(enabled = ch == ' ' && result.isEmpty()) {
                             val b = board.toCharArray()
                             b[i] = 'X'
                             board = b.concatToString()
@@ -520,7 +520,7 @@ private fun PlayContent(modifier: Modifier) {
         } else Column {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 com.rusty.museecho.gadget.FriendsBrain.RPS_EMOJI.forEachIndexed { i, e ->
-                    Box(Modifier.size(64.dp).background(Palette.card, RoundedCornerShape(14.dp)).clickable {
+                    Box(Modifier.size(64.dp).glass(RoundedCornerShape(14.dp)).clickable {
                         val puff = java.util.Random().nextInt(3)
                         rps = i to puff
                         GadgetState.say(com.rusty.museecho.gadget.FriendsBrain.RPS_EMOJI[puff], 4)
@@ -605,7 +605,7 @@ private fun TricksContent() {
         com.rusty.museecho.gadget.FriendsBrain.TRICKS.forEach { (key, label) ->
             val skill = data.tricks[key] ?: 0
             val goes = data.practice["$today|$key"] ?: 0
-            Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(12.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(12.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(label.replaceFirstChar { it.uppercase() }, color = Palette.ink, fontSize = 14.sp)
                     Text("${com.rusty.museecho.gadget.FriendsBrain.trickLevel(skill)} · $skill/100 · practised $goes× today", color = Palette.muted, fontSize = 11.sp)
@@ -704,7 +704,7 @@ private fun Cookbook(modifier: Modifier) {
     androidx.compose.foundation.lazy.LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         items(recipes.size) { i ->
             val r = recipes[i]
-            Row(Modifier.fillMaxWidth().background(Palette.card.copy(alpha = 0.8f), RoundedCornerShape(12.dp)).clickable {
+            Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(12.dp)).clickable {
                 GadgetState.show(Screen.Reader("🍳 ${r.title}", buildString {
                     append("_Baked by ${r.cooks} · ${r.date}_")
                     if (r.real) append("  \n**A real recipe you can make!**")

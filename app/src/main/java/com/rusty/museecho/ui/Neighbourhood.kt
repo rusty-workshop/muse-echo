@@ -349,7 +349,7 @@ private fun HouseInside(f: Friend, where: Where, hour: Int, actions: UiActions, 
                 if (where == Where.HOME || where == Where.OUT) Text("Invite over 🚶", color = Palette.night, fontSize = 15.sp,
                     modifier = Modifier.background(c, RoundedCornerShape(50)).clickable(onClick = onInvite).padding(horizontal = 16.dp, vertical = 8.dp))
                 Text("Close", color = Palette.ink, fontSize = 15.sp,
-                    modifier = Modifier.background(Palette.card, RoundedCornerShape(50)).clickable(onClick = onClose).padding(horizontal = 16.dp, vertical = 8.dp))
+                    modifier = Modifier.glass(RoundedCornerShape(50)).clickable(onClick = onClose).padding(horizontal = 16.dp, vertical = 8.dp))
             }
         }
     }

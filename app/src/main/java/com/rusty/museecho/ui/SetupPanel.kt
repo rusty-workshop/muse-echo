@@ -584,6 +584,18 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
                 ToggleRow("Warm evenings", "The screen turns a little warmer from sunset to sunrise", warmOn) {
                     warmOn = it; prefs.warmEvenings = it; if (!it) GadgetState.setWarmth(0f)
                 }
+                var dayNightOn by remember { mutableStateOf(prefs.dayNightLook) }
+                var ambienceOn by remember { mutableStateOf(prefs.ambience) }
+                var uiSoundsOn by remember { mutableStateOf(prefs.uiSounds) }
+                ToggleRow("Day and night look", "Airier in a bright room, deeper and lower-glare in a dim one (from the light sensor)", dayNightOn) {
+                    dayNightOn = it; prefs.dayNightLook = it; GadgetState.setLooks(prefs); if (!it) Palette.lift = 0.5f
+                }
+                ToggleRow("Ambience", "Faint dust motes by day, fireflies in the evening, snow in winter", ambienceOn) {
+                    ambienceOn = it; prefs.ambience = it; GadgetState.setLooks(prefs)
+                }
+                ToggleRow("UI sounds", "Soft clicks, a whoosh between pages, a chime for cards (never in quiet hours)", uiSoundsOn) {
+                    uiSoundsOn = it; prefs.uiSounds = it
+                }
                 ToggleRow("Bedtime reminder", "Learns when the lights usually go off and mentions it if you're up much later", bedOn) {
                     bedOn = it; prefs.bedtimeHint = it
                 }
@@ -654,7 +666,7 @@ fun SetupPanel(actions: UiActions, onClose: () -> Unit) {
             }
             Spacer(Modifier.width(16.dp))
             Column(
-                Modifier.weight(1f).fillMaxHeight().background(Palette.card, RoundedCornerShape(14.dp)).padding(10.dp)
+                Modifier.weight(1f).fillMaxHeight().glass(RoundedCornerShape(14.dp)).padding(10.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text("Log", color = Palette.amber, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
