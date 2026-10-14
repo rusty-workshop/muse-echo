@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -171,7 +173,8 @@ class Chores(
 
     private suspend fun inbox() {
         while (true) {
-            delay(if (isQuiet()) 20_000 else 4_000)
+            // Quicker while someone's watching the screen from the phone (taps should land promptly).
+            delay(if (System.currentTimeMillis() < GadgetState.screenWantedUntil) 500 else if (isQuiet()) 20_000 else 4_000)
             for (item in hub.inbox()) {
                 when ((item["type"] as? JsonPrimitive)?.contentOrNull) {
                     "timer" -> {
@@ -187,6 +190,7 @@ class Chores(
                         // The laptop settings page is watching: send a picture every 2 s for a little while.
                         val wasIdle = GadgetState.screenWantedUntil < System.currentTimeMillis()
                         GadgetState.screenWantedUntil = System.currentTimeMillis() + 10_000
+                        if ((item["fast"] as? JsonPrimitive)?.booleanOrNull == true) GadgetState.screenFastUntil = System.currentTimeMillis() + 10_000
                         if (wasIdle) scope.launch { streamScreen() }
                     }
                     "blob" -> {
@@ -213,6 +217,14 @@ class Chores(
                             GadgetState.say(if ((item["from"] as? JsonPrimitive)?.contentOrNull == "phone") "👋 Hi from your phone!" else "👋 Hi from your wrist!", 6)
                         }
                         postState()
+                    }
+                    // A tap or swipe from the phone's live view (x, y as fractions of the screen).
+                    "touch" -> {
+                        fun f(k: String) = (item[k] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f)
+                        val x = f("x") ?: continue
+                        val y = f("y") ?: continue
+                        val kind = (item["kind"] as? JsonPrimitive)?.contentOrNull ?: "tap"
+                        MainActivity.remoteTouch(kind, x, y, f("x2") ?: x, f("y2") ?: y)
                     }
                     "invite" -> {
                         val name = (item["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
@@ -658,7 +670,8 @@ class Chores(
         while (System.currentTimeMillis() < GadgetState.screenWantedUntil) {
             val jpeg = MainActivity.capture()
             hub.postScreen(jpeg)
-            delay(2_000)
+            // Once a second for the phone's view (you're touching through it), every 2 s for the laptop's.
+            delay(if (System.currentTimeMillis() < GadgetState.screenFastUntil) 900 else 2_000)
         }
     }
 

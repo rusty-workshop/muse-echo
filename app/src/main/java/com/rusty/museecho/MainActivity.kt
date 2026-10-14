@@ -533,6 +533,40 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        /**
+         * A touch from the phone's live view, replayed in this window as if a finger did it: a tap,
+         * or a swipe from (x, y) to (x2, y2). Coordinates are fractions of the screen. Only while the
+         * app is showing (it can't touch anything else).
+         */
+        fun remoteTouch(kind: String, x: Float, y: Float, x2: Float, y2: Float) {
+            val activity = current?.get()?.takeIf { visible } ?: return
+            activity.runOnUiThread {
+                val v = activity.window.decorView
+                val w = v.width.toFloat(); val h = v.height.toFloat()
+                if (w <= 0f || h <= 0f) return@runOnUiThread
+                val start = android.os.SystemClock.uptimeMillis()
+                fun ev(action: Int, t: Long, fx: Float, fy: Float) {
+                    val e = android.view.MotionEvent.obtain(start, t, action, fx * w, fy * h, 0)
+                    e.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    activity.dispatchTouchEvent(e)
+                    e.recycle()
+                }
+                ev(android.view.MotionEvent.ACTION_DOWN, start, x, y)
+                if (kind == "swipe") {
+                    // A quick, smooth drag (so pagers see a fling).
+                    val steps = 10
+                    for (i in 1..steps) {
+                        val p = i / steps.toFloat()
+                        val at = start + i * 22L
+                        v.postDelayed({ ev(android.view.MotionEvent.ACTION_MOVE, at, x + (x2 - x) * p, y + (y2 - y) * p) }, i * 22L)
+                    }
+                    v.postDelayed({ ev(android.view.MotionEvent.ACTION_UP, start + steps * 22L + 10, x2, y2) }, steps * 22L + 10)
+                } else {
+                    v.postDelayed({ ev(android.view.MotionEvent.ACTION_UP, start + 70, x, y) }, 70)
+                }
+            }
+        }
+
         suspend fun capture(): ByteArray? {
             val activity = current?.get()?.takeIf { visible } ?: return null
             return kotlinx.coroutines.suspendCancellableCoroutine { cont ->

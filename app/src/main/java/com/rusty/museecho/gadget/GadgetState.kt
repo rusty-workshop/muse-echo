@@ -841,6 +841,8 @@ object GadgetState {
     /** The laptop settings page wants live pictures of the screen until this time. */
     @Volatile
     var screenWantedUntil = 0L
+    /** The phone is watching: pictures every second rather than every two. */
+    @Volatile var screenFastUntil = 0L
 
     /** Screen-cleaning mode: touches are ignored until this time. */
     private val _cleaningUntil = MutableStateFlow(0L)
