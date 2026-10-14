@@ -92,6 +92,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     // WebSocket to the Muse VM, the device API, and image downloads.
     implementation(libs.okhttp)
+    // QR codes (the guest Wi-Fi code).
+    implementation(libs.zxing.core)
     // X25519 for the Noise handshake: Android 11's provider has no XDH, so the
     // whole protocol uses BouncyCastle's lightweight API (no JCA provider
     // registration, so it never shadows Android's own "BC").

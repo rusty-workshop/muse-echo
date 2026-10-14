@@ -567,6 +567,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        /** Text typed on the phone, typed here into whatever field has focus (as key presses); Enter after it if asked. */
+        fun remoteType(text: String, enter: Boolean) {
+            val activity = current?.get()?.takeIf { visible } ?: return
+            activity.runOnUiThread {
+                val map = android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
+                map.getEvents(text.take(300).toCharArray())?.forEach { activity.dispatchKeyEvent(it) }
+                if (enter) {
+                    activity.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+                    activity.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER))
+                }
+            }
+        }
+
         suspend fun capture(): ByteArray? {
             val activity = current?.get()?.takeIf { visible } ?: return null
             return kotlinx.coroutines.suspendCancellableCoroutine { cont ->

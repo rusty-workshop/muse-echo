@@ -843,6 +843,13 @@ object GadgetState {
     var screenWantedUntil = 0L
     /** The phone is watching: pictures every second rather than every two. */
     @Volatile var screenFastUntil = 0L
+    /** Whether a guest Wi-Fi network is set up (for the QR code button). */
+    private val _guestWifi = MutableStateFlow(false)
+    val guestWifi: StateFlow<Boolean> = _guestWifi.asStateFlow()
+    fun setGuestWifi(on: Boolean) { _guestWifi.value = on }
+
+    /** The phone's remote is open: check the inbox often so its buttons respond quickly. */
+    @Volatile var fastInboxUntil = 0L
 
     /** Screen-cleaning mode: touches are ignored until this time. */
     private val _cleaningUntil = MutableStateFlow(0L)

@@ -143,6 +143,9 @@ class Chores(
         GadgetState.bubble.value?.takeIf { it.untilMs > now }?.let { put("bubble", it.text) }
         GadgetState.held.value?.takeIf { it.untilMs > now }?.let { h -> put("holding", h.item.name.lowercase()); if (h.text.isNotEmpty()) put("label", h.text) }
         put("doing", GadgetService.instance?.life?.friends?.doingLine() ?: "")
+        GadgetState.laptopStatus.value?.let { l ->
+            put("laptop", buildJsonObject { put("playing", l.playing); put("track", l.track); put("artist", l.artist); l.batteryPercent?.let { put("battery", it) } })
+        }
         GadgetState.trip.value?.let { t ->
             put("away_at", GadgetState.friends.value.friends.firstOrNull { it.id == t.friendId }?.shownName ?: "a friend's")
             put("away_overnight", t.overnight)
@@ -174,7 +177,8 @@ class Chores(
     private suspend fun inbox() {
         while (true) {
             // Quicker while someone's watching the screen from the phone (taps should land promptly).
-            delay(if (System.currentTimeMillis() < GadgetState.screenWantedUntil) 500 else if (isQuiet()) 20_000 else 4_000)
+            val now0 = System.currentTimeMillis()
+            delay(if (now0 < GadgetState.screenWantedUntil || now0 < GadgetState.fastInboxUntil) 500 else if (isQuiet()) 20_000 else 4_000)
             for (item in hub.inbox()) {
                 when ((item["type"] as? JsonPrimitive)?.contentOrNull) {
                     "timer" -> {
@@ -225,6 +229,34 @@ class Chores(
                         val y = f("y") ?: continue
                         val kind = (item["kind"] as? JsonPrimitive)?.contentOrNull ?: "tap"
                         MainActivity.remoteTouch(kind, x, y, f("x2") ?: x, f("y2") ?: y)
+                    }
+                    // The phone's remote is open: quick checks for a while.
+                    "hello" -> GadgetState.fastInboxUntil = System.currentTimeMillis() + 15_000
+                    // A button on the phone's remote: the TV (Roku keys) or the laptop (media keys and shortcuts).
+                    "remote" -> {
+                        GadgetState.fastInboxUntil = System.currentTimeMillis() + 15_000
+                        val key = (item["key"] as? JsonPrimitive)?.contentOrNull ?: continue
+                        val svc = GadgetService.instance ?: continue
+                        when ((item["target"] as? JsonPrimitive)?.contentOrNull) {
+                            "tv" -> scope.launch { svc.tvKey(key) }
+                            "laptop" -> if (key.startsWith("shortcut:")) scope.launch { svc.laptopShortcut(key.removePrefix("shortcut:")) }
+                                else svc.laptopMedia(key)
+                        }
+                    }
+                    // Shared from the phone: a card on the Echo.
+                    "card" -> {
+                        val text = (item["text"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
+                        val title = (item["title"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: "📱 From your phone"
+                        GadgetState.lastTouch = System.currentTimeMillis()
+                        GadgetState.setAsleep(false)
+                        GadgetState.show(Screen.Text(title, text))
+                        toFront()
+                    }
+                    // Typed on the phone into whatever box is open on the Echo.
+                    "type" -> {
+                        val text = (item["text"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        val enter = (item["enter"] as? JsonPrimitive)?.booleanOrNull == true
+                        MainActivity.remoteType(text, enter)
                     }
                     "invite" -> {
                         val name = (item["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
@@ -578,6 +610,11 @@ class Chores(
             put("ambience", p.ambience)
             put("ui_sounds", p.uiSounds)
             put("weather_accents", p.weatherAccents)
+            put("guest_wifi_ssid", p.guestWifiSsid)
+            // Never the password itself: just whether there is one (the page leaves the box empty).
+            put("guest_wifi_pass", "")
+            put("guest_wifi_has_pass", p.guestWifiPass.isNotEmpty())
+            put("guest_wifi_sec", p.guestWifiSec)
             put("user_name", p.userName)
             put("puff_sniffles", p.puffSniffles)
             put("puff_away_sleepovers", p.puffAwaySleepovers)

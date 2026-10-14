@@ -224,6 +224,7 @@ class GadgetService : Service() {
         scope.launch { assignments.value.collect { GadgetState.setAssignments(it.items) } }
         GadgetState.setGuestUntil(Prefs(this).guestUntil)
         GadgetState.setLooks(Prefs(this))
+        GadgetState.setGuestWifi(Prefs(this).guestWifiSsid.isNotBlank())
         GadgetState.setFrameMarks(Prefs(this).frameFavs, Prefs(this).frameHidden)
         scope.launch { watchAlerts() }
         scope.launch { watchReminders() }
@@ -1057,6 +1058,9 @@ class GadgetService : Service() {
         bool("day_night_look")?.let { v -> p.dayNightLook = v; GadgetState.setLooks(p); done += "day_night_look" }
         bool("ambience")?.let { v -> p.ambience = v; GadgetState.setLooks(p); done += "ambience" }
         bool("ui_sounds")?.let { v -> p.uiSounds = v; done += "ui_sounds" }
+        str("guest_wifi_ssid")?.let { v -> p.guestWifiSsid = v; GadgetState.setGuestWifi(p.guestWifiSsid.isNotBlank()); done += "guest_wifi_ssid" }
+        str("guest_wifi_pass")?.takeIf { it.isNotEmpty() }?.let { v -> p.guestWifiPass = v; done += "guest_wifi_pass" }
+        str("guest_wifi_sec")?.takeIf { it in setOf("WPA", "WEP", "nopass") }?.let { v -> p.guestWifiSec = v; done += "guest_wifi_sec" }
         bool("weather_accents")?.let { v -> p.weatherAccents = v; GadgetState.setLooks(p); done += "weather_accents" }
         str("user_name")?.let { v -> p.userName = v; GadgetState.setLooks(p); done += "user_name" }
         bool("puff_sniffles")?.let { v -> p.puffSniffles = v; if (!v) life.friends.stopSniffles(); done += "puff_sniffles" }
@@ -1558,6 +1562,13 @@ class GadgetService : Service() {
             GadgetState.weekRecap.value?.let { (text, at) -> put("week_recap", text); put("week_recap_ms", at) }
             put("friends", json.parseToJsonElement(json.encodeToString(FriendsData.serializer(), GadgetState.friends.value.copy(today = emptyMap()))))
             put("street", life.friends.streetInfo())
+            // For the phone's remote.
+            put("remote", kotlinx.serialization.json.buildJsonObject {
+                put("tv", tvAvailable())
+                put("laptop", laptop.configured)
+                put("shortcuts", kotlinx.serialization.json.JsonArray(runCatching { laptopShortcuts() }.getOrDefault(emptyList()).map { (k, l) ->
+                    kotlinx.serialization.json.buildJsonObject { put("key", k); put("label", l) } }))
+            })
             put("catalog", kotlinx.serialization.json.buildJsonObject {
                 put("stickers", kotlinx.serialization.json.JsonArray(FriendsBrain.STICKERS.map { s ->
                     kotlinx.serialization.json.buildJsonObject { put("id", s.id); put("emoji", s.emoji); put("title", s.title); put("who", s.who) } }))
@@ -2248,6 +2259,17 @@ class Prefs(context: Context) {
     var weatherAccents: Boolean
         get() = prefs.getBoolean("weather_accents", true)
         set(v) = prefs.edit().putBoolean("weather_accents", v).apply()
+    /** Guest Wi-Fi for the QR code visitors scan (security WPA, WEP or nopass). The password never leaves the Echo. */
+    var guestWifiSsid: String
+        get() = prefs.getString("guest_wifi_ssid", "") ?: ""
+        set(v) = prefs.edit().putString("guest_wifi_ssid", v.trim().take(32)).apply()
+    var guestWifiPass: String
+        get() = prefs.getString("guest_wifi_pass", "") ?: ""
+        set(v) = prefs.edit().putString("guest_wifi_pass", v.take(63)).apply()
+    var guestWifiSec: String
+        get() = prefs.getString("guest_wifi_sec", "WPA") ?: "WPA"
+        set(v) = prefs.edit().putString("guest_wifi_sec", v).apply()
+
     /** What the greeting calls you. */
     var userName: String
         get() = prefs.getString("user_name", null) ?: "Rusty"

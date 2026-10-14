@@ -15,6 +15,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import kotlinx.coroutines.launch
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -317,6 +319,12 @@ fun MuseEchoApp(actions: UiActions) {
                 }
                 IconButton(onClick = actions::morningBrief) {
                     Icon(Icons.Filled.WbSunny, "Morning brief", tint = Palette.muted)
+                }
+                // Guest Wi-Fi: a QR code visitors can scan to join.
+                val guestWifi by GadgetState.guestWifi.collectAsState()
+                if (guestWifi) {
+                    val ctxQr = androidx.compose.ui.platform.LocalContext.current
+                    IconButton(onClick = { showWifiQr(ctxQr) }) { Icon(Icons.Filled.Wifi, "Guest Wi-Fi code", tint = Palette.muted) }
                 }
                 val guest = rememberGuest()
                 // Guest mode: hides personal things (agenda, notes, history, reminders) for 4 hours.
@@ -1393,7 +1401,21 @@ private fun Captions(modifier: Modifier, actions: UiActions) {
             if (reply.isNotEmpty() || images.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.Top) {
                     if (reply.isNotEmpty()) {
-                        Column(Modifier.weight(1f).heightIn(max = if (compact) 56.dp else 150.dp).verticalScroll(rememberScrollState())) {
+                        val replyScroll = rememberScrollState()
+                        // Long replies scroll by themselves, teleprompter-style: along with the voice while it's
+                        // speaking (about 2.6 words a second), at a reading pace otherwise. A touch stops it.
+                        LaunchedEffect(reply.length > 0 && (talk == Talk.REPLIED || talk == Talk.IDLE), speaking) {
+                            delay(2_500)
+                            val words = reply.split(Regex("\\s+")).size
+                            while (replyScroll.value < replyScroll.maxValue && !replyScroll.isScrollInProgress) {
+                                val perSec = if (speaking) 2.6f else 3.5f
+                                val total = (words / perSec * 1000f).coerceAtLeast(4_000f)
+                                val step = (replyScroll.maxValue / (total / 100f)).coerceAtLeast(1f)
+                                replyScroll.scrollBy(step)
+                                delay(100)
+                            }
+                        }
+                        Column(Modifier.weight(1f).heightIn(max = if (compact) 56.dp else 150.dp).verticalScroll(replyScroll)) {
                             Text(rememberReveal(remember(reply) { com.rusty.museecho.gadget.Markdown.toAnnotated(reply) }, Palette.ink.copy(alpha = 0.4f)),
                                 color = if (talk == Talk.ERROR) Palette.coral else Palette.ink,
                                 fontSize = if (compact) 15.sp else 20.sp, lineHeight = if (compact) 20.sp else 27.sp,
@@ -1986,4 +2008,19 @@ private fun TalentVote() {
             }
         },
     )
+}
+
+/** The guest Wi-Fi as a QR code (phones join by scanning it), shown full screen. */
+private fun showWifiQr(ctx: android.content.Context) {
+    val p = com.rusty.museecho.gadget.Prefs(ctx)
+    if (p.guestWifiSsid.isBlank()) return
+    fun esc(v: String) = v.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace(":", "\\:").replace("\"", "\\\"")
+    val content = "WIFI:T:${p.guestWifiSec};S:${esc(p.guestWifiSsid)};" + (if (p.guestWifiSec != "nopass") "P:${esc(p.guestWifiPass)};" else "") + ";"
+    val size = 520
+    val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(content, com.google.zxing.BarcodeFormat.QR_CODE, size, size,
+        mapOf(com.google.zxing.EncodeHintType.MARGIN to 2))
+    val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.RGB_565)
+    for (x in 0 until size) for (y in 0 until size) bmp.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+    GadgetState.lastTouch = System.currentTimeMillis()
+    GadgetState.show(Screen.Image(bmp, "📶 Scan to join \"${p.guestWifiSsid}\" · tap to close"))
 }
