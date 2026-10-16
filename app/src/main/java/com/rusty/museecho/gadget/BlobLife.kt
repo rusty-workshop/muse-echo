@@ -144,6 +144,7 @@ class BlobLife(
         friends.start()
         scope.launch { laptopLoop() }
         scope.launch { weekRecapLoop() }
+        scope.launch { GadgetState.assignments.collect { rememberAssignments(it) } }
         scope.launch { eveningLoop() }
     }
 
@@ -380,7 +381,7 @@ class BlobLife(
         }
     }
 
-    // -- Weekly homelab recap ------------------------------------------------------------------
+    // -- Weekly report ------------------------------------------------------------------
 
     private suspend fun weekRecapLoop() {
         delay(3 * 60_000L)
@@ -395,19 +396,60 @@ class BlobLife(
         }
     }
 
-    /** Fetch the week's numbers from the echo-hub and have Pixel write them up. */
+    /**
+     * Schoolwork the Echo has been told about, kept a few weeks past its due date (the live list drops
+     * it once it's due), so the weekly report can say what wrapped up. "due|course|title" lines.
+     */
+    private fun rememberAssignments(items: List<com.rusty.museecho.integrations.Assignment>) {
+        val cutoff = java.time.LocalDate.now().minusDays(21).toString()
+        val seen = (prefs.getStringSet("assignments_seen", emptySet()).orEmpty() +
+            items.map { "${it.due}|${it.course.replace("|", "")}|${it.title.replace("|", "")}" })
+            .filter { it.substringBefore('|') >= cutoff }.toSet()
+        prefs.edit().putStringSet("assignments_seen", seen).apply()
+    }
+
+    /** Sunday's weekly report: school, Puff's week and the server, from real numbers, written up by Pixel. */
     suspend fun runWeekRecap(): Boolean {
-        val facts = hub.weekFacts() ?: return false
+        val today = java.time.LocalDate.now()
+        val weekAgo = today.minusDays(7).toString()
+        val nextWeek = today.plusDays(7).toString()
+        val seen = prefs.getStringSet("assignments_seen", emptySet()).orEmpty().map { it.split('|', limit = 3) }.filter { it.size == 3 }
+        fun line(a: List<String>) = "- ${a[2]}${if (a[1].isNotBlank()) " (${a[1]})" else ""}, due ${a[0]}"
+        val wrapped = seen.filter { it[0] >= weekAgo && it[0] < today.toString() }.sortedBy { it[0] }.map(::line)
+        val coming = seen.filter { it[0] >= today.toString() && it[0] <= nextWeek }.sortedBy { it[0] }.map(::line)
+        val f = GadgetState.friends.value
+        fun nameOf(id: String) = f.friends.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } ?: "a friend"
+        val visitors = f.diary.filter { it.date >= weekAgo }.groupingBy { nameOf(it.friendId) }.eachCount()
+        val happenings = f.happenings.filter { it.date >= weekAgo }.takeLast(5).map { "- ${it.text}" }
+        val diary = GadgetState.diary.value.filter { it.date >= weekAgo }.takeLast(7).map { "- ${it.date}: ${it.text.take(220)}" }
+        val server = hub.weekFacts()
+        val blob = GadgetState.blobCalled()
+        val facts = buildString {
+            appendLine("SCHOOL, due this past week (I can't tell which were turned in, so don't say they were):")
+            appendLine(wrapped.joinToString("\n").ifEmpty { "- none" })
+            appendLine("SCHOOL, due in the next 7 days:")
+            appendLine(coming.joinToString("\n").ifEmpty { "- none" })
+            appendLine("$blob's WEEK. Friends who visited (times): " + (visitors.entries.joinToString { "${it.key} ${it.value}" }.ifEmpty { "nobody" }))
+            if (happenings.isNotEmpty()) appendLine("Things that happened:\n" + happenings.joinToString("\n"))
+            if (diary.isNotEmpty()) appendLine("$blob's diary:\n" + diary.joinToString("\n"))
+            appendLine("SERVER (the Dell Latitude; uptime is percent over 7 days, speeds Mbps):")
+            appendLine(server ?: "numbers unavailable this week")
+        }
         val text = quietAsk(
-            "Write a short, friendly recap of this week on my homelab server (the Dell Latitude), 3 to 5 sentences, " +
-                "like a little weekly news bulletin: mention anything that went wrong or stood out, and say so if " +
-                "it was a quiet week. Here are the real numbers (uptime is percent over 7 days; speeds are Mbps):\n$facts\n" +
-                "Reply with only the recap text: no title, no commands, and don't change anything on any device.",
+            "Write my weekly report for the Echo Show screen, under 170 words, in three short parts, each starting on " +
+                "its own line with its heading: \"📚 School\", \"🫧 $blob's week\" and \"🖥️ Server\". Friendly and " +
+                "plain: what was due and what's coming up, the highlights of $blob's week, and anything that went wrong " +
+                "or stood out on the server (say so if it was a quiet week). Here are the real facts:\n$facts\n" +
+                "Reply with only the report: no title, no markdown symbols, no commands, and don't change anything on any device.",
         ) ?: return false
         val at = System.currentTimeMillis()
         prefs.edit().putString("week_recap", text.take(1500)).putLong("week_recap_ms", at).apply()
         GadgetState.setWeekRecap(text.take(1500) to at)
-        GadgetState.log("weekly homelab recap written")
+        GadgetState.log("weekly report written")
+        if (!isQuiet()) {
+            GadgetState.show(Screen.Text("📰 Your week", text.take(1500)))
+            GadgetState.say("Your weekly report is ready! 📰", 60)
+        }
         return true
     }
 

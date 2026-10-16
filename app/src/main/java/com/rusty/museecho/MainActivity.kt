@@ -337,6 +337,10 @@ class MainActivity : ComponentActivity() {
             GadgetService.instance?.setMicOff(off)
         }
 
+        override fun findPhone() {
+            GadgetService.instance?.let { s -> lifecycleScope.launch { s.findPhone() } }
+        }
+
         override fun morningBrief() {
             GadgetService.instance?.morningBrief()
         }

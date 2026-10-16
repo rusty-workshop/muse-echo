@@ -47,6 +47,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Keyboard
@@ -134,6 +135,7 @@ interface UiActions {
     fun refreshQuiet()
     fun setMicOff(off: Boolean)
     fun morningBrief()
+    fun findPhone()
     fun notes(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.integrations.PinnedNote>
     fun removeNote(item: String)
     fun glance(): kotlinx.coroutines.flow.StateFlow<com.rusty.museecho.integrations.GlanceLine>
@@ -333,6 +335,9 @@ fun MuseEchoApp(actions: UiActions) {
                         if (guest) "Guest mode on (tap to end)" else "Guest mode", tint = if (guest) Palette.coral else Palette.muted)
                 }
                 if (!guest) {
+                    IconButton(onClick = actions::findPhone) {
+                        Icon(Icons.Filled.PhoneAndroid, "Find my phone", tint = Palette.muted)
+                    }
                     IconButton(onClick = { showHistory = true }) {
                         Icon(Icons.Filled.History, "History", tint = Palette.muted)
                     }
@@ -959,14 +964,14 @@ private fun HomelabPage(actions: UiActions) {
                 Text("  $label", color = Palette.muted, fontSize = 15.sp)
             }
             if (failed && h == null) Text("can't reach the Latitude", color = Palette.coral, fontSize = 15.sp)
-            // Pixel's weekly write-up (Sunday evenings).
+            // Pixel's weekly report (Sunday evenings).
             val recap by GadgetState.weekRecap.collectAsState()
             recap?.let { (text, at) ->
                 Spacer(Modifier.weight(1f))
                 val day = java.text.SimpleDateFormat("MMM d", Locale.US).format(Date(at))
                 Text("📰 This week ($day)", color = Palette.ink, fontSize = 14.sp,
                     modifier = Modifier.glass(RoundedCornerShape(50))
-                        .clickable { GadgetState.show(Screen.Text("This week on the Latitude", text)) }
+                        .clickable { GadgetState.show(Screen.Text("📰 Your week", text)) }
                         .padding(horizontal = 12.dp, vertical = 6.dp))
             }
         }

@@ -1,6 +1,7 @@
 package com.rusty.museecho.gadget
 
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -429,6 +430,20 @@ class GadgetService : Service() {
         "%.1fx real time (%s)".format(x, verdict).also { GadgetState.log("voice speed: $it") }
     }
 
+    /** Make Rusty's phone ring (through echo-hub to the Puff app). What happened, in a few words. */
+    suspend fun findPhone(): String {
+        val listening = hub.findPhone()
+        val said = when (listening) {
+            null -> "I can't reach the Latitude to ring your phone 😕"
+            true -> "Ringing your phone! 📱"
+            false -> "Asked your phone to ring, but the Puff app hasn't checked in lately 🤔"
+        }
+        GadgetState.log("find my phone: ${listening ?: "hub unreachable"}")
+        GadgetState.react(if (listening == true) Reaction.HOP else Reaction.SHAKE)
+        GadgetState.say(said, 20)
+        return said
+    }
+
     /** Ask Muse for the morning brief, as a turn on the Echo. */
     fun morningBrief() {
         talk(BRIEF_PROMPT, null, label = "Morning brief")
@@ -659,6 +674,7 @@ class GadgetService : Service() {
             GadgetState.setReply("")
             GadgetState.setReplyImages(emptyList())
             GadgetState.setTurnActive(true)
+            val turnStart = System.currentTimeMillis()
             try {
                 var heardText = if (label != null) label else text.orEmpty()
                 val reply = chat.turn(text, wav) { heard, partial ->
@@ -671,6 +687,7 @@ class GadgetService : Service() {
                 }
                 if (reply != null) {
                     history.add(com.rusty.museecho.integrations.Exchange(System.currentTimeMillis(), heardText, reply.text, label))
+                    if (label == null && changesCalendar(heardText)) refreshAgendaAfter(turnStart)
                     deliver(reply, source = label, wakeScreen = false)
                 } else {
                     GadgetState.setTalk(Talk.REPLIED)
@@ -691,6 +708,23 @@ class GadgetService : Service() {
                 GadgetState.setTurnActive(false)
             }
         }
+    }
+
+    /** "Put the dentist on Tuesday at 3", "move my meeting to Friday", "cancel practice on my calendar"... */
+    private fun changesCalendar(heard: String): Boolean {
+        val l = heard.lowercase()
+        val verb = Regex("\\b(add|put|schedule|book|move|cancel|delete|remove|change|reschedule)\\b").containsMatchIn(l)
+        val day = Regex("\\b(calendar|today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|" +
+            "january|february|march|april|may|june|july|august|september|october|november|december)\\b").containsMatchIn(l)
+        return verb && day && ("calendar" in l || Regex("\\b(add|put|schedule|book)\\b.*\\b(on|at|for)\\b").containsMatchIn(l))
+    }
+
+    /** After a calendar change by voice, the agenda page catches up (unless Pixel already updated it). */
+    private fun refreshAgendaAfter(since: Long) = scope.launch {
+        delay(25_000)
+        if (agenda.value.value.updatedMs >= since) return@launch
+        GadgetState.log("calendar changed by voice; refreshing the agenda")
+        quietAskImpl(AGENDA_PROMPT, waitForCalm = false)
     }
 
     /**
@@ -1451,24 +1485,27 @@ class GadgetService : Service() {
     }
 
     /**
-     * Each morning, once quiet hours are over: Pixel quietly fills in the agenda page from the
-     * calendars, so it's there without waiting for the morning brief (which refreshes it again).
+     * Each morning once quiet hours are over, and again at noon and 5 pm: Pixel quietly fills in the
+     * agenda page from the calendars, so it's there without the morning brief and catches events added
+     * during the day.
      */
     private suspend fun fillAgenda() {
         var tries = 0
         var triedFor = ""
         delay(90_000)
         while (true) {
-            val today = java.time.LocalDate.now()
-            val updated = agenda.value.value.updatedMs
-            val fresh = updated > 0 && java.time.Instant.ofEpochMilli(updated).atZone(java.time.ZoneId.systemDefault()).toLocalDate() == today
-            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-            if (!fresh && hour >= 5 && !isQuietNow()) {
-                if (triedFor != today.toString()) { triedFor = today.toString(); tries = 0 }
-                if (tries < 4) {
-                    tries++
-                    GadgetState.log("filling in today's agenda")
-                    quietAskImpl(AGENDA_PROMPT, waitForCalm = false)
+            val now = java.time.LocalDateTime.now()
+            val slot = AGENDA_HOURS.lastOrNull { now.hour >= it }
+            if (slot != null && !isQuietNow()) {
+                val slotStart = now.toLocalDate().atTime(slot, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                val key = "${now.toLocalDate()} $slot"
+                if (agenda.value.value.updatedMs < slotStart) {
+                    if (triedFor != key) { triedFor = key; tries = 0 }
+                    if (tries < 4) {
+                        tries++
+                        GadgetState.log("filling in today's agenda")
+                        quietAskImpl(AGENDA_PROMPT, waitForCalm = false)
+                    }
                 }
             }
             delay(10 * 60_000L)
@@ -1567,6 +1604,13 @@ class GadgetService : Service() {
                 if (System.currentTimeMillis() - lastJournalMs > 60_000) postJournalOnce()
             }
         }
+        // And when the agenda or its leave times change, so the phone's alerts are current.
+        scope.launch {
+            GadgetState.leaveBy.drop(1).debounce(10_000).collect { postJournalOnce() }
+        }
+        scope.launch {
+            agenda.value.drop(1).debounce(10_000).collect { postJournalOnce() }
+        }
         while (true) {
             if (System.currentTimeMillis() - lastJournalMs > 4 * 60_000L) postJournalOnce()
             delay(5 * 60_000L)
@@ -1588,6 +1632,25 @@ class GadgetService : Service() {
             GadgetState.weekRecap.value?.let { (text, at) -> put("week_recap", text); put("week_recap_ms", at) }
             put("friends", json.parseToJsonElement(json.encodeToString(FriendsData.serializer(), GadgetState.friends.value.copy(today = emptyMap()))))
             put("street", life.friends.streetInfo())
+            // The agenda page, with when to leave for events that have an address (for the phone's agenda and alerts).
+            put("agenda", agenda.value.value.let { d ->
+                val leave = GadgetState.leaveBy.value
+                fun items(list: List<com.rusty.museecho.integrations.AgendaItem>, withLeave: Boolean) = kotlinx.serialization.json.JsonArray(list.map { i ->
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("time", i.time); put("title", i.title); put("location", i.location)
+                        if (withLeave) leave["${i.title}|${i.time}"]?.let { put("leave_min", it) }
+                    }
+                })
+                val isToday = BlobBrain.isToday(d.date, java.time.LocalDate.now())
+                kotlinx.serialization.json.buildJsonObject {
+                    put("date", d.date)
+                    put("day", if (isToday) java.time.LocalDate.now().toString() else "")
+                    put("updated_ms", d.updatedMs)
+                    put("items", items(d.items, isToday))
+                    put("upcoming", kotlinx.serialization.json.JsonArray(d.upcoming.map { u ->
+                        kotlinx.serialization.json.buildJsonObject { put("date", u.date); put("items", items(u.items, false)) } }))
+                }
+            })
             // For the phone's remote.
             put("remote", kotlinx.serialization.json.buildJsonObject {
                 put("tv", tvAvailable())
@@ -2069,6 +2132,8 @@ class GadgetService : Service() {
         const val PAIRING_WINDOW_MS = 10 * 60_000L
         const val RING_MAX_MS = 2 * 60_000L
         const val RECONNECT_KICK_MS = 5 * 60_000L
+        /** When the agenda is refreshed from the calendars (hours). */
+        val AGENDA_HOURS = listOf(5, 12, 17)
         const val AGENDA_PROMPT = "Quietly, with no reply needed beyond \"done\": on the Echo Show, call agenda.set with " +
             "today's events from ALL my Google calendars (school, church, family and the rest, not just the primary one) " +
             "plus the next 3 days as upcoming. Give events a location (street address) when they have one. Call it even " +

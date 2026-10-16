@@ -89,6 +89,7 @@ class HomeCommands(
             optional = mapOf("minutes" to param("integer", "Clear it after this many minutes. Omit to keep it.")))
         spec("glance.clear", "Clear the glance line under the clock.")
         spec("agenda.set", "Fill in the agenda page on the Echo Show (swipe left from the clock): today's events in order. " +
+            "Whenever you add, move or cancel a calendar event for Rusty, call this again so the page stays current. " +
             "Replaces what's there; call it each morning (and when plans change).",
             required = mapOf("items" to param("array", "Events: [{\"time\": \"9:30 AM\" or \"All day\", \"title\": \"Dentist\", " +
                 "\"location\": \"street address (optional)\"}], in order. With a time and an address the Echo works out " +
@@ -133,6 +134,8 @@ class HomeCommands(
             required = mapOf("actions" to param("array", "List of {\"label\": short button text, \"prompt\": the request to send}.")))
         spec("media.control", "Control whatever is playing on the Echo Show (any app, or audio.play_url).",
             required = mapOf("action" to param("string", "One of: play_pause, play, pause, next, previous, stop.")))
+        spec("phone.find", "Make Rusty's phone ring loudly (even on silent) so he can find it, through the Puff app on it. " +
+            "For \"where's my phone\", \"find my phone\", \"ring my phone\".")
         spec("laptop.shortcuts", "List the shortcuts Rusty has allowed on his laptop (same safelist as Sofa's Coding Mode).")
         spec("laptop.run", "Run one of the laptop's safelisted shortcuts (from laptop.shortcuts).",
             required = mapOf("shortcut" to param("string", "Its key or label.")),
@@ -399,6 +402,10 @@ class HomeCommands(
             else commandOk(buildJsonObject {
                 put("shortcuts", buildJsonArray { list.forEach { add(buildJsonObject { put("key", it.key); put("label", it.label) }) } })
             })
+        }
+        "phone.find" -> {
+            val said = GadgetService.instance?.findPhone() ?: return commandError("the Echo app isn't running")
+            commandOk(buildJsonObject { put("result", said) })
         }
         "laptop.run" -> withLaptop {
             val want = params.str("shortcut") ?: return@withLaptop commandError("shortcut is required")

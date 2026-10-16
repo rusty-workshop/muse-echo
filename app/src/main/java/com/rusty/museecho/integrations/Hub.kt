@@ -120,6 +120,12 @@ class Hub(private val context: Context) {
     /** Every minute: the Echo is alive (echo-hub turns this into a health check Kuma can watch). */
     suspend fun heartbeat(info: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/heartbeat", info.toString()).first == 200 }
 
+    /** Ring Rusty's phone (the Puff app listens for it). True if the app was listening; null if the hub didn't answer. */
+    suspend fun findPhone(): Boolean? = withContext(Dispatchers.IO) {
+        val (code, body) = post("/echo/find-phone", "{}")
+        if (code != 200) null else body?.contains("\"listening\": true") == true
+    }
+
     /** Timers etc., for the watch. */
     suspend fun postState(state: JsonObject): Boolean = withContext(Dispatchers.IO) { post("/echo/state", state.toString()).first == 200 }
 
