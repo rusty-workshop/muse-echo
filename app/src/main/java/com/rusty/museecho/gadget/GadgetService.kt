@@ -201,6 +201,7 @@ class GadgetService : Service() {
         scope.launch { watchPresence() }
         scope.launch { writeDiary() }
         scope.launch { fetchDailyThing() }
+        scope.launch { fillAgenda() }
         scope.launch { watchDesktop() }
         life = BlobLife(this, scope, hub, ::isQuietNow, ::quietAsk, { diary.load().size }, { frame.photos().size }).also { it.start() }
         scope.launch { postJournal() }
@@ -1449,6 +1450,31 @@ class GadgetService : Service() {
         return true
     }
 
+    /**
+     * Each morning, once quiet hours are over: Pixel quietly fills in the agenda page from the
+     * calendars, so it's there without waiting for the morning brief (which refreshes it again).
+     */
+    private suspend fun fillAgenda() {
+        var tries = 0
+        var triedFor = ""
+        delay(90_000)
+        while (true) {
+            val today = java.time.LocalDate.now()
+            val updated = agenda.value.value.updatedMs
+            val fresh = updated > 0 && java.time.Instant.ofEpochMilli(updated).atZone(java.time.ZoneId.systemDefault()).toLocalDate() == today
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            if (!fresh && hour >= 5 && !isQuietNow()) {
+                if (triedFor != today.toString()) { triedFor = today.toString(); tries = 0 }
+                if (tries < 4) {
+                    tries++
+                    GadgetState.log("filling in today's agenda")
+                    quietAskImpl(AGENDA_PROMPT, waitForCalm = false)
+                }
+            }
+            delay(10 * 60_000L)
+        }
+    }
+
     /** Each morning: a word, fact or bit of history for the little sign on the clock page. */
     private suspend fun fetchDailyThing() {
         var tries = 0
@@ -2043,6 +2069,10 @@ class GadgetService : Service() {
         const val PAIRING_WINDOW_MS = 10 * 60_000L
         const val RING_MAX_MS = 2 * 60_000L
         const val RECONNECT_KICK_MS = 5 * 60_000L
+        const val AGENDA_PROMPT = "Quietly, with no reply needed beyond \"done\": on the Echo Show, call agenda.set with " +
+            "today's events from ALL my Google calendars (school, church, family and the rest, not just the primary one) " +
+            "plus the next 3 days as upcoming. Give events a location (street address) when they have one. Call it even " +
+            "if today is empty, so the Echo knows it's up to date."
         const val BRIEF_PROMPT = "Good morning! Give me my morning brief, under 80 words and written to be spoken aloud " +
             "(no lists or markdown): today's weather here, what's on my calendars today, anything I asked you to remind " +
             "me about, and whether anything is wrong on the Latitude server. Check ALL my Google calendars (school, " +

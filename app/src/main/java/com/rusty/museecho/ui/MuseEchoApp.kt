@@ -757,7 +757,7 @@ private fun AgendaPage(actions: UiActions) {
         }
         Spacer(Modifier.height(10.dp))
         if (day.items.isEmpty()) {
-            EmptyState(EmptyArt.LAZY_DAY, "Nothing on today. $name fills this in with the morning brief,\nor ask \"what's on today?\"",
+            EmptyState(EmptyArt.LAZY_DAY, "Nothing on today. $name checks your calendars each morning,\nor ask \"what's on today?\"",
                 Modifier.fillMaxWidth().padding(top = 8.dp))
         }
         Column(Modifier.verticalScroll(scroll)) {
