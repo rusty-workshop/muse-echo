@@ -141,6 +141,11 @@ class EchoCommands(
         spec("blob.friends",
             "List the blob's friends: their names, personalities, bios, how close they are, their favourite games, " +
                 "who they're closest to among the others, and recent letters.")
+        spec("blob.world",
+            "What's going on in the blob's world right now (check this before answering questions about it): the " +
+                "mystery visitor's clues (and who it was, once solved), the umbrella-or-raincoat debate, letters Rusty " +
+                "posted that are on their way, its pet's tricks and how far along each is, today's outfit and the closet, " +
+                "trivia streaks and recent scores, the last radio show, and recent fortunes.")
         spec("blob.fortune", "Crack open a fortune cookie on the Echo Show: the blob holds it up and reads the fortune " +
             "(for \"fortune\", \"give me a fortune cookie\"). Returns the fortune.")
         spec("trivia.start", "Start trivia night on the Echo Show: you're asked (in the background) for 5 questions, which " +
@@ -222,6 +227,47 @@ class EchoCommands(
                     // Written in the background (it asks you), so this returns straight away.
                     GadgetService.instance?.scopeLaunch { fl.writeLetter(f) }
                     commandOk(buildJsonObject { put("status", "${f.shownName} is writing a letter") })
+                }
+                "blob.world" -> {
+                    val d = GadgetState.friends.value
+                    fun name(id: String) = d.friends.firstOrNull { it.id == id }?.shownName ?: "a friend"
+                    val today = java.time.LocalDate.now().toString()
+                    commandOk(buildJsonObject {
+                        d.mystery?.let { m ->
+                            put("mystery_visitor", buildJsonObject {
+                                put("date", m.date)
+                                put("clues", kotlinx.serialization.json.JsonArray(m.clues.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                                put("guessed", kotlinx.serialization.json.JsonArray(m.guesses.map { kotlinx.serialization.json.JsonPrimitive(name(it)) }))
+                                // The answer only once it's out: don't spoil it for Rusty.
+                                if (m.open) put("status", "unsolved: Rusty is guessing from the phone (3 guesses); don't reveal it")
+                                else put("it_was", name(m.friendId))
+                            })
+                        }
+                        d.debate?.takeIf { it.date >= today }?.let { db ->
+                            put("rain_gear_debate", buildJsonObject {
+                                put("for_date", db.date); put("blob_wants", db.puff); put("friend", name(db.friendId)); put("friend_wants", db.friend)
+                                put("decided", db.choice.ifEmpty { "not yet: Rusty settles it from the phone" })
+                            })
+                        }
+                        put("letters_from_rusty_in_the_post", d.mail.count { !it.delivered })
+                        d.pet?.let { pet ->
+                            put("pet", buildJsonObject {
+                                put("kind", pet.label); put("name", pet.name)
+                                put("tricks", buildJsonObject {
+                                    FunLife.tricksFor(pet.kind).forEach { t -> put(t, (pet.tricks[t] ?: 0).let { if (it >= 100) "learned" else "$it%" }) }
+                                })
+                            })
+                        }
+                        put("outfit_today", d.outfit.takeIf { it.startsWith(today) }?.substringAfter('|')?.let { FunLife.costumeLabel(it) } ?: "none")
+                        put("closet", kotlinx.serialization.json.JsonArray(d.wardrobe.map { kotlinx.serialization.json.JsonPrimitive(FunLife.costumeLabel(it)) }))
+                        put("trivia", buildJsonObject {
+                            put("games", d.trivia.played); put("best_score", d.trivia.bestScore)
+                            put("streak", d.trivia.streak); put("best_streak", d.trivia.bestStreak)
+                            put("recent", kotlinx.serialization.json.JsonArray(d.trivia.rounds.takeLast(5).map { kotlinx.serialization.json.JsonPrimitive("${it.date} ${it.theme}: ${it.score}/5") }))
+                        })
+                        d.radio.lastOrNull()?.let { r -> put("last_radio_show", "${r.date}: " + r.lines.joinToString(" / ")) }
+                        put("recent_fortunes", kotlinx.serialization.json.JsonArray(d.fortunes.takeLast(5).map { kotlinx.serialization.json.JsonPrimitive(it.text) }))
+                    })
                 }
                 "blob.fortune" -> {
                     val text = GadgetService.instance?.life?.fun_?.fortune() ?: return@withTimeout commandError("not ready yet")

@@ -38,6 +38,36 @@ class FunLife(
         scope.launch { mysteryLoop() }
         scope.launch { radioLoop() }
         scope.launch { petShowOffLoop() }
+        scope.launch { briefPixel() }
+    }
+
+    /**
+     * Once per new [BRIEFING_VERSION]: tell Pixel (in the background, no reply needed) what's new in
+     * the blob's world, so it can talk about it. blob.world is the live source; this is the heads-up.
+     */
+    private suspend fun briefPixel() {
+        delay(6 * 60_000L)
+        if (prefs.getInt("pixel_briefed", 0) >= BRIEFING_VERSION) return
+        val name = GadgetState.blobCalled()
+        val ok = quietAsk(
+            "A heads-up about new things in $name's world on my Echo Show (the blob that lives there), so you can talk " +
+                "about them; no need to do anything now, just reply \"got it\".\n" +
+                "- Fortune cookies: blob.fortune cracks one open (for \"fortune\" or \"give me a fortune cookie\").\n" +
+                "- Trivia night: trivia.start with a theme; 5 questions you'll be asked to write, Rusty taps the answers, $name cheers or groans.\n" +
+                "- Rusty can write $name letters from his phone; they arrive by mail truck the next morning and $name writes back.\n" +
+                "- When the laptop plays something lively, a dance visit turns into a disco with a mirror ball.\n" +
+                "- The evening before rain or snow, $name and a friend argue about umbrella or raincoat (or earmuffs or scarf); Rusty settles it from his phone and $name wears the winner.\n" +
+                "- A mystery visitor in a trench coat (one of the friends in disguise) sometimes drops 3 clues; Rusty guesses who from his phone. Never give the answer away while it's unsolved.\n" +
+                "- $name's pet is learning tricks Rusty teaches from his phone, a practice a day.\n" +
+                "- A new costume arrives in $name's closet each month.\n" +
+                "- Most evenings around 8 to 9:30, $name does a little radio show in speech bubbles.\n" +
+                "- Also: phone.find rings Rusty's phone (\"where's my phone\").\n" +
+                "For the current state of any of this (clues, the debate, trick progress, outfit, trivia streaks, the last radio show), call blob.world.",
+        )
+        if (ok != null) {
+            prefs.edit().putInt("pixel_briefed", BRIEFING_VERSION).apply()
+            GadgetState.log("briefed Pixel on what's new")
+        }
     }
 
     private fun today() = LocalDate.now().toString()
@@ -382,6 +412,9 @@ class FunLife(
     }
 
     companion object {
+        /** Bump to send Pixel a new heads-up (briefPixel) after adding things it should know about. */
+        const val BRIEFING_VERSION = 1
+
         /** A new costume each month (added to the closet on the first day Puff's up). */
         val COSTUMES = mapOf(1 to "EARMUFFS", 2 to "HEART_GLASSES", 3 to "CLOVER_HAT", 4 to "BUNNY_EARS", 5 to "FLOWER_CROWN",
             6 to "SUNHAT", 7 to "STAR_GLASSES", 8 to "SNORKEL", 9 to "GRAD_CAP", 10 to "SCARECROW_HAT", 11 to "LEAF_CROWN", 12 to "ANTLERS")
