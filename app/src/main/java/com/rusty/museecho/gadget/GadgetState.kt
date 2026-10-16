@@ -34,7 +34,7 @@ enum class Reaction(val ms: Long) {
 }
 
 /** Something the blob holds up (blob.hold, or its own forecast props). */
-enum class HeldItem { NONE, WATERING_CAN, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN, HOURGLASS }
+enum class HeldItem { NONE, FORTUNE, MIC, WATERING_CAN, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN, HOURGLASS }
 
 data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
@@ -91,6 +91,10 @@ data class FriendScene(
     val hidingAt: String? = null,
     val hug: Boolean = false,
     val apart: Boolean = false,
+    /** A disco: mirror ball and coloured lights (a dance visit while the laptop plays something lively). */
+    val disco: Boolean = false,
+    /** The mystery visitor's trench coat and hat (on the guest). */
+    val disguise: Boolean = false,
     /** Which friend (id) is blushing / giggling after a tap, until when. */
     val tappedId: String? = null,
     val tappedUntil: Long = 0,
@@ -985,4 +989,31 @@ object GadgetState {
         val stamped = "${timeFormat.format(Date())}  $line"
         _log.update { (it + stamped).takeLast(200) }
     }
+
+    // -- Fun things: the mail truck, Puff's radio show, pet tricks, trivia night ----------------------
+
+    /** When the mail truck last pulled up with a letter from Rusty (it drives across for a few seconds). */
+    @Volatile var mailTruckAt = 0L
+
+    /** Puff's radio show is on air until this time (0: not on). */
+    private val _onAirUntil = MutableStateFlow(0L)
+    val onAirUntil: StateFlow<Long> = _onAirUntil.asStateFlow()
+    fun setOnAir(untilMs: Long) { _onAirUntil.value = untilMs }
+
+    /** The pet showing a trick: which one, when it started, and whether it's got it yet (or is still practising). */
+    data class PetTrickShow(val trick: String, val atMs: Long, val learned: Boolean)
+    private val _petTrick = MutableStateFlow<PetTrickShow?>(null)
+    val petTrick: StateFlow<PetTrickShow?> = _petTrick.asStateFlow()
+    fun showPetTrick(s: PetTrickShow?) { _petTrick.value = s }
+
+    /** Trivia night: Pixel's questions and how it's going (null: not playing). */
+    data class TriviaQ(val q: String, val options: List<String>, val answer: Int)
+    data class TriviaGame(val theme: String, val questions: List<TriviaQ> = emptyList(), val at: Int = 0, val score: Int = 0,
+        /** The option tapped for the current question (shown for a moment before the next), or -1. */
+        val picked: Int = -1, val loading: Boolean = true, val failed: Boolean = false, val lastTouchMs: Long = System.currentTimeMillis()) {
+        val done get() = !loading && questions.isNotEmpty() && at >= questions.size
+    }
+    private val _trivia = MutableStateFlow<TriviaGame?>(null)
+    val trivia: StateFlow<TriviaGame?> = _trivia.asStateFlow()
+    fun setTrivia(g: TriviaGame?) { _trivia.value = g }
 }

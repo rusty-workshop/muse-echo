@@ -83,6 +83,7 @@ internal fun BlobPage(actions: UiActions) {
                 if (away) TripCard(actions, Modifier.fillMaxSize())
             }
             FriendLayer(center, half, actions)
+            ShowLayer(center, half)
             PetTapTarget(center, half)
             TreasureTapLayer(center, half)
             BookshelfTapTarget(center, half)
@@ -575,8 +576,7 @@ private fun WardrobeContent(modifier: Modifier) {
     val data by GadgetState.friends.collectAsState()
     val today = java.time.LocalDate.now().toString()
     val wearing = data.outfit.takeIf { it.startsWith(today) }?.substringAfter('|')
-    val emoji = mapOf("PARTY_HAT" to "🎉", "SANTA_HAT" to "🎅", "WITCH_HAT" to "🧙", "SUNGLASSES" to "😎", "SCARF" to "🧣",
-        "HEADPHONES" to "🎧", "CROWN" to "👑", "BOW" to "🎀", "FLOWER" to "🌸", "POPCORN" to "🍿")
+    val emoji = com.rusty.museecho.gadget.FunLife.OUTFIT_EMOJI
     Column(modifier) {
         Text("${GadgetState.blobName.collectAsState().value.ifBlank { "Puff" }} picks an outfit each morning for the weather and its mood. Tap one to choose for it today.",
             color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
@@ -592,7 +592,7 @@ private fun WardrobeContent(modifier: Modifier) {
                 }
             }
         }
-        Text("New outfits come from gifts, market day and holidays.", color = Palette.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        Text("New outfits come from gifts, market day, holidays and a new costume every month.", color = Palette.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
     }
 }
 

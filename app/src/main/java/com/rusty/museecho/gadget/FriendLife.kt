@@ -485,19 +485,21 @@ class FriendLife(
             when (a) { "tictactoe", "ttt" -> "tictactoe"; "rockpaperscissors" -> "rps"; "hideandseek" -> "hideseek"; "teatime" -> "tea"; else -> a }
         }?.takeIf { it in FriendsBrain.ACTIVITIES } ?: pickActivity(f)
         // Two at once for the sociable things, now and then.
-        val group = act in setOf("birthday", "trickortreat", "blockparty", "talentshow", "market", "puppetshow")
+        // A disco brings the gang (two at once), and so does a big debate.
+        val group = act in setOf("birthday", "trickortreat", "blockparty", "talentshow", "market", "puppetshow") || (act == "dance" && discoMusic())
         val clubMate = if (act.endsWith("club")) store.data.friends.firstOrNull {
             it.id != f.id && it.name.isNotBlank() && FriendsBrain.clubOf(it).name.lowercase() == act.removeSuffix("club")
         } else null
         val second = clubMate ?: if (group || act in setOf("chat", "tea", "party", "dance", "story", "movie") && rnd.nextFloat() < 0.3f) pickBuddy(f) else null
-        val guest = if (act == "cousin") FriendsBrain.relativeOf(f.p).let { r ->
+        val guest = if (act == "mystery") Friend(id = "guest", name = "???", personality = f.personality, color = 0xFF9A8B78,
+            scaleOverride = f.scale, bio = "a mystery visitor") else if (act == "cousin") FriendsBrain.relativeOf(f.p).let { r ->
             val c = Color(f.color)
             Friend(id = "guest", name = r.names[(f.id.hashCode() and 0x7fffffff) % r.names.size], personality = f.personality,
                 color = (0xFF000000 or (androidx.core.graphics.ColorUtils.blendARGB(f.color.toInt(), if (r.scale > 1f) 0xFF808080.toInt() else 0xFFFFFFFF.toInt(), 0.35f).toLong() and 0xFFFFFF)),
                 scaleOverride = r.scale, bio = r.relation)
         } else null
         GadgetState.setGuest(guest)
-        val ids = if (guest != null) listOf(f.id, "guest") else if (act in setOf("groupphoto", "puffbirthday", "firstsnow", "petshow", "picnic")) listOf(f.id) + store.data.friends.filter { it.id != f.id && it.name.isNotBlank() }.map { it.id }
+        val ids = if (act == "mystery") listOf("guest") else if (guest != null) listOf(f.id, "guest") else if (act in setOf("groupphoto", "puffbirthday", "firstsnow", "petshow", "picnic")) listOf(f.id) + store.data.friends.filter { it.id != f.id && it.name.isNotBlank() }.map { it.id }
             else listOfNotNull(f.id, second?.id)
         val base = when (act) {
             "sleepover" -> 9 * 60
@@ -580,6 +582,8 @@ class FriendLife(
                     "petshow" -> petShow(f, v)
                     "picnic" -> picnic(f, v)
                     "cardmaking" -> cardMaking(f, second, v)
+                    "mystery" -> mysteryVisit(f, v)
+                    "raingear" -> rainGear(f, v)
                     else -> squabble(f)
                 }
                 // After the game or whatever it was, they stay and hang out until it's time to go.
@@ -595,7 +599,8 @@ class FriendLife(
                 GadgetState.scene { FriendScene() }
                 GadgetState.setFriend(null)
                 GadgetState.setGuest(null)
-                record(f, act, detail, second)
+                // The mystery visitor stays a mystery (no diary entry or timeline line giving it away).
+                if (act != "mystery") record(f, act, detail, second)
             }
         }
         return "${f.shownName} is visiting (${FriendsBrain.activityLabel(act)})"
@@ -795,10 +800,107 @@ class FriendLife(
     }
 
     private suspend fun dance(f: Friend, v: FriendVisit): String {
-        say(f, "I heard music! 💃", 2_500)
+        val disco = discoMusic()
+        if (disco) GadgetState.scene { it.copy(disco = true) }
+        say(f, if (disco) "DISCO TIME!! 🪩" else "I heard music! 💃", 2_500)
+        if (disco) blob("Lights! Ball! Let's go! ✨", 3_000)
         GadgetState.setMood(Mood.HAPPY, ((v.untilMs - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(5))
         untilEnd(v)
-        return ""
+        GadgetState.scene { it.copy(disco = false) }
+        return if (disco) "a disco" else ""
+    }
+
+    /** Something lively on the laptop: a dance visit turns into a disco. */
+    private fun discoMusic(): Boolean = GadgetState.laptopStatus.value?.let { it.playing && it.musicVibe.isNotEmpty() && it.musicVibe != "calm" } == true
+
+    // -- The mystery visitor ----------------------------------------------------------------------
+
+    /**
+     * A friend in disguise (trench coat, hat), who leaves three clues and goes; Rusty guesses who it
+     * was from the phone. [f] is who it really is.
+     */
+    private suspend fun mysteryVisit(f: Friend, v: FriendVisit): String {
+        val g = GadgetState.guest.value ?: return chat(f, null)
+        GadgetState.scene { it.copy(disguise = true) }
+        val clues = FriendsBrain.mysteryClues(f, store.data.friends, rnd)
+        blob("Um… hello? Who are you? 🤔", 3_000)
+        say(g, "…just a visitor. Nobody special. 🕵️", 3_500)
+        blob("You look a bit familiar… 🧐", 3_000)
+        clues.forEach { c -> say(g, "…", 1_500); GadgetState.say("🔎 $c", 6); delay(4_500) }
+        say(g, "I must be going. Farewell! 🎩", 3_000)
+        store.update { it.copy(mystery = Mystery(f.id, java.time.LocalDate.now().toString(), clues)) }
+        DayLog.event("a mystery visitor in a trench coat came by and left clues", "mystery")
+        // It slips out early; Puff's left wondering.
+        delay(1_500)
+        blob("Who WAS that?! Rusty, help me work it out! 🕵️", 4_000)
+        return "a mystery visitor"
+    }
+
+    /** Rusty's guess (a friend id, from the phone). True if right. */
+    fun guessMystery(id: String): Boolean? {
+        val m = store.data.mystery?.takeIf { it.open } ?: return null
+        val right = id == m.friendId
+        val who = store.friend(m.friendId)?.shownName ?: "a friend"
+        val guessed = store.friend(id)?.shownName ?: "them"
+        val tries = m.guesses + id
+        store.update { it.copy(mystery = m.copy(guesses = tries, solved = right, revealed = !right && tries.size >= 3)) }
+        when {
+            right -> {
+                GadgetState.react(Reaction.CELEBRATE)
+                GadgetState.say("It was $who all along!! You got it! 🕵️🎉", 20)
+                DayLog.event("Rusty solved the mystery: it was $who", "mystery")
+                if (GadgetState.friend.value == null && GadgetState.trip.value == null && !isQuiet()) scope.launch {
+                    delay(4_000)
+                    visit("chat", 4, store.friend(m.friendId)?.name)
+                    delay(3_000)
+                    store.friend(m.friendId)?.let { GadgetState.setFriendSay("Hehe, you caught me! 🎩", it.id) }
+                }
+            }
+            tries.size >= 3 -> {
+                GadgetState.react(Reaction.HOP)
+                GadgetState.say("It was… $who! The coat came off! 😆", 20)
+                DayLog.event("the mystery visitor turned out to be $who", "mystery")
+            }
+            else -> {
+                GadgetState.react(Reaction.SHAKE)
+                GadgetState.say("Hmm, I don't think it was $guessed… 🤔 (${3 - tries.size} guesses left)", 15)
+            }
+        }
+        return right
+    }
+
+    // -- Umbrella or raincoat? ----------------------------------------------------------------------
+
+    /** The evening before a wet day: Puff and a friend can't agree what to wear tomorrow. */
+    private suspend fun rainGear(f: Friend, v: FriendVisit): String {
+        val snow = "snow" in GadgetState.weather.value?.tomorrowSummary.orEmpty().lowercase()
+        val (a, b) = if (snow) "earmuffs" to "scarf" else "umbrella" to "raincoat"
+        val (puff, friend) = if (rnd.nextBoolean()) a to b else b to a
+        val tomorrow = java.time.LocalDate.now().plusDays(1).toString()
+        store.update { it.copy(debate = Debate(tomorrow, f.id, puff, friend)) }
+        val why = mapOf("umbrella" to "It keeps EVERYTHING dry! ☂️", "raincoat" to "Hands free for puddles! 🧥",
+            "earmuffs" to "Cosy ears are happy ears! 🎧", "scarf" to "A scarf is a hug for your neck! 🧣")
+        blob(if (snow) "Snow tomorrow! ❄️ I'm wearing earmuffs… or a scarf…" else "Rain tomorrow! 🌧️ I'll need my $puff.", 3_500)
+        say(f, "$friend is better! ${why[friend]}", 3_500)
+        blob("No, $puff! ${why[puff]}", 3_500)
+        say(f, "${friend.uppercase()}!", 2_000)
+        blob("${puff.uppercase()}!!", 2_000)
+        say(f, "Let's ask Rusty! 📱", 3_000)
+        blob("Rusty decides! Check your phone! 📱", 4_000)
+        DayLog.event("argued with ${f.shownName} about $puff or $friend for tomorrow", "debate")
+        untilEnd(v)
+        return "an argument about $puff or $friend"
+    }
+
+    /** Rusty's pick (from the phone). */
+    fun settleDebate(choice: String): Boolean {
+        val d = store.data.debate?.takeIf { it.choice.isEmpty() && choice in setOf(it.puff, it.friend) } ?: return false
+        store.update { it.copy(debate = d.copy(choice = choice, by = "rusty")) }
+        val winner = if (choice == d.puff) GadgetState.blobCalled() else store.friend(d.friendId)?.shownName ?: "the friend"
+        GadgetState.react(if (choice == d.puff) Reaction.CELEBRATE else Reaction.NOD)
+        GadgetState.say(if (choice == d.puff) "Rusty says $choice! I WIN! 🎉" else "Rusty says $choice… fine, $winner wins 😤", 20)
+        DayLog.event("Rusty settled it: $choice ($winner was right)", "debate")
+        return true
     }
 
     private suspend fun movie(f: Friend, v: FriendVisit): String {

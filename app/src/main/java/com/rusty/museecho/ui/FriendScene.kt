@@ -137,6 +137,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         val t = tAt(now)
         val (f0, s0) = spots.first()
         val mid = Offset((blob.x + f0.x) / 2, blob.y + 74 * dp)
+        if (scene.disco) drawDisco(blob, t, vibe, dp, enter)
         scene.board?.let { drawBoard(it, mid, 42 * dp, Color(friends.first().color)) }
         if (scene.throwAt > 0) {
             val p = ((now - scene.throwAt) / 1200f).coerceIn(0f, 1f)
@@ -299,7 +300,9 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
                 .clickable(remember { MutableInteractionSource() }, null) { GadgetService.instance?.life?.friends?.tapped(f.id) },
         ) {
             Blob(Modifier.requiredSize(sizeDp).align(Alignment.TopCenter), actions, mini = true, gaze = gaze, moodOverride = mood,
-                tintOverride = Color(f.color), ownStyle = false, accessoryOverride = accessory)
+                tintOverride = Color(f.color), ownStyle = false, accessoryOverride = if (scene.disguise && f.id == "guest") null else accessory)
+            // The mystery visitor's disguise: a trench coat and a hat pulled low.
+            if (scene.disguise && f.id == "guest") Canvas(Modifier.requiredSize(sizeDp).align(Alignment.TopCenter)) { drawDisguise(this.size.width) }
         }
         // Its own speech bubble, and a name tag.
         (says[f.id] ?: says[""].takeIf { i == 0 })?.let { text ->
@@ -600,4 +603,62 @@ internal fun HomeEventChips(modifier: Modifier = Modifier) {
                     .padding(horizontal = 12.dp, vertical = 5.dp))
         }
     }
+}
+
+/** A disco: a mirror ball overhead, coloured beams sweeping the room and a dance floor pulsing on the beat. */
+private fun DrawScope.drawDisco(blob: Offset, t: Float, vibe: String, dp: Float, enter: Float) {
+    val beat = if (vibe == "hype") 0.43f else 0.5f
+    val n = (t / beat).toInt()
+    val pulse = 1f - (t % beat) / beat
+    val cols = listOf(Color(0xFFFF4FD8), Color(0xFF45D3C7), Color(0xFFFFC94D), Color(0xFF8B6CFF))
+    val ball = Offset(blob.x, (blob.y - 175 * dp).coerceAtLeast(26 * dp))
+    // Beams from the ball, sweeping.
+    for (k in 0 until 4) {
+        val a = t * 0.9f + k * PI.toFloat() / 2
+        val end = Offset(blob.x + cos(a) * 260 * dp, blob.y + 90 * dp + sin(a * 0.7f) * 20 * dp)
+        val perp = Offset(-(end.y - ball.y), end.x - ball.x).let { p -> p / kotlin.math.max(1f, kotlin.math.hypot(p.x, p.y)) * (30 * dp) }
+        drawPath(Path().apply { moveTo(ball.x, ball.y); lineTo(end.x + perp.x, end.y + perp.y); lineTo(end.x - perp.x, end.y - perp.y); close() },
+            cols[k].copy(alpha = 0.12f * enter))
+    }
+    // The dance floor.
+    for (i in -4..4) {
+        val on = (i + n) % 2 == 0
+        drawRoundRect(cols[(i + 4 + n) % 4].copy(alpha = enter * (0.08f + (if (on) 0.3f else 0.08f) * pulse)),
+            Offset(blob.x + i * 40 * dp - 18 * dp, blob.y + 84 * dp), Size(36 * dp, 12 * dp), CornerRadius(3 * dp))
+    }
+    // Specks of light on the walls.
+    for (k in 0 until 12) {
+        val ang = t * 0.6f + k * 0.52f
+        val p = Offset(blob.x + cos(ang) * (150 + (k % 3) * 45f) * dp, blob.y - 40 * dp + sin(ang * 1.3f + k) * 90 * dp)
+        drawCircle(Color.White.copy(alpha = 0.5f * abs(sin(t * 3f + k)) * enter), 2.2f * dp, p)
+    }
+    // The ball on its string, facets glinting.
+    drawLine(Color.White.copy(alpha = 0.35f * enter), Offset(ball.x, 0f), ball, 1.5f * dp)
+    drawCircle(Color(0xFFC9D1DE).copy(alpha = enter), 17 * dp, ball)
+    for (row in -2..2) for (c in -2..2) {
+        if (row * row + c * c > 6) continue
+        val glint = 0.3f + 0.7f * abs(sin(t * 5f + row * 1.7f + c * 2.3f))
+        drawRect(Color.White.copy(alpha = glint * enter * 0.8f), Offset(ball.x + c * 6 * dp - 2.2f * dp, ball.y + row * 6 * dp - 2.2f * dp), Size(4.4f * dp, 4.4f * dp))
+    }
+}
+
+/** A tan trench coat with a collar and belt over the lower body, and a brown hat pulled down low. */
+private fun DrawScope.drawDisguise(w: Float) {
+    val coat = Color(0xFFB59A6A)
+    val dark = Color(0xFF7A6340)
+    val c = Offset(w / 2, w / 2)
+    val r = w * 0.42f
+    drawPath(Path().apply {
+        moveTo(c.x - r * 0.62f, c.y + r * 0.05f); lineTo(c.x + r * 0.62f, c.y + r * 0.05f)
+        lineTo(c.x + r * 0.8f, c.y + r * 0.95f); lineTo(c.x - r * 0.8f, c.y + r * 0.95f); close()
+    }, coat)
+    // Collar flaps and the belt.
+    drawPath(Path().apply { moveTo(c.x - r * 0.62f, c.y + r * 0.05f); lineTo(c.x, c.y + r * 0.45f); lineTo(c.x - r * 0.15f, c.y + r * 0.05f); close() }, dark)
+    drawPath(Path().apply { moveTo(c.x + r * 0.62f, c.y + r * 0.05f); lineTo(c.x, c.y + r * 0.45f); lineTo(c.x + r * 0.15f, c.y + r * 0.05f); close() }, dark)
+    drawRect(dark, Offset(c.x - r * 0.72f, c.y + r * 0.58f), Size(r * 1.44f, r * 0.09f))
+    // The hat.
+    val hatY = c.y - r * 0.38f
+    drawOval(Color(0xFF4A3B2A), Offset(c.x - r * 0.75f, hatY - r * 0.05f), Size(r * 1.5f, r * 0.2f))
+    drawRoundRect(Color(0xFF5A4834), Offset(c.x - r * 0.42f, hatY - r * 0.42f), Size(r * 0.84f, r * 0.42f), CornerRadius(r * 0.12f))
+    drawRect(Color(0xFF2A2018), Offset(c.x - r * 0.42f, hatY - r * 0.12f), Size(r * 0.84f, r * 0.08f))
 }

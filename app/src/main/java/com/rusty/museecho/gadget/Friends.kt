@@ -80,11 +80,42 @@ data class Storyline(val title: String, val cast: List<String>, val chapters: Li
     val next get() = chapters.getOrNull(at)
 }
 
+@Serializable
+data class Fortune(val date: String, val text: String)
+
+@Serializable
+data class MailFromRusty(val text: String, val sentMs: Long, val arrive: String, val delivered: Boolean = false,
+    val deliveredMs: Long = 0, val replied: Boolean = false)
+
+/** [puff] and [friend] are the two choices ("umbrella", "raincoat"); [choice] once someone picks. */
+@Serializable
+data class Debate(val date: String, val friendId: String, val puff: String, val friend: String, val choice: String = "",
+    val by: String = "", val worn: Boolean = false)
+
+@Serializable
+data class Mystery(val friendId: String, val date: String, val clues: List<String>, val guesses: List<String> = emptyList(),
+    val solved: Boolean = false, val revealed: Boolean = false) {
+    val open get() = !solved && !revealed
+}
+
+@Serializable
+data class TriviaStats(val played: Int = 0, val bestScore: Int = 0, val streak: Int = 0, val bestStreak: Int = 0,
+    val rounds: List<TriviaRound> = emptyList())
+
+@Serializable
+data class TriviaRound(val date: String, val theme: String, val score: Int)
+
+@Serializable
+data class RadioShow(val date: String, val lines: List<String>)
+
 /** Puff's pet: what it is, its name, and when it arrived (it grows over the weeks). */
 @Serializable
 data class Pet(val kind: String, val name: String = "", val bornMs: Long = 0, val fedDate: String = "", val pats: Int = 0,
     /** Pet show rosettes won ("Shiniest shell · 2026-10"). */
-    val rosettes: List<String> = emptyList()) {
+    val rosettes: List<String> = emptyList(),
+    /** Tricks Rusty is teaching it from the phone: name to 0..100 (learned at 100), and "date|trick" practised. */
+    val tricks: Map<String, Int> = emptyMap(),
+    val practised: List<String> = emptyList()) {
     /** 0.6 when new, full size after a month. */
     fun growth(nowMs: Long) = (0.6f + 0.4f * ((nowMs - bornMs) / (30 * 86_400_000f))).coerceIn(0.6f, 1f)
     val label get() = when (kind) { "snail" -> "snail"; "sprout" -> "sprout"; else -> "goldfish" }
@@ -184,6 +215,19 @@ data class FriendsData(
     val boardWins: Map<String, Int> = emptyMap(),
     /** The house upgrade each friend has (id to level 1-2), so each is announced once. */
     val upgrades: Map<String, Int> = emptyMap(),
+    /** The fortune-cookie jar, newest last. */
+    val fortunes: List<Fortune> = emptyList(),
+    /** Letters Rusty wrote Puff from the phone, on their way (they arrive the next day) and answered. */
+    val mail: List<MailFromRusty> = emptyList(),
+    /** Umbrella or raincoat? Puff and a friend disagree the evening before a wet day; Rusty settles it. */
+    val debate: Debate? = null,
+    /** The latest mystery visitor: which friend it really was, and the clues it left. */
+    val mystery: Mystery? = null,
+    val trivia: TriviaStats = TriviaStats(),
+    /** The month ("2026-10") whose costume has arrived. */
+    val costumeMonth: String = "",
+    /** Puff's late-night radio shows, newest last. */
+    val radio: List<RadioShow> = emptyList(),
 ) {
     fun bond(a: String, b: String) = bonds[FriendsBrain.pair(a, b)] ?: 0
 
@@ -222,7 +266,7 @@ object FriendsBrain {
         "hideseek", "story", "party", "comfort", "gift", "redecorate", "squabble",
         "birthday", "trickortreat", "snowball", "blockparty", "talentshow", "sad", "market", "treasure", "bookclub", "danceclub", "gardenclub", "groupphoto", "cheerrusty", "cousin", "puddles", "kites", "lollies",
         "puffbirthday", "cooking", "fort", "stargazing", "soup", "welcome",
-        "boardgame", "puppetshow", "firstsnow", "petshow", "picnic", "cardmaking")
+        "boardgame", "puppetshow", "firstsnow", "petshow", "picnic", "cardmaking", "mystery", "raingear")
 
     fun pair(a: String, b: String) = if (a < b) "$a|$b" else "$b|$a"
 
@@ -396,7 +440,7 @@ object FriendsBrain {
             specialDay && has("PARTY_HAT") -> "PARTY_HAT"
             tempF != null && tempF <= 55 && has("SCARF") -> "SCARF"
             tempF != null && tempF >= 85 && ("clear" in s || "sun" in s || "partly" in s) && has("SUNGLASSES") -> "SUNGLASSES"
-            else -> owned.filter { it !in setOf("SCARF", "SUNGLASSES", "POPCORN", "HEADPHONES") }.randomOrNull()?.takeIf { rnd.nextInt(4) > 0 }
+            else -> owned.filter { it !in setOf("SCARF", "SUNGLASSES", "POPCORN", "HEADPHONES", "RAINCOAT", "SNORKEL", "EARMUFFS") }.randomOrNull()?.takeIf { rnd.nextInt(4) > 0 }
         }
     }
 
@@ -764,6 +808,8 @@ object FriendsBrain {
         "tea" -> "tea time"
         "movie" -> "movie night"
         "dance" -> "a dance party"
+        "mystery" -> "a mystery visit"
+        "raingear" -> "an umbrella-or-raincoat debate"
         "story" -> "storytime"
         "party" -> "a party"
         "comfort" -> "a cheer-up visit"
@@ -820,6 +866,43 @@ object FriendsBrain {
         val name = field("name")?.split(Regex("\\s+"))?.firstOrNull()?.trim('.', ',', '!')?.takeIf { it.length in 2..16 } ?: return null
         val bio = field("bio")?.takeIf { it.isNotEmpty() } ?: return null
         return name.replaceFirstChar { it.uppercase() } to bio.take(300)
+    }
+
+    /** Three clues the mystery visitor lets slip about who it really is ([f]), the more telling ones first. */
+    fun mysteryClues(f: Friend, all: List<Friend>, rnd: java.util.Random): List<String> {
+        val habit = when (f.p) {
+            Personality.BOUNCY -> "It couldn't stop bouncing on its toes"
+            Personality.SHY -> "It blushed whenever anyone looked at it"
+            Personality.SLEEPY -> "It yawned three times in a row"
+            Personality.SPARKLY -> "A little glitter fell out of its coat"
+            Personality.TINY -> "Its coat dragged on the floor, it was so small"
+        }
+        val clues = mutableListOf(habit)
+        if (f.petKind.isNotBlank()) clues += "A tiny ${f.petKind} peeked out of its pocket"
+        clues += "A ${colorName(f.color)} thread was poking out of its sleeve"
+        f.favourite()?.let { clues += "It kept asking to play ${activityLabel(it)}" }
+        clues += "It had a ${clubOf(f).name.lowercase()} club badge pinned inside its coat"
+        f.birthday.takeIf { it.length == 5 }?.let { b ->
+            val m = java.time.Month.of(b.take(2).toInt()).getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US)
+            clues += "It mentioned its birthday is in $m"
+        }
+        // Prefer clues that set it apart from the others.
+        fun shared(c: String) = all.count { o -> o.id != f.id && o.name.isNotBlank() && mysteryClueFits(c, o) }
+        return clues.distinct().sortedBy { shared(it) + rnd.nextFloat() }.take(3).shuffled(rnd)
+    }
+
+    private fun mysteryClueFits(c: String, o: Friend): Boolean = when {
+        "bouncing" in c -> o.p == Personality.BOUNCY
+        "blushed" in c -> o.p == Personality.SHY
+        "yawned" in c -> o.p == Personality.SLEEPY
+        "glitter" in c -> o.p == Personality.SPARKLY
+        "so small" in c -> o.p == Personality.TINY
+        "peeked out" in c -> o.petKind.isNotBlank() && "tiny ${o.petKind} " in c
+        "thread" in c -> colorName(o.color) in c
+        "asking to play" in c -> o.favourite()?.let { activityLabel(it) in c } == true
+        "club badge" in c -> clubOf(o).name.lowercase() in c
+        "birthday" in c -> o.birthday.length == 5 && java.time.Month.of(o.birthday.take(2).toInt()).getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US) in c
+        else -> false
     }
 
     fun colorName(c: Long) = when (c) {

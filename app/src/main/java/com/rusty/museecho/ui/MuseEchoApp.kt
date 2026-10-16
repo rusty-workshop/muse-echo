@@ -303,6 +303,8 @@ fun MuseEchoApp(actions: UiActions) {
                     is Screen.Reader -> ReaderScreen(s, actions)
                 }
             }
+            // Trivia night, over whatever's showing.
+            TriviaOverlay()
             // The status chips stop short of the icons on the right (their width varies), and the laptop
             // chip shrinks with an ellipsis rather than running into them.
             var iconsWidth by remember { mutableStateOf(0) }
@@ -585,6 +587,7 @@ private fun IdleFace(actions: UiActions) {
     BookshelfTapTarget(blobCenter, blobHalf)
     WindowTapTarget(blobCenter, blobHalf)
     SouvenirBadge(blobCenter, blobHalf)
+    ShowLayer(blobCenter, blobHalf)
     }
 }
 

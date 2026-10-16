@@ -142,6 +142,7 @@ class BlobLife(
         GadgetState.setWeekRecap(prefs.getString("week_recap", null)?.let { it to prefs.getLong("week_recap_ms", 0L) })
         scope.launch { roomLoop() }
         friends.start()
+        fun_.start()
         scope.launch { laptopLoop() }
         scope.launch { weekRecapLoop() }
         scope.launch { GadgetState.assignments.collect { rememberAssignments(it) } }
@@ -211,6 +212,7 @@ class BlobLife(
     // -- Friends (gadget/FriendLife.kt) -----------------------------------------------------------
 
     val friends = FriendLife(context, scope, this, isQuiet, quietAsk)
+    val fun_ = FunLife(context, scope, this, isQuiet, quietAsk)
 
     /** A visit now (Pixel's blob.friend, the playground). */
     fun visit(activity: String? = null, minutes: Int? = null, name: String? = null): String = friends.visit(activity, minutes, name)

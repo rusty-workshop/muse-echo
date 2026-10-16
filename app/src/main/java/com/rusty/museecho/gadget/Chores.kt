@@ -284,6 +284,24 @@ class Chores(
                         val caption = (item["caption"] as? JsonPrimitive)?.contentOrNull.orEmpty()
                         scope.launch { phonePhoto(id, dest, caption) }
                     }
+                    // The fun things from the phone app.
+                    "fortune" -> { toFront(); GadgetService.instance?.life?.fun_?.fortune(); postState() }
+                    "rustyletter" -> (item["text"] as? JsonPrimitive)?.contentOrNull?.let { GadgetService.instance?.life?.fun_?.letterFromRusty(it) }
+                    "settle" -> (item["choice"] as? JsonPrimitive)?.contentOrNull?.let { c ->
+                        if (GadgetService.instance?.life?.friends?.settleDebate(c) == true) toFront()
+                    }
+                    "mystery_guess" -> (item["friend_id"] as? JsonPrimitive)?.contentOrNull?.let { id ->
+                        if (GadgetService.instance?.life?.friends?.guessMystery(id) != null) toFront()
+                    }
+                    "pettrick" -> (item["trick"] as? JsonPrimitive)?.contentOrNull?.let { t ->
+                        toFront()
+                        GadgetState.log("pet trick from the phone: " + GadgetService.instance?.life?.fun_?.practise(t))
+                    }
+                    "trivia" -> GadgetService.instance?.life?.fun_?.startTrivia((item["theme"] as? JsonPrimitive)?.contentOrNull.orEmpty())
+                    "outfit" -> (item["name"] as? JsonPrimitive)?.contentOrNull?.let { n ->
+                        val fl = GadgetService.instance?.life?.friends
+                        if (fl != null && (n == "NONE" || n in fl.store.data.wardrobe)) { toFront(); fl.wearToday(n.takeIf { it != "NONE" }) }
+                    }
                     "friends_add" -> {
                         val n = (item["count"] as? JsonPrimitive)?.intOrNull ?: 1
                         val added = GadgetService.instance?.life?.friends?.addFriends(n) ?: 0

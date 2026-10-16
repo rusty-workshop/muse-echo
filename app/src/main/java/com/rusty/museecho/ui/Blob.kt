@@ -1158,7 +1158,125 @@ private fun DrawScope.drawAccessory(a: Accessory, core: Offset, r: Float, t: Flo
             for (i in -1..1) drawLine(Color.White, Offset(base.x + i * r * 0.08f, base.y - r * 0.25f), Offset(base.x + i * r * 0.065f, base.y - r * 0.01f), r * 0.025f)
             for (i in 0 until 5) drawCircle(cream, r * 0.05f, Offset(base.x + (i - 2) * r * 0.055f, base.y - r * 0.28f - (i % 2) * r * 0.04f))
         }
+        else -> drawCostume(a, core, top, r, t)
     }
+}
+
+/** The raincoat and the monthly costumes from Puff's closet. */
+private fun DrawScope.drawCostume(a: Accessory, core: Offset, top: Offset, r: Float, t: Float) {
+    val eyes = core + Offset(0f, -r * 0.03f)
+    when (a) {
+        Accessory.RAINCOAT -> {
+            // A yellow hood over the head and a collar with buttons.
+            val yellow = Color(0xFFFFD23F)
+            drawArc(yellow, 180f, 180f, true, Offset(core.x - r * 0.5f, top.y - r * 0.16f), Size(r * 1.0f, r * 0.62f))
+            drawArc(Color(0xFFE0B52A), 180f, 180f, false, Offset(core.x - r * 0.5f, top.y - r * 0.16f), Size(r * 1.0f, r * 0.62f), style = Stroke(r * 0.03f))
+            val y = core.y + r * 0.3f
+            drawRoundRect(yellow, Offset(core.x - r * 0.42f, y), Size(r * 0.84f, r * 0.16f), CornerRadius(r * 0.06f))
+            for (i in -1..1) drawCircle(Color(0xFF3B6EA8), r * 0.025f, Offset(core.x + i * r * 0.16f, y + r * 0.08f))
+        }
+        Accessory.EARMUFFS -> {
+            drawArc(Color(0xFFB0B8C8), 200f, 140f, false, core - Offset(r * 0.5f, r * 0.55f), Size(r * 1.0f, r * 1.0f), style = Stroke(r * 0.04f, cap = StrokeCap.Round))
+            for (side in listOf(-1f, 1f)) {
+                val c = Offset(core.x + side * r * 0.48f, core.y - r * 0.1f)
+                drawCircle(Color(0xFFFFB3C7), r * 0.11f, c)
+                for (k in 0 until 6) drawCircle(Color.White.copy(alpha = 0.5f), r * 0.025f, c + Offset(cos(k * TAU / 6) * r * 0.06f, sin(k * TAU / 6) * r * 0.06f))
+            }
+        }
+        Accessory.HEART_GLASSES -> for (side in listOf(-1f, 1f)) {
+            val c = Offset(eyes.x + side * r * 0.17f, eyes.y)
+            drawHeart(c + Offset(0f, -r * 0.02f), r * 0.075f, Color(0xFFFF4F7B))
+            drawLine(Color(0xFFFF4F7B), Offset(eyes.x - r * 0.06f, eyes.y - r * 0.02f), Offset(eyes.x + r * 0.06f, eyes.y - r * 0.02f), r * 0.025f)
+        }
+        Accessory.CLOVER_HAT -> rotate(-6f, top) {
+            val green = Color(0xFF2E9E5B)
+            drawRect(green, Offset(top.x - r * 0.17f, top.y - r * 0.3f), Size(r * 0.34f, r * 0.3f))
+            drawOval(green, Offset(top.x - r * 0.32f, top.y - r * 0.05f), Size(r * 0.64f, r * 0.1f))
+            drawRect(Color(0xFF1A1A1A), Offset(top.x - r * 0.17f, top.y - r * 0.1f), Size(r * 0.34f, r * 0.05f))
+            val c = Offset(top.x + r * 0.08f, top.y - r * 0.2f)
+            for (k in 0 until 3) drawCircle(Color(0xFF7FE0A8), r * 0.035f, c + Offset(cos(k * TAU / 3 - 1.57f) * r * 0.035f, sin(k * TAU / 3 - 1.57f) * r * 0.035f))
+        }
+        Accessory.BUNNY_EARS -> for (side in listOf(-1f, 1f)) {
+            val base = Offset(core.x + side * r * 0.16f, top.y + r * 0.02f)
+            rotate(side * 12f + sin(t * 2f + side) * 4f, base) {
+                drawOval(Color.White, Offset(base.x - r * 0.08f, base.y - r * 0.42f), Size(r * 0.16f, r * 0.44f))
+                drawOval(Color(0xFFFFB3C7), Offset(base.x - r * 0.04f, base.y - r * 0.36f), Size(r * 0.08f, r * 0.32f))
+            }
+        }
+        Accessory.FLOWER_CROWN -> for (k in 0 until 7) {
+            val x = core.x - r * 0.36f + k * r * 0.12f
+            val y = top.y + r * 0.04f - sin(k / 6f * PI.toFloat()) * r * 0.08f
+            val col = listOf(Color(0xFFFFB3DE), Color(0xFFFFE07A), Color(0xFFB3D8FF))[k % 3]
+            for (p in 0 until 5) drawCircle(col, r * 0.03f, Offset(x + cos(p * TAU / 5) * r * 0.03f, y + sin(p * TAU / 5) * r * 0.03f))
+            drawCircle(Color(0xFFFFC94D), r * 0.018f, Offset(x, y))
+        }
+        Accessory.SUNHAT -> rotate(-5f, top) {
+            val straw = Color(0xFFF2D49B)
+            drawOval(straw, Offset(top.x - r * 0.52f, top.y - r * 0.06f), Size(r * 1.04f, r * 0.16f))
+            drawArc(straw, 180f, 180f, true, Offset(top.x - r * 0.24f, top.y - r * 0.26f), Size(r * 0.48f, r * 0.5f))
+            drawRect(Color(0xFFFF7A8A), Offset(top.x - r * 0.24f, top.y - r * 0.06f), Size(r * 0.48f, r * 0.05f))
+        }
+        Accessory.STAR_GLASSES -> for (side in listOf(-1f, 1f)) {
+            val c = Offset(eyes.x + side * r * 0.17f, eyes.y)
+            drawStar5(c, r * 0.13f, Color(0xFF4F8BFF))
+            drawCircle(Color.White.copy(alpha = 0.35f + 0.35f * kotlin.math.abs(sin(t * 3f + side))), r * 0.02f, c + Offset(-r * 0.04f, -r * 0.04f))
+        }
+        Accessory.SNORKEL -> {
+            drawRoundRect(Color(0xFF45D3C7).copy(alpha = 0.85f), Offset(eyes.x - r * 0.3f, eyes.y - r * 0.1f), Size(r * 0.6f, r * 0.2f), CornerRadius(r * 0.08f))
+            drawRoundRect(Color(0xFFBFE6F5).copy(alpha = 0.6f), Offset(eyes.x - r * 0.26f, eyes.y - r * 0.07f), Size(r * 0.52f, r * 0.14f), CornerRadius(r * 0.06f))
+            val tube = Offset(core.x + r * 0.34f, eyes.y)
+            drawLine(Color(0xFFFF9A3C), tube, tube + Offset(0f, -r * 0.42f), r * 0.06f, StrokeCap.Round)
+            drawLine(Color(0xFFFF9A3C), tube + Offset(0f, -r * 0.42f), tube + Offset(-r * 0.06f, -r * 0.46f), r * 0.06f, StrokeCap.Round)
+        }
+        Accessory.GRAD_CAP -> rotate(-8f, top) {
+            val ink = Color(0xFF26223A)
+            drawRect(ink, Offset(top.x - r * 0.16f, top.y - r * 0.12f), Size(r * 0.32f, r * 0.12f))
+            drawPath(Path().apply {
+                moveTo(top.x - r * 0.36f, top.y - r * 0.14f); lineTo(top.x, top.y - r * 0.24f); lineTo(top.x + r * 0.36f, top.y - r * 0.14f)
+                lineTo(top.x, top.y - r * 0.05f); close()
+            }, ink)
+            drawLine(Color(0xFFFFC94D), Offset(top.x, top.y - r * 0.15f), Offset(top.x + r * 0.28f, top.y - r * 0.08f), r * 0.02f)
+            drawLine(Color(0xFFFFC94D), Offset(top.x + r * 0.28f, top.y - r * 0.08f), Offset(top.x + r * 0.28f + sin(t * 2f) * r * 0.02f, top.y + r * 0.08f), r * 0.025f)
+        }
+        Accessory.SCARECROW_HAT -> rotate(-10f, top) {
+            val straw = Color(0xFFD9B26A)
+            drawOval(straw, Offset(top.x - r * 0.46f, top.y - r * 0.06f), Size(r * 0.92f, r * 0.14f))
+            drawPath(Path().apply {
+                moveTo(top.x - r * 0.2f, top.y); lineTo(top.x - r * 0.12f, top.y - r * 0.3f); lineTo(top.x + r * 0.14f, top.y - r * 0.26f); lineTo(top.x + r * 0.2f, top.y); close()
+            }, Color(0xFFB8893C))
+            drawRect(Color(0xFF7A4A2A), Offset(top.x - r * 0.18f, top.y - r * 0.08f), Size(r * 0.37f, r * 0.05f))
+            // Straw poking out from under the brim.
+            for (k in -3..3) drawLine(straw, Offset(top.x + k * r * 0.12f, top.y + r * 0.04f), Offset(top.x + k * r * 0.13f + r * 0.02f, top.y + r * 0.12f), r * 0.015f)
+        }
+        Accessory.LEAF_CROWN -> for (k in 0 until 6) {
+            val x = core.x - r * 0.32f + k * r * 0.13f
+            val y = top.y + r * 0.03f - sin(k / 5f * PI.toFloat()) * r * 0.08f
+            val col = listOf(Color(0xFFE0782A), Color(0xFFC0392B), Color(0xFFF2B33D))[k % 3]
+            rotate(-30f + k * 12f, Offset(x, y)) { drawOval(col, Offset(x - r * 0.05f, y - r * 0.09f), Size(r * 0.1f, r * 0.17f)) }
+        }
+        Accessory.ANTLERS -> for (side in listOf(-1f, 1f)) {
+            val brown = Color(0xFF8A5A3C)
+            val base = Offset(core.x + side * r * 0.2f, top.y + r * 0.04f)
+            val tip = base + Offset(side * r * 0.12f, -r * 0.34f)
+            drawLine(brown, base, tip, r * 0.045f, StrokeCap.Round)
+            drawLine(brown, base + Offset(side * r * 0.04f, -r * 0.14f), base + Offset(side * r * 0.2f, -r * 0.2f), r * 0.035f, StrokeCap.Round)
+            drawLine(brown, base + Offset(side * r * 0.08f, -r * 0.25f), base + Offset(-side * r * 0.04f, -r * 0.36f), r * 0.03f, StrokeCap.Round)
+            if (side > 0) drawCircle(Color(0xFFE5484D), r * 0.05f, core + Offset(0f, r * 0.06f))
+        }
+        else -> {}
+    }
+}
+
+private fun DrawScope.drawStar5(c: Offset, s: Float, color: Color) {
+    drawPath(Path().apply {
+        for (k in 0 until 10) {
+            val a = -PI.toFloat() / 2 + k * PI.toFloat() / 5
+            val rr = if (k % 2 == 0) s * 0.6f else s * 0.26f
+            val p = c + Offset(cos(a) * rr, sin(a) * rr)
+            if (k == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y)
+        }
+        close()
+    }, color)
 }
 
 /** Three z's drifting up and fading, on a loop. */
@@ -1263,6 +1381,19 @@ private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float,
     val a = core + Offset(-r * 0.44f, r * 0.36f)
     when (item) {
         HeldItem.NONE -> {}
+        HeldItem.FORTUNE -> {
+            // A fortune cookie cracked in two, the little slip of paper sticking out.
+            val tan = Color(0xFFE8B86A)
+            for (side in listOf(-1f, 1f)) drawArc(tan, if (side < 0) 90f else -90f, 180f, true,
+                Offset(a.x + side * r * 0.07f - r * 0.09f, a.y - r * 0.08f), Size(r * 0.18f, r * 0.16f))
+            rotate(-12f, a) { drawRect(Color.White, Offset(a.x - r * 0.03f, a.y - r * 0.2f), Size(r * 0.06f, r * 0.2f)) }
+            drawLine(Palette.coral, Offset(a.x - r * 0.01f, a.y - r * 0.16f), Offset(a.x + r * 0.02f, a.y - r * 0.06f), r * 0.01f)
+        }
+        HeldItem.MIC -> {
+            drawLine(Color(0xFF55596A), a + Offset(0f, -r * 0.05f), a + Offset(0f, r * 0.14f), r * 0.03f, StrokeCap.Round)
+            drawRoundRect(Color(0xFF8C93A8), Offset(a.x - r * 0.06f, a.y - r * 0.2f), Size(r * 0.12f, r * 0.17f), CornerRadius(r * 0.06f))
+            for (k in 1..3) drawLine(Color(0xFF55596A), Offset(a.x - r * 0.05f, a.y - r * 0.2f + k * r * 0.04f), Offset(a.x + r * 0.05f, a.y - r * 0.2f + k * r * 0.04f), r * 0.008f)
+        }
         HeldItem.WATERING_CAN -> rotate(-20f + sin(t * 2f) * 4f, a) {
             // Tilted, pouring a few drops.
             val can = Color(0xFF6FB3A8)

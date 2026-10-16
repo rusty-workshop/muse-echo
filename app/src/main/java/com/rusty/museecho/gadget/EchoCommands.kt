@@ -141,6 +141,11 @@ class EchoCommands(
         spec("blob.friends",
             "List the blob's friends: their names, personalities, bios, how close they are, their favourite games, " +
                 "who they're closest to among the others, and recent letters.")
+        spec("blob.fortune", "Crack open a fortune cookie on the Echo Show: the blob holds it up and reads the fortune " +
+            "(for \"fortune\", \"give me a fortune cookie\"). Returns the fortune.")
+        spec("trivia.start", "Start trivia night on the Echo Show: you're asked (in the background) for 5 questions, which " +
+            "Rusty answers by tapping; the blob cheers or groans at each.",
+            optional = mapOf("theme" to param("string", "A theme (\"animals\", \"space\", \"90s music\"...). Default: anything.")))
         spec("blob.letter",
             "Have one of the blob's friends send it a letter now (you'll be asked to write it, in the friend's voice). " +
                 "The blob holds it up and reads it out; it's kept in the Blob page's mailbox.",
@@ -217,6 +222,14 @@ class EchoCommands(
                     // Written in the background (it asks you), so this returns straight away.
                     GadgetService.instance?.scopeLaunch { fl.writeLetter(f) }
                     commandOk(buildJsonObject { put("status", "${f.shownName} is writing a letter") })
+                }
+                "blob.fortune" -> {
+                    val text = GadgetService.instance?.life?.fun_?.fortune() ?: return@withTimeout commandError("not ready yet")
+                    commandOk(buildJsonObject { put("fortune", text) })
+                }
+                "trivia.start" -> {
+                    val r = GadgetService.instance?.life?.fun_?.startTrivia(params.string("theme").orEmpty()) ?: return@withTimeout commandError("not ready yet")
+                    commandOk(buildJsonObject { put("status", r) })
                 }
                 "blob.feelings" -> {
                     val fl = GadgetService.instance?.life?.friends ?: return@withTimeout commandError("not ready yet")

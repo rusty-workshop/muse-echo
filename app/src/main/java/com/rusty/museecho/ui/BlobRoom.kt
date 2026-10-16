@@ -38,6 +38,9 @@ import com.rusty.museecho.gadget.Decor
 import com.rusty.museecho.gadget.GadgetState
 import com.rusty.museecho.gadget.Mood
 import kotlin.math.sin
+import kotlin.math.PI
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.rotate
 
 /**
  * The blob's room, drawn faintly behind it on the clock page: what it has collected so far,
@@ -60,10 +63,13 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
     val theme by GadgetState.roomTheme.collectAsState()
     // A goldfish swims all the time; otherwise only weather and leaves need frames.
     val moving = ((sky != WindowWeather.NONE || autumn) && Decor.WINDOW.name in items || pet?.kind == "goldfish") && !quiet
+    // A pet trick plays smoothly for its few seconds.
+    val trick by GadgetState.petTrick.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(moving) {
+    LaunchedEffect(moving, trick) {
         while (true) {
-            if (moving) awaitBeat(120) else kotlinx.coroutines.delay(60_000)
+            val tricking = trick?.let { System.currentTimeMillis() - it.atMs < PET_TRICK_MS } == true
+            if (tricking) awaitBeat(40) else if (moving) awaitBeat(120) else kotlinx.coroutines.delay(60_000)
             now = System.currentTimeMillis()
         }
     }
@@ -186,7 +192,7 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         // The window-box garden, under the window.
         if (has(Decor.WINDOW)) drawGarden(Offset(cx - 124 * u, blob.y - 68 * u), u, garden, dim, t)
         // The pet, on the rug.
-        pet?.let { drawPet(it, Offset(cx - 60 * u, floor + 2 * u), u, dim, now, t) }
+        pet?.let { drawPet(it, Offset(cx - 60 * u, floor + 2 * u), u, dim, now, t, trick) }
     }
 }
 
@@ -438,7 +444,43 @@ private fun DrawScope.drawGarden(at: Offset, u: Float, stage: Int, dim: Float, t
     }
 }
 
-private fun DrawScope.drawPet(pet: com.rusty.museecho.gadget.Pet, at: Offset, u: Float, dim: Float, now: Long, t: Float) {
+private const val PET_TRICK_MS = 4_500L
+
+private fun DrawScope.drawPet(pet: com.rusty.museecho.gadget.Pet, at: Offset, u: Float, dim: Float, now: Long, t: Float,
+    trick: GadgetState.PetTrickShow? = null) {
+    val tr = trick?.takeIf { now - it.atMs in 0 until PET_TRICK_MS }
+    if (tr == null) { drawPetBody(pet, at, u, dim, now, t); return }
+    // A trick: a big jump (with a spin for the spinning ones) once it's learned, little wobbly hops while practising.
+    val p = (now - tr.atMs) / PET_TRICK_MS.toFloat()
+    val name = tr.trick.lowercase()
+    val hop = if (tr.learned) kotlin.math.max(0f, sin(p * PI.toFloat() * 2f)) * 18 * u else kotlin.math.abs(sin(p * PI.toFloat() * 3f)) * 6 * u
+    val spins = tr.learned && listOf("spin", "twirl", "hoop", "dash").any { it in name }
+    val angle = if (spins) 360f * ((p * 2f).coerceAtMost(1f)) else if (!tr.learned) sin(p * 14f) * 10f else 0f
+    val pivot = at + Offset(0f, -8 * u - hop)
+    translate(top = -hop) {
+        rotate(angle, pivot) { drawPetBody(pet, at, u, dim, now, t) }
+    }
+    val c = at + Offset(0f, -22 * u - hop)
+    if (tr.learned) {
+        for (k in 0 until 6) {
+            val a = k * 1.05f + p * 4f
+            val d = (8 + 14 * p) * u
+            val spot = c + Offset(kotlin.math.cos(a) * d, sin(a) * d * 0.7f)
+            if ("heart" in name || "bow" in name || "wave" in name)
+                drawCircle(Color(0xFFFF7A9A).copy(alpha = (1f - p) * dim), 2.2f * u, spot)
+            else drawCircle(Color(0xFFFFF3B0).copy(alpha = (1f - p) * dim), 1.8f * u, spot)
+        }
+        if ("bloom" in name) for (k in 0 until 5) {
+            val a = k * 1.256f
+            drawCircle(Color(0xFFFFB3DE).copy(alpha = dim), 2.6f * u * (p * 2f).coerceAtMost(1f), c + Offset(kotlin.math.cos(a) * 3 * u, sin(a) * 3 * u))
+        }
+    } else if (p > 0.5f) {
+        // Not quite: a little puff of effort.
+        drawCircle(Color.White.copy(alpha = (1f - p) * 0.6f * dim), 3 * u, c + Offset(6 * u, 4 * u))
+    }
+}
+
+private fun DrawScope.drawPetBody(pet: com.rusty.museecho.gadget.Pet, at: Offset, u: Float, dim: Float, now: Long, t: Float) {
     val g = pet.growth(now)
     val poked = (now - GadgetState.petPokedAt).coerceAtLeast(0) < 2_500
     val wiggle = if (poked) sin(t * 18f) * 2 * u else 0f

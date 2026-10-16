@@ -1334,6 +1334,12 @@ class GadgetService : Service() {
     /** Run [block] on the service's own scope (outlives a command's timeout). */
     fun scopeLaunch(block: suspend () -> Unit) = scope.launch { block() }
 
+    /** Ask Pixel something in the background right away (no waiting for a calm moment), e.g. trivia questions. */
+    suspend fun askQuietlyNow(prompt: String): String? = quietAskImpl(prompt, waitForCalm = false)
+
+    /** Bring the Echo app to the front (trivia started from the phone). */
+    fun showApp() = bringToFront(force = true)
+
     fun goodnight() = scope.launch {
         // A one-line bedtime story first, in its bubble while it settles down.
         if (::life.isInitialized) GadgetState.say(life.friends.bedtimeStory(), 20)
