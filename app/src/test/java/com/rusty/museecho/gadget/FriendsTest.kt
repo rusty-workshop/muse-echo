@@ -80,21 +80,6 @@ class FriendsTest {
     }
 
     @Test
-    fun comicsParse() {
-        val reply = """TITLE: The Great Sock Hunt
-PANEL: Bean, Moss | curious | none | room | Where did Moss go? | Morning
-PANEL: Moss | surprised | gift | outside | Found you a sock! |
-PANEL: Bean, Moss | happy | heart | room | Best gift ever. | The end"""
-        val c = FriendsBrain.parseComic(reply, "2026-10-12")!!
-        assertEquals("The Great Sock Hunt", c.title)
-        assertEquals(listOf("Bean", "Moss"), c.panels[0].who)
-        assertEquals("", c.panels[0].prop)
-        assertEquals("gift", c.panels[1].prop)
-        assertEquals("outside", c.panels[1].place)
-        assertNull(FriendsBrain.parseComic("TITLE: x\nPANEL: a | happy | none | room | hi", "d"))
-    }
-
-    @Test
     fun blobNames() {
         assertEquals("Bean", FriendsBrain.parseBlobName("NAME: bean!"))
         assertNull(FriendsBrain.parseBlobName("How about Bean?"))
@@ -159,27 +144,15 @@ CHAPTER: Puff | Pebble made it to the top! 🎉"""
     }
 
     @Test
-    fun gazetteParses() {
-        val g = FriendsBrain.parseGazette("""HEADLINE: Snail Wins Race!
-ARTICLE: Miso's big day | Miso the snail crossed the rug.
-ARTICLE: Market news | Glitter sold out.
-WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
-        assertEquals("Snail Wins Race!", g.headline)
-        assertEquals(2, g.articles.size)
-        assertEquals("Cloudy with a chance of cookies", g.weather)
-    }
-
-    @Test
-    fun everyoneHasAClubAndAPet() {
+    fun everyoneHasAClub() {
         Personality.entries.forEach { p ->
             val f = Friend("x", personality = p.name)
             assertTrue(FriendsBrain.clubOf(f) in FriendsBrain.Club.entries)
-            assertTrue(FriendsBrain.petEmoji(FriendsBrain.petFor(p)) != "🐟" || FriendsBrain.petFor(p) == "glitterfish")
         }
     }
 
     @Test
-    fun penpalsBooksRelativesStickers() {
+    fun penpalsBooksStickers() {
         val p = FriendsBrain.parsePenpal("**NAME:** Sora!\nPLACE: a lighthouse in Hokkaido\nBIO: Loves the sea.")!!
         assertEquals("Sora", p.name)
         assertEquals("a lighthouse in Hokkaido", p.place)
@@ -188,8 +161,6 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
         assertEquals("The Puddle Who Wanted to Be a Lake", b.title)
         assertEquals("Pip", b.reader)
         assertNull(FriendsBrain.parseBook("I can't think of one", "Pip", "2026-10-12"))
-        Personality.entries.forEach { assertTrue(FriendsBrain.relativeOf(it).names.isNotEmpty()) }
-        assertTrue(FriendsBrain.relativeOf(Personality.TINY).scale < FriendsBrain.relativeOf(Personality.SLEEPY).scale)
         val ids = FriendsBrain.STICKERS.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
         assertTrue(FriendsBrain.STICKERS.all { it.who == "puff" || it.who == "you" })
@@ -197,14 +168,7 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
     }
 
     @Test
-    fun recipesStarsFestivals() {
-        val r = FriendsBrain.parseRecipe("**TITLE:** Cloud Cupcakes\nINGREDIENTS: 1 cup flour; 2 eggs; a pinch of moonlight\nSTEPS: Mix; Bake 20 min; Eat", "Puff & Pip", "2026-10-12", true)!!
-        assertEquals("Cloud Cupcakes", r.title)
-        assertEquals(3, r.ingredients.size)
-        assertEquals("Bake 20 min", r.steps[1])
-        assertNull(FriendsBrain.parseRecipe("TITLE: Nothing", "Puff", "2026-10-12", false))
-        assertEquals(3, FriendsBrain.parseLines("1. A sock went missing 🧦\n2. It was scary\n3. It was in the jar 🍪\n4. extra")!!.size)
-        assertNull(FriendsBrain.parseLines("just one line"))
+    fun starsAndFestivals() {
         assertEquals("The Sleepy Teapot", FriendsBrain.parseConstellation("NAME: The Sleepy Teapot\nSHAPE: a teapot having a nap", "Puff", "2026-10-12")!!.name)
         assertEquals("full moon", FriendsBrain.moonPhase(java.time.LocalDate.of(2024, 10, 17)).second)
         assertEquals("new moon", FriendsBrain.moonPhase(java.time.LocalDate.of(2024, 10, 2)).second)
@@ -220,15 +184,11 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
     }
 
     @Test
-    fun boardPuppetsAnniversariesCalendar() {
+    fun boardAnniversariesCalendar() {
         assertEquals(11 to "ladder", FriendsBrain.snakesMove(1, 2))
         assertEquals(4 to "snake", FriendsBrain.snakesMove(10, 4))
         assertEquals(27 to null, FriendsBrain.snakesMove(27, 6))
         assertEquals(30 to null, FriendsBrain.snakesMove(27, 3))
-        val play = FriendsBrain.parsePuppet("TITLE: The Lost Hat\nSCENE 1: A hat blew away 🎩\nSCENE 2: Everyone chased it 🏃\nSCENE 3: A bird wore it 🐦\nSCENE 4: They shared 💛")!!
-        assertEquals("The Lost Hat", play.first)
-        assertEquals(4, play.second.size)
-        assertNull(FriendsBrain.parsePuppet("TITLE: Too short\nSCENE 1: one"))
         val zone = java.time.ZoneId.systemDefault()
         val met = java.time.LocalDate.of(2026, 1, 15).atStartOfDay(zone).toInstant().toEpochMilli()
         assertEquals("1 month", FriendsBrain.anniversary(met, java.time.LocalDate.of(2026, 2, 15)))
@@ -241,7 +201,5 @@ WEATHER: Cloudy with a chance of cookies""", "2026-10-18")!!
         assertEquals("🌧️", FriendsBrain.weatherDoodle("Light rain", 60))
         assertEquals(2, FriendsBrain.upgradeLevel(90))
         assertEquals(0, FriendsBrain.upgradeLevel(10))
-        assertEquals(FriendsBrain.COLLECTIBLES.size, FriendsBrain.COLLECTIBLES.map { it.id }.toSet().size)
-        assertEquals(setOf("Shells", "Leaves", "Stamps", "Stones"), FriendsBrain.COLLECTIBLES.map { it.set }.toSet())
     }
 }

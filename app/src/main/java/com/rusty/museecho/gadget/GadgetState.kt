@@ -34,7 +34,7 @@ enum class Reaction(val ms: Long) {
 }
 
 /** Something the blob holds up (blob.hold, or its own forecast props). */
-enum class HeldItem { NONE, FORTUNE, MIC, WATERING_CAN, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN, HOURGLASS }
+enum class HeldItem { NONE, FORTUNE, WATERING_CAN, PACKAGE, UMBRELLA, LETTER, GIFT, COFFEE, HEART, STAR, BALLOON, CAKE, SUNGLASSES, SUITCASE, CAMERA, BAG, CALENDAR, NOTE, SERVER, SUN, HOURGLASS }
 
 data class Held(val item: HeldItem, val text: String, val untilMs: Long)
 
@@ -58,32 +58,15 @@ data class FriendScene(
     val pillow: Boolean = false,
     /** The friend (id) who turned up sad, until cheered up. */
     val sadId: String? = null,
-    /** Market day: stalls in the room. */
-    val market: Boolean = false,
     /** Group photo day: everyone lined up, and when the camera flashed. */
     val groupPhoto: Boolean = false,
     val flashAt: Long = 0,
     /** Puff's surprise party: the lights are off while everyone hides. */
     val lightsOff: Boolean = false,
-    /** Baking: a mixing bowl between them. */
-    val bowl: Boolean = false,
-    /** A blanket fort over everyone, with a torch. */
-    val fort: Boolean = false,
     /** Stargazing: a telescope and the night sky. */
     val stargaze: Boolean = false,
     /** Snakes and ladders: Puff's and the friend's squares (1-30), and the last roll. */
     val snakes: Triple<Int, Int, Int>? = null,
-    /** A puppet show: the stage up, and the play's title. */
-    val puppets: Boolean = false,
-    val playTitle: String = "",
-    /** A picnic blanket and basket; making a card with crayons. */
-    val picnic: Boolean = false,
-    val crafting: Boolean = false,
-    /** Weather adventures: splashing in puddles, kites on the wind. */
-    val puddles: Boolean = false,
-    val kites: Boolean = false,
-    /** The friends' pets run over to play with Puff's pet. */
-    val petsPlay: Boolean = false,
     /** Halloween costumes (witch hats) and snowballs instead of a ball. */
     val costume: Boolean = false,
     val snow: Boolean = false,
@@ -91,10 +74,6 @@ data class FriendScene(
     val hidingAt: String? = null,
     val hug: Boolean = false,
     val apart: Boolean = false,
-    /** A disco: mirror ball and coloured lights (a dance visit while the laptop plays something lively). */
-    val disco: Boolean = false,
-    /** The mystery visitor's trench coat and hat (on the guest). */
-    val disguise: Boolean = false,
     /** Which friend (id) is blushing / giggling after a tap, until when. */
     val tappedId: String? = null,
     val tappedUntil: Long = 0,
@@ -608,9 +587,6 @@ object GadgetState {
         _garden.value = stage
     }
 
-    /** When the pet was last tapped or fed (it wiggles). */
-    @Volatile
-    var petPokedAt = 0L
 
     /**
      * "Hold still": no idle motion (breathing, drifting, idle antics, energy hops, friends bobbing)
@@ -738,17 +714,6 @@ object GadgetState {
     /** The same, for the start of a sentence or a title ("Puff", or "The blob" until named). */
     fun BlobCalled(): String = blobCalled().replaceFirstChar { it.uppercase() }
 
-    /** A talent show's vote: who performed (ids to names), until when. Null: no vote on. */
-    private val _vote = MutableStateFlow<Pair<List<Pair<String, String>>, Long>?>(null)
-    val vote: StateFlow<Pair<List<Pair<String, String>>, Long>?> = _vote.asStateFlow()
-
-    fun setVote(v: Pair<List<Pair<String, String>>, Long>?) {
-        _vote.value = v
-    }
-
-    /** Who was voted for (a friend id), once someone taps. */
-    @Volatile
-    var voted: String? = null
 
     /** The blob's friend, while it's visiting. */
     private val _friend = MutableStateFlow<FriendVisit?>(null)
@@ -990,21 +955,10 @@ object GadgetState {
         _log.update { (it + stamped).takeLast(200) }
     }
 
-    // -- Fun things: the mail truck, Puff's radio show, pet tricks, trivia night ----------------------
+    // -- Fun things: the mail truck, trivia night ----------------------
 
     /** When the mail truck last pulled up with a letter from Rusty (it drives across for a few seconds). */
     @Volatile var mailTruckAt = 0L
-
-    /** Puff's radio show is on air until this time (0: not on). */
-    private val _onAirUntil = MutableStateFlow(0L)
-    val onAirUntil: StateFlow<Long> = _onAirUntil.asStateFlow()
-    fun setOnAir(untilMs: Long) { _onAirUntil.value = untilMs }
-
-    /** The pet showing a trick: which one, when it started, and whether it's got it yet (or is still practising). */
-    data class PetTrickShow(val trick: String, val atMs: Long, val learned: Boolean)
-    private val _petTrick = MutableStateFlow<PetTrickShow?>(null)
-    val petTrick: StateFlow<PetTrickShow?> = _petTrick.asStateFlow()
-    fun showPetTrick(s: PetTrickShow?) { _petTrick.value = s }
 
     /** Trivia night: Pixel's questions and how it's going (null: not playing). */
     data class TriviaQ(val q: String, val options: List<String>, val answer: Int)

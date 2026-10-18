@@ -44,19 +44,17 @@ import kotlin.math.sin
 private const val TRUCK_MS = 7_000L
 
 /**
- * Little shows around the blob: the mail truck bringing a letter from Rusty (it drives in, stops by
- * Puff, and drives off), and the "ON AIR" sign while Puff does its radio show. Same space as the
- * room ([blob] centre, [half] size).
+ * The mail truck bringing a letter from Rusty: it drives in, stops by Puff, and drives off. Same
+ * space as the room ([blob] centre, [half] size).
  */
 @Composable
 internal fun ShowLayer(blob: Offset, half: Float) {
     if (blob == Offset.Unspecified || half <= 0f) return
-    val onAir by GadgetState.onAirUntil.collectAsState()
     val clock = remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
             val truck = System.currentTimeMillis() - GadgetState.mailTruckAt < TRUCK_MS
-            if (truck || onAir > System.currentTimeMillis()) awaitBeat(40) else kotlinx.coroutines.delay(1_000)
+            if (truck) awaitBeat(40) else kotlinx.coroutines.delay(1_000)
             clock.longValue = System.currentTimeMillis()
         }
     }
@@ -65,13 +63,6 @@ internal fun ShowLayer(blob: Offset, half: Float) {
         val now = clock.longValue
         val since = now - GadgetState.mailTruckAt
         if (since in 0 until TRUCK_MS) drawMailTruck(blob, u, since / 1000f, this.size.width)
-    }
-    if (onAir > clock.longValue) {
-        val t = clock.longValue / 1000f
-        Text("● ON AIR", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.offset { IntOffset((blob.x - 34 * u).toInt(), (blob.y - half * 1.05f).toInt()) }
-                .background(Color(0xFFE5484D).copy(alpha = 0.6f + 0.4f * abs(sin(t * 2f))), RoundedCornerShape(6.dp))
-                .padding(horizontal = 8.dp, vertical = 3.dp))
     }
 }
 

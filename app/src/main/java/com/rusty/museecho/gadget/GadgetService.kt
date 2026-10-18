@@ -1572,7 +1572,6 @@ class GadgetService : Service() {
                 addAll(day.events.takeLast(8))
                 if (day.talks > 0) add("Rusty talked to it ${day.talks} times today")
                 d.story?.takeIf { !it.done && it.at > 0 }?.let { add("the friends' adventure \"${it.title}\": ${it.chapters[it.at - 1].line}") }
-                d.pet?.takeIf { it.name.isNotBlank() }?.let { add("its pet ${it.label} ${it.name}" + if (it.fedDate == java.time.LocalDate.now().toString()) " (fed today)" else "") }
                 d.letters.lastOrNull()?.let { l -> add("latest letter: " + if (l.fromBlob) "it wrote to a friend" else "from ${d.friends.firstOrNull { it.id == l.friendId }?.name ?: "a friend"}") }
                 d.treasure?.takeIf { !it.found }?.let { add("there's a treasure hunt on that nobody has solved yet") }
                 GadgetState.mood.value?.let { add("mood right now: ${it.mood.name.lowercase()}") }
@@ -1667,8 +1666,6 @@ class GadgetService : Service() {
             put("catalog", kotlinx.serialization.json.buildJsonObject {
                 put("stickers", kotlinx.serialization.json.JsonArray(FriendsBrain.STICKERS.map { s ->
                     kotlinx.serialization.json.buildJsonObject { put("id", s.id); put("emoji", s.emoji); put("title", s.title); put("who", s.who) } }))
-                put("collectibles", kotlinx.serialization.json.JsonArray(FriendsBrain.COLLECTIBLES.map { c ->
-                    kotlinx.serialization.json.buildJsonObject { put("id", c.id); put("emoji", c.emoji); put("name", c.name); put("set", c.set) } }))
             })
             put("today_activities", kotlinx.serialization.json.buildJsonObject {
                 val today = java.time.LocalDate.now().toString()

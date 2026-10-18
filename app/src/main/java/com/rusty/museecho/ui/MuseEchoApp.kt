@@ -221,7 +221,6 @@ internal fun rememberGuest(): Boolean {
     return on
 }
 
-
 @Composable
 fun MuseEchoApp(actions: UiActions) {
     // The chosen colour theme, applied before anything draws.
@@ -384,7 +383,6 @@ fun MuseEchoApp(actions: UiActions) {
             val padOpen by GadgetState.timePad.collectAsState()
             TimePad(padOpen, actions) { GadgetState.setTimePad(false) }
             VisitorPrompt(actions)
-            TalentVote()
             // Warm evenings: a faint orange wash from around sunset to sunrise (touches pass through).
             val warmth by GadgetState.warmth.collectAsState()
             val warmNow by androidx.compose.animation.core.animateFloatAsState(warmth, tween(4000), label = "warm")
@@ -582,7 +580,6 @@ private fun IdleFace(actions: UiActions) {
     }
     // Visiting friends show up here too.
     FriendLayer(blobCenter, blobHalf, actions)
-    PetTapTarget(blobCenter, blobHalf)
     TreasureTapLayer(blobCenter, blobHalf)
     BookshelfTapTarget(blobCenter, blobHalf)
     WindowTapTarget(blobCenter, blobHalf)
@@ -1974,7 +1971,6 @@ internal fun Mono(text: String) {
     Text(text, color = Palette.muted, fontSize = 11.sp, lineHeight = 14.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, textAlign = TextAlign.Start)
 }
 
-
 /** A new phone joined the Wi-Fi: offer guest mode for 4 hours. Goes away by itself after 10 minutes. */
 @Composable
 private fun VisitorPrompt(actions: UiActions) {
@@ -1995,26 +1991,6 @@ private fun VisitorPrompt(actions: UiActions) {
             }) { Text("Guest mode") }
         },
         dismissButton = { androidx.compose.material3.TextButton(onClick = { GadgetState.setVisitorPrompt(null) }) { Text("No thanks") } },
-    )
-}
-
-
-/** The talent show's vote: tap who was best (it goes away after a minute and a half). */
-@Composable
-private fun TalentVote() {
-    val v by GadgetState.vote.collectAsState()
-    val (acts, _) = v ?: return
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = { GadgetState.setVote(null) },
-        title = { Text("🎭 Who was best?") },
-        text = { Text("Tap your favourite act.") },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                acts.forEach { (id, name) ->
-                    androidx.compose.material3.TextButton(onClick = { GadgetState.voted = id; GadgetState.setVote(null) }) { Text(name) }
-                }
-            }
-        },
     )
 }
 

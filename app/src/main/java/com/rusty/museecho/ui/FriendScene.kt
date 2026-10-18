@@ -137,7 +137,6 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         val t = tAt(now)
         val (f0, s0) = spots.first()
         val mid = Offset((blob.x + f0.x) / 2, blob.y + 74 * dp)
-        if (scene.disco) drawDisco(blob, t, vibe, dp, enter)
         scene.board?.let { drawBoard(it, mid, 42 * dp, Color(friends.first().color)) }
         if (scene.throwAt > 0) {
             val p = ((now - scene.throwAt) / 1200f).coerceIn(0f, 1f)
@@ -156,70 +155,8 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         }
         if (scene.book) drawBook(Offset(mid.x, blob.y + 52 * dp), dp)
         scene.snakes?.let { (a, b, roll) -> drawSnakesBoard(Offset(mid.x, blob.y + 68 * dp), 54 * dp, a, b, roll, Color(friends.first().color)) }
-        // A picnic: a checked blanket and a basket under everyone.
-        if (scene.picnic) {
-            val xs = spots.map { it.first.x } + blob.x
-            val l = xs.min() - 50 * dp
-            val r = xs.max() + 50 * dp
-            val y = blob.y + 70 * dp
-            val sq = 14 * dp
-            var k = 0
-            var x = l
-            while (x < r) {
-                for (row in 0..1) drawRect(if ((k + row) % 2 == 0) Color(0xFFE04848).copy(alpha = 0.75f) else Color.White.copy(alpha = 0.75f),
-                    Offset(x, y + row * sq * 0.5f), Size(sq, sq * 0.5f))
-                x += sq; k++
-            }
-            val bk = Offset(mid.x + 30 * dp, y - 14 * dp)
-            drawRoundRect(Color(0xFFB08A5A), bk, Size(30 * dp, 18 * dp), CornerRadius(4 * dp))
-            drawArc(Color(0xFF8A6A3A), 180f, 180f, false, bk + Offset(4 * dp, -10 * dp), Size(22 * dp, 20 * dp), style = androidx.compose.ui.graphics.drawscope.Stroke(2.5f * dp))
-        }
-        // Making a card: a folded card and crayons.
-        if (scene.crafting) {
-            val c = Offset(mid.x, blob.y + 60 * dp)
-            drawRect(Color(0xFFFFF3D6), Offset(c.x - 22 * dp, c.y - 14 * dp), Size(44 * dp, 28 * dp))
-            drawLine(Color(0xFFD8C8A8), Offset(c.x, c.y - 14 * dp), Offset(c.x, c.y + 14 * dp), 1 * dp)
-            drawHeartShape(Offset(c.x + 11 * dp, c.y), 6 * dp, Color(0xFFFF7A8A))
-            for (k in 0..2) drawCircle(Color(0xFFFFF3B0).copy(alpha = 0.4f + 0.5f * abs(sin(t * 3f + k))), 1.5f * dp, Offset(c.x - 14 * dp + k * 6 * dp, c.y - 6 * dp + k * 4 * dp))
-            listOf(Color(0xFF45D3C7), Color(0xFF8B6CFF), Color(0xFFFFC266)).forEachIndexed { k, col ->
-                drawLine(col, Offset(c.x + 28 * dp, c.y + (k * 5 - 6) * dp), Offset(c.x + 44 * dp, c.y + (k * 5 - 9) * dp), 3 * dp)
-            }
-        }
         // Stargazing: the night sky over the room, tonight's moon, a telescope, shooting stars in a shower.
         if (scene.stargaze) drawStargazing(blob, half, f0, s0, t, dp)
-        // Baking: a mixing bowl with a whisk going round.
-        if (scene.bowl) {
-            val b = Offset(mid.x, blob.y + 58 * dp)
-            val wa = t * 6f
-            drawLine(Color(0xFFBFC6D0), b + Offset(kotlin.math.cos(wa) * 6 * dp, -4 * dp), b + Offset(kotlin.math.cos(wa) * 10 * dp, -26 * dp), 2.5f * dp)
-            drawArc(Color(0xFFE8DCC8), 0f, 180f, true, Offset(b.x - 18 * dp, b.y - 14 * dp), Size(36 * dp, 28 * dp))
-            drawOval(Color(0xFFF5E6B8), Offset(b.x - 16 * dp, b.y - 3 * dp), Size(32 * dp, 6 * dp))
-            if ((t % 1.2f) < 0.6f) drawCircle(Color.White.copy(alpha = 0.6f), 2 * dp, b + Offset(sin(t * 4f) * 10 * dp, -10 * dp - (t % 0.6f) * 20 * dp))
-        }
-        // Puddle jumping: a puddle under everyone, splashes on each hop, wellies on.
-        if (scene.puddles) {
-            drawOval(Color(0xFF5B8DB8).copy(alpha = 0.55f), Offset(blob.x - 170 * dp, blob.y + 78 * dp), Size(340 * dp, 26 * dp))
-            (listOf(blob to half * 0.9f) + spots).forEachIndexed { i, (p, s) ->
-                val hop = abs(sin(t * 2.4f + i))
-                if (hop < 0.25f) for (k in -2..2) drawCircle(Color(0xFFA9D2F0).copy(alpha = 0.8f),
-                    2.5f * dp, Offset(p.x + k * 9 * dp, blob.y + 80 * dp - (1 - hop * 4) * 14 * dp * (1 - abs(k) * 0.25f)))
-                for (side in listOf(-1f, 1f)) drawRoundRect(Color(0xFFE6C229), Offset(p.x + side * s * 0.18f - 7 * dp, blob.y + 62 * dp), Size(14 * dp, 16 * dp), CornerRadius(4 * dp))
-            }
-        }
-        // Kites on the wind, one per friend, strings down to their paws.
-        if (scene.kites) spots.forEachIndexed { i, (p, s) ->
-            val k = Offset(p.x + (if (i % 2 == 0) 40f else -40f) * dp + sin(t * 1.7f + i) * 18 * dp, blob.y - 150 * dp + cos(t * 1.3f + i) * 12 * dp)
-            val col = Color(friends[i].color)
-            val kite = Path().apply {
-                moveTo(k.x, k.y - 18 * dp); lineTo(k.x + 13 * dp, k.y); lineTo(k.x, k.y + 22 * dp); lineTo(k.x - 13 * dp, k.y); close()
-            }
-            drawLine(Color.White.copy(alpha = 0.5f), k + Offset(0f, 22 * dp), p + Offset(0f, -s * 0.1f), 1.2f * dp)
-            drawPath(kite, col)
-            drawLine(Color.White.copy(alpha = 0.6f), k + Offset(0f, -18 * dp), k + Offset(0f, 22 * dp), 1f * dp)
-            for (b in 1..3) drawCircle(col, 2.5f * dp, k + Offset(sin(t * 3f + b) * 5 * dp, (22 + b * 8) * dp))
-        }
-        // Market day: a little stall with a striped awning behind each friend.
-        if (scene.market) spots.forEach { (p, s) -> drawStall(p + Offset(0f, s * 0.15f), s) }
         if (scene.pillow) drawPillow(f0 + Offset(0f, s0 * 0.26f), s0)
         if (scene.hug) {
             val h = Offset((blob.x + f0.x) / 2, blob.y - 40 * dp + sin(t * 3f) * 4 * dp)
@@ -271,7 +208,6 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         val mood = when {
             napping -> Mood.SLEEPY
             scene.tappedId == f.id && now < scene.tappedUntil -> Mood.WINK
-            act == "squabble" && scene.apart -> Mood.SAD
             scene.sadId == f.id -> Mood.SAD
             act == "story" && t > 25f && i == 0 -> Mood.DROWSY
             f.p == Personality.SLEEPY -> Mood.DROWSY
@@ -300,9 +236,7 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
                 .clickable(remember { MutableInteractionSource() }, null) { GadgetService.instance?.life?.friends?.tapped(f.id) },
         ) {
             Blob(Modifier.requiredSize(sizeDp).align(Alignment.TopCenter), actions, mini = true, gaze = gaze, moodOverride = mood,
-                tintOverride = Color(f.color), ownStyle = false, accessoryOverride = if (scene.disguise && f.id == "guest") null else accessory)
-            // The mystery visitor's disguise: a trench coat and a hat pulled low.
-            if (scene.disguise && f.id == "guest") Canvas(Modifier.requiredSize(sizeDp).align(Alignment.TopCenter)) { drawDisguise(this.size.width) }
+                tintOverride = Color(f.color), ownStyle = false, accessoryOverride = accessory)
         }
         // Its own speech bubble, and a name tag.
         (says[f.id] ?: says[""].takeIf { i == 0 })?.let { text ->
@@ -313,77 +247,11 @@ internal fun FriendLayer(blob: Offset, half: Float, actions: UiActions) {
         }
         if (enter > 0.9f && !hiding && f.name.isNotBlank()) Text(f.name, color = Color(f.color), fontSize = 11.sp,
             modifier = Modifier.offset { place().let { (x, y) -> IntOffset((x - size * 0.25f).toInt(), (y + size * 0.42f).toInt()) } })
-        // Its pet tags along at its feet, and runs over to Puff's pet to play now and then.
-        if (f.petKind.isNotBlank() && !hiding) {
-            val petHome = Offset(baseX + side * size * 0.45f, pos.y + size * 0.3f)
-            val miso = Offset(blob.x + PET_SPOT.x * u, blob.y + 92 * u - 10 * u)
-            val to by androidx.compose.animation.core.animateOffsetAsState(if (scene.petsPlay && i == 0) miso + Offset(14 * u, 0f) else petHome,
-                androidx.compose.animation.core.tween(1200), label = "pet$i")
-            val petsPlay = scene.petsPlay
-            Text(com.rusty.museecho.gadget.FriendsBrain.petEmoji(f.petKind), fontSize = 16.sp,
-                modifier = Modifier.graphicsLayer { alpha = enter }.offset {
-                    val hop = if (petsPlay) kotlin.math.abs(sin(tAt(clock.longValue) * 6f)) * 6 * dp else 0f
-                    IntOffset((to.x - 9 * dp).toInt(), (to.y - 10 * dp - hop).toInt())
-                })
-        }
     }
     // Sleepover: a little quilt over the friend's lower half (on top of it).
     if (scene.pillow && enter > 0.5f) Canvas(Modifier.fillMaxSize()) {
         val (f0, s0) = spots.first()
         drawQuilt(f0, s0, Color(friends.first().color), enter)
-    }
-    // The blanket fort: a draped blanket over everyone (see-through enough to see them), lit by a torch.
-    if (scene.fort && enter > 0.3f) Canvas(Modifier.fillMaxSize()) {
-        val t = tAt(clock.longValue)
-        val xs = spots.map { it.first.x } + blob.x
-        val left = xs.min() - 70 * dp
-        val right = xs.max() + 70 * dp
-        val floor = blob.y + 92 * u
-        val apex = Offset(blob.x, blob.y - half * 1.15f)
-        val cloth = Color(friends.first().color).let { androidx.compose.ui.graphics.lerp(it, Color(0xFF3A3F8F), 0.5f) }
-        val tent = Path().apply {
-            moveTo(left, floor); quadraticTo(left + 10 * dp, apex.y + 30 * dp, apex.x, apex.y)
-            quadraticTo(right - 10 * dp, apex.y + 30 * dp, right, floor); close()
-        }
-        drawPath(tent, cloth.copy(alpha = 0.32f * enter))
-        drawPath(tent, Color.White.copy(alpha = 0.35f * enter), style = androidx.compose.ui.graphics.drawscope.Stroke(2 * dp))
-        // Patches and the chair-back poking up.
-        listOf(0.3f to 0.5f, 0.7f to 0.45f, 0.5f to 0.75f).forEachIndexed { k, (fx, fy) ->
-            drawRoundRect(listOf(Color(0xFFFFC266), Color(0xFFFF9EC7), Color(0xFF7FE0A8))[k].copy(alpha = 0.25f * enter),
-                Offset(left + (right - left) * fx - 9 * dp, apex.y + (floor - apex.y) * fy - 7 * dp), Size(18 * dp, 14 * dp), CornerRadius(3 * dp))
-        }
-        drawRect(Color(0xFF7A5536).copy(alpha = 0.7f * enter), Offset(apex.x - 2 * dp, apex.y - 14 * dp), Size(4 * dp, 16 * dp))
-        // The torch's beam, swinging a little.
-        val hand = blob + Offset(-half * 0.44f, half * 0.36f)
-        val aim = Offset(apex.x + sin(t * 0.7f) * 50 * dp, apex.y + 30 * dp)
-        val dir = (aim - hand).let { it / it.getDistance() }
-        val perp = Offset(-dir.y, dir.x)
-        drawPath(Path().apply {
-            moveTo(hand.x, hand.y); lineTo(aim.x + perp.x * 34 * dp, aim.y + perp.y * 34 * dp); lineTo(aim.x - perp.x * 34 * dp, aim.y - perp.y * 34 * dp); close()
-        }, Brush.linearGradient(listOf(Color(0xFFFFE9A8).copy(alpha = 0.45f * enter), Color.Transparent), hand, aim))
-    }
-    // A puppet show: a little theatre around the performers, curtains open, the title on top.
-    if (scene.puppets && enter > 0.3f) {
-        val xs = spots.map { it.first.x }
-        val l = xs.min() - spots.maxOf { it.second } * 0.75f
-        val r = xs.max() + spots.maxOf { it.second } * 0.75f
-        val top = spots.minOf { it.first.y - it.second * 0.9f }
-        val bottom = spots.maxOf { it.first.y + it.second * 0.45f }
-        Canvas(Modifier.fillMaxSize()) {
-            val red = Color(0xFFB0303A)
-            drawRect(Color(0xFF7A5536), Offset(l, bottom), Size(r - l, 14 * dp))
-            drawRect(red, Offset(l - 6 * dp, top - 18 * dp), Size(r - l + 12 * dp, 18 * dp))
-            for (k in 0..7) drawCircle(Color(0xFFFFC266), 2 * dp, Offset(l + (r - l) * k / 7, top - 2 * dp))
-            for (side in listOf(0, 1)) {
-                val x0 = if (side == 0) l else r
-                val dir = if (side == 0) 1f else -1f
-                drawPath(Path().apply {
-                    moveTo(x0, top); lineTo(x0 + dir * 26 * dp, top); quadraticTo(x0 + dir * 10 * dp, (top + bottom) / 2, x0 + dir * 4 * dp, bottom); lineTo(x0, bottom); close()
-                }, red.copy(alpha = 0.95f))
-            }
-        }
-        if (scene.playTitle.isNotEmpty()) Text("🎭 ${scene.playTitle}", color = Color(0xFFFFE9A8), fontSize = 12.sp, maxLines = 1,
-            modifier = Modifier.offset { IntOffset((l + 4 * dp).toInt(), (top - 17 * dp).toInt()) }.widthIn(max = with(density) { (r - l).toDp() }))
     }
     // Puff's surprise party: the lights are off while everyone hides.
     if (scene.lightsOff) Box(Modifier.fillMaxSize().background(Color(0xFF05040A).copy(alpha = 0.82f)))
@@ -443,7 +311,6 @@ private fun DrawScope.drawHeartShape(c: Offset, s: Float, color: Color) {
     drawPath(Path().apply { moveTo(c.x - s * 0.95f, c.y + s * 0.15f); lineTo(c.x + s * 0.95f, c.y + s * 0.15f); lineTo(c.x, c.y + s * 1.1f); close() }, color)
 }
 
-
 /** A puffy pillow under a sleeping friend: pinched corners, a soft shade and a seam. */
 private fun DrawScope.drawPillow(c: Offset, s: Float) {
     val w = s * 0.95f
@@ -477,18 +344,6 @@ private fun DrawScope.drawQuilt(c: Offset, s: Float, friend: Color, alpha: Float
     // The folded-over top edge.
     drawRoundRect(Color(0xFFF2EEFA).copy(alpha = alpha), Offset(left - s * 0.02f, top - s * 0.02f), Size(w + s * 0.04f, s * 0.07f), CornerRadius(s * 0.035f))
 }
-
-
-private fun DrawScope.drawStall(c: Offset, s: Float) {
-    val w = s * 1.3f
-    val top = c.y - s * 0.75f
-    drawRect(Color(0xFF8A5A3C).copy(alpha = 0.7f), Offset(c.x - w / 2, c.y + s * 0.2f), Size(w, s * 0.12f))
-    for (x in listOf(-1f, 1f)) drawLine(Color(0xFF8A5A3C).copy(alpha = 0.7f), Offset(c.x + x * w * 0.45f, top), Offset(c.x + x * w * 0.45f, c.y + s * 0.2f), 3f)
-    val stripes = 6
-    for (i in 0 until stripes) drawRect((if (i % 2 == 0) Color(0xFFFF7A8A) else Color.White).copy(alpha = 0.8f),
-        Offset(c.x - w / 2 + i * w / stripes, top), Size(w / stripes, s * 0.16f))
-}
-
 
 /** Puff's out at a friend's: a little window onto it there, where Puff usually sits. */
 @Composable
@@ -583,82 +438,18 @@ private fun DrawScope.drawSnakesBoard(c: Offset, size: Float, puff: Int, friend:
     }
 }
 
-/** Home page chips: a ticket while a puppet show's on, and today's holiday card from Puff and friends. */
+/** Home page chip: today's holiday card from Puff and friends. */
 @Composable
 internal fun HomeEventChips(modifier: Modifier = Modifier) {
-    val visit by GadgetState.friend.collectAsState()
-    val scene by GadgetState.friendScene.collectAsState()
     val data by GadgetState.friends.collectAsState()
     val today = java.time.LocalDate.now().toString()
-    val card = data.cards.lastOrNull { it.date == today }
-    val show = visit?.activity == "puppetshow"
-    if (!show && card == null) return
+    val card = data.cards.lastOrNull { it.date == today } ?: return
     androidx.compose.foundation.layout.Row(modifier, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-        if (show) Text("🎟️ Puppet show" + if (scene.playTitle.isNotEmpty()) ": ${scene.playTitle}" else " starting!", color = Palette.night, fontSize = 13.sp, maxLines = 1,
-            modifier = Modifier.background(Color(0xFFFFC266), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 5.dp))
-        card?.let { c ->
+        card.let { c ->
             Text("💌 A ${c.holiday} card for you!", color = Palette.night, fontSize = 13.sp, maxLines = 1,
                 modifier = Modifier.background(Color(0xFFFF9EC7), RoundedCornerShape(50))
                     .clickable { GadgetState.show(com.rusty.museecho.gadget.Screen.Text("💌 Happy ${c.holiday}!", "${c.text}\n\nLove from ${c.from}")) }
                     .padding(horizontal = 12.dp, vertical = 5.dp))
         }
     }
-}
-
-/** A disco: a mirror ball overhead, coloured beams sweeping the room and a dance floor pulsing on the beat. */
-private fun DrawScope.drawDisco(blob: Offset, t: Float, vibe: String, dp: Float, enter: Float) {
-    val beat = if (vibe == "hype") 0.43f else 0.5f
-    val n = (t / beat).toInt()
-    val pulse = 1f - (t % beat) / beat
-    val cols = listOf(Color(0xFFFF4FD8), Color(0xFF45D3C7), Color(0xFFFFC94D), Color(0xFF8B6CFF))
-    val ball = Offset(blob.x, (blob.y - 175 * dp).coerceAtLeast(26 * dp))
-    // Beams from the ball, sweeping.
-    for (k in 0 until 4) {
-        val a = t * 0.9f + k * PI.toFloat() / 2
-        val end = Offset(blob.x + cos(a) * 260 * dp, blob.y + 90 * dp + sin(a * 0.7f) * 20 * dp)
-        val perp = Offset(-(end.y - ball.y), end.x - ball.x).let { p -> p / kotlin.math.max(1f, kotlin.math.hypot(p.x, p.y)) * (30 * dp) }
-        drawPath(Path().apply { moveTo(ball.x, ball.y); lineTo(end.x + perp.x, end.y + perp.y); lineTo(end.x - perp.x, end.y - perp.y); close() },
-            cols[k].copy(alpha = 0.12f * enter))
-    }
-    // The dance floor.
-    for (i in -4..4) {
-        val on = (i + n) % 2 == 0
-        drawRoundRect(cols[(i + 4 + n) % 4].copy(alpha = enter * (0.08f + (if (on) 0.3f else 0.08f) * pulse)),
-            Offset(blob.x + i * 40 * dp - 18 * dp, blob.y + 84 * dp), Size(36 * dp, 12 * dp), CornerRadius(3 * dp))
-    }
-    // Specks of light on the walls.
-    for (k in 0 until 12) {
-        val ang = t * 0.6f + k * 0.52f
-        val p = Offset(blob.x + cos(ang) * (150 + (k % 3) * 45f) * dp, blob.y - 40 * dp + sin(ang * 1.3f + k) * 90 * dp)
-        drawCircle(Color.White.copy(alpha = 0.5f * abs(sin(t * 3f + k)) * enter), 2.2f * dp, p)
-    }
-    // The ball on its string, facets glinting.
-    drawLine(Color.White.copy(alpha = 0.35f * enter), Offset(ball.x, 0f), ball, 1.5f * dp)
-    drawCircle(Color(0xFFC9D1DE).copy(alpha = enter), 17 * dp, ball)
-    for (row in -2..2) for (c in -2..2) {
-        if (row * row + c * c > 6) continue
-        val glint = 0.3f + 0.7f * abs(sin(t * 5f + row * 1.7f + c * 2.3f))
-        drawRect(Color.White.copy(alpha = glint * enter * 0.8f), Offset(ball.x + c * 6 * dp - 2.2f * dp, ball.y + row * 6 * dp - 2.2f * dp), Size(4.4f * dp, 4.4f * dp))
-    }
-}
-
-/** A tan trench coat with a collar and belt over the lower body, and a brown hat pulled down low. */
-private fun DrawScope.drawDisguise(w: Float) {
-    val coat = Color(0xFFB59A6A)
-    val dark = Color(0xFF7A6340)
-    val c = Offset(w / 2, w / 2)
-    val r = w * 0.42f
-    drawPath(Path().apply {
-        moveTo(c.x - r * 0.62f, c.y + r * 0.05f); lineTo(c.x + r * 0.62f, c.y + r * 0.05f)
-        lineTo(c.x + r * 0.8f, c.y + r * 0.95f); lineTo(c.x - r * 0.8f, c.y + r * 0.95f); close()
-    }, coat)
-    // Collar flaps and the belt.
-    drawPath(Path().apply { moveTo(c.x - r * 0.62f, c.y + r * 0.05f); lineTo(c.x, c.y + r * 0.45f); lineTo(c.x - r * 0.15f, c.y + r * 0.05f); close() }, dark)
-    drawPath(Path().apply { moveTo(c.x + r * 0.62f, c.y + r * 0.05f); lineTo(c.x, c.y + r * 0.45f); lineTo(c.x + r * 0.15f, c.y + r * 0.05f); close() }, dark)
-    drawRect(dark, Offset(c.x - r * 0.72f, c.y + r * 0.58f), Size(r * 1.44f, r * 0.09f))
-    // The hat.
-    val hatY = c.y - r * 0.38f
-    drawOval(Color(0xFF4A3B2A), Offset(c.x - r * 0.75f, hatY - r * 0.05f), Size(r * 1.5f, r * 0.2f))
-    drawRoundRect(Color(0xFF5A4834), Offset(c.x - r * 0.42f, hatY - r * 0.42f), Size(r * 0.84f, r * 0.42f), CornerRadius(r * 0.12f))
-    drawRect(Color(0xFF2A2018), Offset(c.x - r * 0.42f, hatY - r * 0.12f), Size(r * 0.84f, r * 0.08f))
 }

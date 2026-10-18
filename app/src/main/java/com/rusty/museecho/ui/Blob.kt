@@ -1162,19 +1162,10 @@ private fun DrawScope.drawAccessory(a: Accessory, core: Offset, r: Float, t: Flo
     }
 }
 
-/** The raincoat and the monthly costumes from Puff's closet. */
+/** The monthly costumes from Puff's closet. */
 private fun DrawScope.drawCostume(a: Accessory, core: Offset, top: Offset, r: Float, t: Float) {
     val eyes = core + Offset(0f, -r * 0.03f)
     when (a) {
-        Accessory.RAINCOAT -> {
-            // A yellow hood over the head and a collar with buttons.
-            val yellow = Color(0xFFFFD23F)
-            drawArc(yellow, 180f, 180f, true, Offset(core.x - r * 0.5f, top.y - r * 0.16f), Size(r * 1.0f, r * 0.62f))
-            drawArc(Color(0xFFE0B52A), 180f, 180f, false, Offset(core.x - r * 0.5f, top.y - r * 0.16f), Size(r * 1.0f, r * 0.62f), style = Stroke(r * 0.03f))
-            val y = core.y + r * 0.3f
-            drawRoundRect(yellow, Offset(core.x - r * 0.42f, y), Size(r * 0.84f, r * 0.16f), CornerRadius(r * 0.06f))
-            for (i in -1..1) drawCircle(Color(0xFF3B6EA8), r * 0.025f, Offset(core.x + i * r * 0.16f, y + r * 0.08f))
-        }
         Accessory.EARMUFFS -> {
             drawArc(Color(0xFFB0B8C8), 200f, 140f, false, core - Offset(r * 0.5f, r * 0.55f), Size(r * 1.0f, r * 1.0f), style = Stroke(r * 0.04f, cap = StrokeCap.Round))
             for (side in listOf(-1f, 1f)) {
@@ -1388,11 +1379,6 @@ private fun DrawScope.drawHeld(item: HeldItem, core: Offset, r: Float, t: Float,
                 Offset(a.x + side * r * 0.07f - r * 0.09f, a.y - r * 0.08f), Size(r * 0.18f, r * 0.16f))
             rotate(-12f, a) { drawRect(Color.White, Offset(a.x - r * 0.03f, a.y - r * 0.2f), Size(r * 0.06f, r * 0.2f)) }
             drawLine(Palette.coral, Offset(a.x - r * 0.01f, a.y - r * 0.16f), Offset(a.x + r * 0.02f, a.y - r * 0.06f), r * 0.01f)
-        }
-        HeldItem.MIC -> {
-            drawLine(Color(0xFF55596A), a + Offset(0f, -r * 0.05f), a + Offset(0f, r * 0.14f), r * 0.03f, StrokeCap.Round)
-            drawRoundRect(Color(0xFF8C93A8), Offset(a.x - r * 0.06f, a.y - r * 0.2f), Size(r * 0.12f, r * 0.17f), CornerRadius(r * 0.06f))
-            for (k in 1..3) drawLine(Color(0xFF55596A), Offset(a.x - r * 0.05f, a.y - r * 0.2f + k * r * 0.04f), Offset(a.x + r * 0.05f, a.y - r * 0.2f + k * r * 0.04f), r * 0.008f)
         }
         HeldItem.WATERING_CAN -> rotate(-20f + sin(t * 2f) * 4f, a) {
             // Tilted, pouring a few drops.

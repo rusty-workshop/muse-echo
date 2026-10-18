@@ -16,8 +16,7 @@ import kotlinx.serialization.json.intOrNull
 
 /**
  * The playful extras around Puff: fortune cookies, letters Rusty posts from the phone (by mail truck,
- * the next day), the monthly costume, the umbrella-or-raincoat debate, the mystery visitor, the
- * late-night radio show, the pet's tricks and trivia night.
+ * the next day), the monthly costume and trivia night.
  */
 class FunLife(
     private val context: Context,
@@ -34,35 +33,26 @@ class FunLife(
         scope.launch { delay(5 * 60_000L); refillFortune() }
         scope.launch { mailLoop() }
         scope.launch { costumeLoop() }
-        scope.launch { debateLoop() }
-        scope.launch { mysteryLoop() }
-        scope.launch { radioLoop() }
-        scope.launch { petShowOffLoop() }
         scope.launch { briefPixel() }
     }
 
     /**
-     * Once per new [BRIEFING_VERSION]: tell Pixel (in the background, no reply needed) what's new in
-     * the blob's world, so it can talk about it. blob.world is the live source; this is the heads-up.
+     * Once per new [BRIEFING_VERSION]: tell Pixel (in the background, no reply needed) what's changed
+     * in the blob's world, so it can talk about it. blob.world is the live source; this is the heads-up.
      */
     private suspend fun briefPixel() {
         delay(6 * 60_000L)
         if (prefs.getInt("pixel_briefed", 0) >= BRIEFING_VERSION) return
         val name = GadgetState.blobCalled()
         val ok = quietAsk(
-            "A heads-up about new things in $name's world on my Echo Show (the blob that lives there), so you can talk " +
-                "about them; no need to do anything now, just reply \"got it\".\n" +
-                "- Fortune cookies: blob.fortune cracks one open (for \"fortune\" or \"give me a fortune cookie\").\n" +
-                "- Trivia night: trivia.start with a theme; 5 questions you'll be asked to write, Rusty taps the answers, $name cheers or groans.\n" +
-                "- Rusty can write $name letters from his phone; they arrive by mail truck the next morning and $name writes back.\n" +
-                "- When the laptop plays something lively, a dance visit turns into a disco with a mirror ball.\n" +
-                "- The evening before rain or snow, $name and a friend argue about umbrella or raincoat (or earmuffs or scarf); Rusty settles it from his phone and $name wears the winner.\n" +
-                "- A mystery visitor in a trench coat (one of the friends in disguise) sometimes drops 3 clues; Rusty guesses who from his phone. Never give the answer away while it's unsolved.\n" +
-                "- $name's pet is learning tricks Rusty teaches from his phone, a practice a day.\n" +
-                "- A new costume arrives in $name's closet each month.\n" +
-                "- Most evenings around 8 to 9:30, $name does a little radio show in speech bubbles.\n" +
-                "- Also: phone.find rings Rusty's phone (\"where's my phone\").\n" +
-                "For the current state of any of this (clues, the debate, trick progress, outfit, trivia streaks, the last radio show), call blob.world.",
+            "An update about $name's world on my Echo Show (the blob that lives there); no need to do anything now, just reply \"got it\".\n" +
+                "Rusty trimmed it down. These are GONE, so don't bring them up or offer them: $name's pet (and the friends' pets), " +
+                "pet tricks, the comic strip, the Blob Gazette, dreams, the cookbook and baking, the collections cabinet, the talent " +
+                "show, the disco, the umbrella-or-raincoat debate, the mystery visitor, the radio show, and the rarer visits " +
+                "(squabbles, cousins, market day, puppet shows, block parties, kites, puddles, ice lollies, blanket forts, soup, picnics, card-making).\n" +
+                "Still here and new-ish: fortune cookies (blob.fortune), trivia night (trivia.start), letters Rusty writes $name from " +
+                "his phone (they come by mail truck the next morning and $name writes back), a new costume in the closet each " +
+                "month, and phone.find to ring Rusty's phone. For the current state (outfit, closet, trivia streaks, letters in the post, recent fortunes) call blob.world.",
         )
         if (ok != null) {
             prefs.edit().putInt("pixel_briefed", BRIEFING_VERSION).apply()
@@ -179,153 +169,6 @@ class FunLife(
         }
     }
 
-    // -- Umbrella or raincoat? -----------------------------------------------------------------------
-
-    private suspend fun debateLoop() {
-        delay(4 * 60_000L)
-        while (true) {
-            val now = LocalDateTime.now()
-            val tomorrow = now.toLocalDate().plusDays(1).toString()
-            val w = GadgetState.weather.value?.tomorrowSummary.orEmpty().lowercase()
-            val wet = listOf("rain", "drizzle", "shower", "storm", "thunder", "snow").any { it in w }
-            if (wet && now.hour in 17..20 && store.data.debate?.date != tomorrow && Prefs(context).blobFriend && !isQuiet() &&
-                life.idle() && free() && store.data.friends.any { it.name.isNotBlank() }
-            ) life.friends.visit("raingear", 3)
-            // On the day: wear the winner (Puff's own pick if nobody settled it).
-            val d = store.data.debate
-            if (d != null && d.date == today() && !d.worn && now.hour in 6..11 && !isQuiet()) {
-                val pick = d.choice.ifEmpty { d.puff }
-                store.update { it.copy(debate = d.copy(choice = pick, by = d.by.ifEmpty { "puff" }, worn = true)) }
-                when (pick) {
-                    "umbrella" -> GadgetState.hold(HeldItem.UMBRELLA, "☔ Umbrella day!", 240)
-                    "raincoat" -> life.friends.wearToday("RAINCOAT", announce = false)
-                    "earmuffs" -> life.friends.wearToday("EARMUFFS", announce = false)
-                    "scarf" -> life.friends.wearToday("SCARF", announce = false)
-                }
-                GadgetState.say(if (d.choice.isEmpty()) "Nobody decided, so… $pick! I win! 😄" else "Wearing the $pick, like Rusty said! ☔", 20)
-            }
-            delay(10 * 60_000L)
-        }
-    }
-
-    // -- The mystery visitor -------------------------------------------------------------------------
-
-    private suspend fun mysteryLoop() {
-        delay(10 * 60_000L)
-        while (true) {
-            val named = store.data.friends.filter { it.name.isNotBlank() }
-            val last = prefs.getLong("mystery_last", 0L)
-            if (named.size >= 3 && System.currentTimeMillis() - last > 12 * 86_400_000L && store.data.mystery?.open != true &&
-                life.hour() in 10..19 && Prefs(context).blobFriend && !isQuiet() && life.idle() && free() && rnd.nextFloat() < 0.025f
-            ) {
-                prefs.edit().putLong("mystery_last", System.currentTimeMillis()).apply()
-                life.friends.visit("mystery", 3, named.random().name)
-            }
-            delay(20 * 60_000L)
-        }
-    }
-
-    // -- Puff's radio show ---------------------------------------------------------------------------
-
-    private suspend fun radioLoop() {
-        delay(5 * 60_000L)
-        while (true) {
-            val now = LocalDateTime.now()
-            // Some time between 8 and 9:30 pm, a different minute each night.
-            val at = 20 * 60 + (now.toLocalDate().toEpochDay() * 37 % 90).toInt()
-            val min = now.hour * 60 + now.minute
-            if (store.data.radio.none { it.date == today() } && min >= at && now.hour < 22 && !isQuiet() && life.idle() && free()) radioShow()
-            delay(5 * 60_000L)
-        }
-    }
-
-    /** Two minutes on air: Puff at the mic, its show in speech bubbles. */
-    suspend fun radioShow() {
-        val name = GadgetState.blobCalled()
-        val d = store.data
-        val todayKey = today()
-        val visitors = d.today.keys.filter { it.startsWith("$todayKey|") }.mapNotNull { k -> d.friends.firstOrNull { it.id == k.substringAfter('|') }?.shownName }
-        val buddy = d.friends.filter { it.name.isNotBlank() }.randomOrNull()?.shownName
-        val w = GadgetState.weather.value
-        val facts = (DayLog.today().events.takeLast(8) + (if (visitors.isNotEmpty()) listOf("friends over today: ${visitors.joinToString()}") else emptyList()))
-        val reply = quietAsk(
-            "Write tonight's little radio show by $name, the blob on my Echo Show, broadcasting from its room: exactly 6 short lines " +
-                "(each under 80 characters), one per line, no numbering. Open with a station ident (make up a cute station name), " +
-                "then today's highlights from these real things:\n" + facts.joinToString("\n") { "- $it" } +
-                (buddy?.let { "\nGive a shout-out to its friend $it." } ?: "") +
-                (w?.tomorrowSummary?.takeIf { it.isNotBlank() }?.let { "\nTomorrow's weather: $it, high ${w.tomorrowHighF ?: w.highF}°F." } ?: "") +
-                "\nEnd with a cosy goodnight sign-off. Reply with only the 6 lines: no commands, and don't change anything on any device.",
-        )
-        if (!life.idle() || !free()) return
-        val lines = reply?.lines()?.map { it.trim().trimStart('-', '•', '*', ' ').replace(Regex("^\\d+[.)]\\s*"), "").trim('"') }
-            ?.filter { it.isNotBlank() }?.take(6)?.takeIf { it.size >= 4 }
-            ?: listOfNotNull("📻 This is Radio $name, live from my room!", "Today was a good one.",
-                buddy?.let { "Shout-out to $it! You're the best." }, w?.tomorrowSummary?.takeIf { it.isNotBlank() }?.let { "Tomorrow: $it." },
-                "That's the show. Goodnight, everyone! 🌙")
-        store.update { it.copy(radio = (it.radio + RadioShow(todayKey, lines)).takeLast(14)) }
-        val each = 19_000L
-        GadgetState.setOnAir(System.currentTimeMillis() + lines.size * each + 3_000)
-        GadgetState.hold(HeldItem.MIC, "📻 On air", lines.size * each.toInt() / 60_000 + 1)
-        GadgetState.log("radio show on air")
-        try {
-            for (l in lines) {
-                GadgetState.say("🎙️ $l", (each / 1000).toInt())
-                delay(each)
-            }
-        } finally {
-            GadgetState.setOnAir(0)
-            GadgetState.hold(HeldItem.NONE, "", 0)
-        }
-        DayLog.event("did its late-night radio show", "radio")
-    }
-
-    // -- Pet tricks ----------------------------------------------------------------------------------
-
-    /** One practice of [trick] (from the phone): once a trick a day; learned after a few days. */
-    fun practise(trick: String): String {
-        val pet = store.data.pet ?: return "no pet yet"
-        val t = tricksFor(pet.kind).firstOrNull { it.equals(trick.trim(), ignoreCase = true) } ?: return "not a trick it can learn"
-        val name = pet.name.ifBlank { "The ${pet.label}" }
-        val have = pet.tricks[t] ?: 0
-        if (have >= 100) {
-            showTrick(t, true)
-            GadgetState.say("$name shows off its ${t.lowercase()}! ✨", 10)
-            return "showed it off"
-        }
-        if ("${today()}|$t" in pet.practised) {
-            GadgetState.say("$name already practised the ${t.lowercase()} today. Tomorrow! 💤", 8)
-            return "already practised today"
-        }
-        val next = (have + 30 + rnd.nextInt(11)).coerceAtMost(100)
-        store.update { d ->
-            d.copy(pet = d.pet?.copy(tricks = d.pet.tricks + (t to next), practised = d.pet.practised.filter { it.startsWith(today()) } + "${today()}|$t"))
-        }
-        showTrick(t, next >= 100)
-        if (next >= 100) {
-            GadgetState.react(Reaction.CELEBRATE)
-            GadgetState.say("🎉 $name learned the ${t.lowercase()}!!", 20)
-            DayLog.event("${pet.name.ifBlank { "its ${pet.label}" }} learned a trick: ${t.lowercase()}", "pet")
-        } else GadgetState.say("$name practised the ${t.lowercase()}… $next% there! 🐾", 12)
-        return if (next >= 100) "learned it!" else "$next%"
-    }
-
-    private fun showTrick(t: String, learned: Boolean) = GadgetState.showPetTrick(GadgetState.PetTrickShow(t, System.currentTimeMillis(), learned))
-
-    /** Now and then, a learned trick unprompted. */
-    private suspend fun petShowOffLoop() {
-        delay(15 * 60_000L)
-        while (true) {
-            val pet = store.data.pet
-            val learned = pet?.tricks?.filterValues { it >= 100 }?.keys.orEmpty()
-            if (learned.isNotEmpty() && !isQuiet() && life.idle() && life.hour() in 9..21 && rnd.nextFloat() < 0.15f) {
-                val t = learned.random()
-                showTrick(t, true)
-                GadgetState.say("Look! ${pet!!.name.ifBlank { "My ${pet.label}" }} does the ${t.lowercase()}! ✨", 8)
-            }
-            delay(30 * 60_000L)
-        }
-    }
-
     // -- Trivia night --------------------------------------------------------------------------------
 
     private var triviaJob: Job? = null
@@ -413,7 +256,7 @@ class FunLife(
 
     companion object {
         /** Bump to send Pixel a new heads-up (briefPixel) after adding things it should know about. */
-        const val BRIEFING_VERSION = 1
+        const val BRIEFING_VERSION = 2
 
         /** A new costume each month (added to the closet on the first day Puff's up). */
         val COSTUMES = mapOf(1 to "EARMUFFS", 2 to "HEART_GLASSES", 3 to "CLOVER_HAT", 4 to "BUNNY_EARS", 5 to "FLOWER_CROWN",
@@ -423,16 +266,10 @@ class FunLife(
 
         /** Emoji for each outfit (the Wardrobe tab and the phone's closet). */
         val OUTFIT_EMOJI = mapOf("PARTY_HAT" to "🎉", "SANTA_HAT" to "🎅", "WITCH_HAT" to "🧙", "SUNGLASSES" to "😎", "SCARF" to "🧣",
-            "HEADPHONES" to "🎧", "CROWN" to "👑", "BOW" to "🎀", "FLOWER" to "🌸", "POPCORN" to "🍿", "RAINCOAT" to "🧥",
+            "HEADPHONES" to "🎧", "CROWN" to "👑", "BOW" to "🎀", "FLOWER" to "🌸", "POPCORN" to "🍿",
             "EARMUFFS" to "❄️", "HEART_GLASSES" to "💘", "CLOVER_HAT" to "☘️", "BUNNY_EARS" to "🐰", "FLOWER_CROWN" to "💐",
             "SUNHAT" to "👒", "STAR_GLASSES" to "🎆", "SNORKEL" to "🤿", "GRAD_CAP" to "🎓", "SCARECROW_HAT" to "🌾",
             "LEAF_CROWN" to "🍂", "ANTLERS" to "🦌")
-
-        fun tricksFor(kind: String) = when (kind) {
-            "snail" -> listOf("Eye-stalk wave", "Shell spin", "Speedy dash")
-            "sprout" -> listOf("Leaf wiggle", "Bloom on cue", "Little bow")
-            else -> listOf("Bubble heart", "Hoop jump", "Twirl")
-        }
 
         private val LOCAL_FORTUNES = listOf(
             "A small kindness today will come back as a big smile.",

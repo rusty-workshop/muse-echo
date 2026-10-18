@@ -152,9 +152,6 @@ class Chores(
         }
         if (GadgetState.sniffles.value) put("sniffles", true)
         if (GadgetState.asleep.value || GadgetState.tuckedIn.value) put("asleep", true)
-        GadgetState.vote.value?.let { (acts, _) ->
-            put("vote", buildJsonArray { acts.forEach { (id, name) -> add(buildJsonObject { put("id", id); put("name", name) }) } })
-        }
         GadgetState.friend.value?.let { v ->
             put("visitors", buildJsonArray {
                 v.friendIds.forEach { id ->
@@ -271,13 +268,6 @@ class Chores(
                         GadgetService.instance?.life?.friends?.phoneGame(game, outcome)
                         postState()
                     }
-                    "vote" -> {
-                        val id = (item["id"] as? JsonPrimitive)?.contentOrNull ?: continue
-                        if (GadgetState.vote.value?.first?.any { it.first == id } == true) {
-                            GadgetState.voted = id
-                            GadgetState.setVote(null)
-                        }
-                    }
                     "photo" -> {
                         val id = (item["id"] as? JsonPrimitive)?.contentOrNull?.takeIf { Regex("[0-9a-f]{16}").matches(it) } ?: continue
                         val dest = (item["dest"] as? JsonPrimitive)?.contentOrNull ?: "frame"
@@ -287,16 +277,6 @@ class Chores(
                     // The fun things from the phone app.
                     "fortune" -> { toFront(); GadgetService.instance?.life?.fun_?.fortune(); postState() }
                     "rustyletter" -> (item["text"] as? JsonPrimitive)?.contentOrNull?.let { GadgetService.instance?.life?.fun_?.letterFromRusty(it) }
-                    "settle" -> (item["choice"] as? JsonPrimitive)?.contentOrNull?.let { c ->
-                        if (GadgetService.instance?.life?.friends?.settleDebate(c) == true) toFront()
-                    }
-                    "mystery_guess" -> (item["friend_id"] as? JsonPrimitive)?.contentOrNull?.let { id ->
-                        if (GadgetService.instance?.life?.friends?.guessMystery(id) != null) toFront()
-                    }
-                    "pettrick" -> (item["trick"] as? JsonPrimitive)?.contentOrNull?.let { t ->
-                        toFront()
-                        GadgetState.log("pet trick from the phone: " + GadgetService.instance?.life?.fun_?.practise(t))
-                    }
                     "trivia" -> GadgetService.instance?.life?.fun_?.startTrivia((item["theme"] as? JsonPrimitive)?.contentOrNull.orEmpty())
                     "outfit" -> (item["name"] as? JsonPrimitive)?.contentOrNull?.let { n ->
                         val fl = GadgetService.instance?.life?.friends
@@ -332,12 +312,6 @@ class Chores(
                         android.os.Process.killProcess(android.os.Process.myPid())
                     }
                     "ask" -> (item["what"] as? JsonPrimitive)?.contentOrNull?.let { askNow(it) }
-                    // A year (2026) or month (2026-10) in review, as a special Gazette.
-                    "review" -> {
-                        val period = (item["period"] as? JsonPrimitive)?.contentOrNull?.takeIf { Regex("""\d{4}(-\d{2})?""").matches(it) }
-                            ?: java.time.YearMonth.now().toString()
-                        GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.reviewNow(period) } }
-                    }
                     "announce" -> {
                         val text = (item["text"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
                         GadgetState.log("announcement from the watch")
@@ -709,7 +683,7 @@ class Chores(
                 put("color", buildJsonArray { BlobStyles.COLORS.keys.forEach { add(JsonPrimitive(it)) } })
                 put("weather", list("RAIN", "HEAVY_RAIN", "THUNDERSTORMS", "SNOW", "CLEAR", "FOG"))
                 put("holiday", list("FIREWORKS", "DECEMBER_SNOW", "VALENTINE_HEARTS", "HALLOWEEN_BATS"))
-                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "comic", "dream", "gazette", "penpal", "book", "stickers", "review", "sniffles", "build", "fair", "parade", "souvenir", "rustyletter", "overnight", "collect", "card")).forEach { add(JsonPrimitive(it.uppercase())) } })
+                put("friend", buildJsonArray { (FriendsBrain.ACTIVITIES.filter { it != "treasure" } + listOf("treasure", "trip", "letter", "reply", "hangout", "penpal", "book", "stickers", "sniffles", "build", "fair", "parade", "souvenir", "rustyletter", "overnight", "card")).forEach { add(JsonPrimitive(it.uppercase())) } })
                 put("state", list("THINKING", "SLEEP", "TUCKED_IN", "MUSIC", "HOURGLASS", "ALERT_GLOW", "BUSY_GEAR", "MUTED", "BUBBLE", "FRIEND"))
             })
             put("version", BuildConfig.VERSION_NAME)
@@ -751,11 +725,8 @@ class Chores(
                     fl.store.data.friends.filter { it.name.isNotBlank() }.maxByOrNull { it.closeness }?.let { f -> scope.launch { fl.writeLetter(f) } }
                 }
                 "HANGOUT" -> GadgetService.instance?.life?.friends?.hangoutNow()?.let { GadgetState.log("friends hung out: $it") }
-                "COMIC" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.comicNow() } }
-                "DREAM" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.dreamNow() } }
                 "TREASURE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.treasureNow() } }
                 "TRIP" -> GadgetService.instance?.life?.friends?.let { fl -> fl.store.data.friends.filter { it.name.isNotBlank() }.randomOrNull()?.let { fl.trip(it, 1) } }
-                "GAZETTE" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.gazetteNow() } }
                 "PENPAL" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.penpalLetterNow() } }
                 "BOOK" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.addBook(GadgetState.BlobCalled()) } }
                 "STICKERS" -> GadgetService.instance?.life?.friends?.checkStickers()
@@ -765,7 +736,6 @@ class Chores(
                 "OVERNIGHT" -> GadgetService.instance?.life?.friends?.let { fl ->
                     fl.store.data.friends.filter { it.name.isNotBlank() }.randomOrNull()?.let { fl.sleepOverAt(it, testMs = 3 * 60_000L) }
                 }
-                "COLLECT" -> GadgetService.instance?.life?.friends?.collect(listOf("Shells", "Leaves", "Stamps", "Stones").random(), "from the playground")
                 "CARD" -> GadgetService.instance?.life?.friends?.store?.let { st ->
                     val today = java.time.LocalDate.now().toString()
                     if (st.data.cards.none { it.date == today }) st.update { it.copy(cards = it.cards + HolidayCard("Card Test", today,
@@ -776,7 +746,6 @@ class Chores(
                     GadgetState.setSouvenir(GadgetState.Souvenir(e, what, GadgetService.instance?.life?.friends?.store?.data?.friends?.firstOrNull { it.name.isNotBlank() }?.shownName ?: "a friend",
                         java.time.LocalDate.now().toString()))
                 }
-                "REVIEW" -> GadgetService.instance?.life?.friends?.let { fl -> scope.launch { fl.reviewNow(java.time.YearMonth.now().toString()) } }
                 "REPLY" -> GadgetService.instance?.life?.friends?.let { fl ->
                     fl.store.data.letters.lastOrNull { !it.fromBlob }?.let { l -> scope.launch { fl.replyTo(l) } }
                 }

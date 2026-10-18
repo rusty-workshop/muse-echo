@@ -58,18 +58,14 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
     // Rain, snow, a storm or falling leaves move ~10 times a second; otherwise once a minute
     // is plenty for the sky and the lamp.
     val friendsData by GadgetState.friends.collectAsState()
-    val pet = friendsData.pet
     val garden by GadgetState.garden.collectAsState()
     val theme by GadgetState.roomTheme.collectAsState()
     // A goldfish swims all the time; otherwise only weather and leaves need frames.
-    val moving = ((sky != WindowWeather.NONE || autumn) && Decor.WINDOW.name in items || pet?.kind == "goldfish") && !quiet
-    // A pet trick plays smoothly for its few seconds.
-    val trick by GadgetState.petTrick.collectAsState()
+    val moving = ((sky != WindowWeather.NONE || autumn) && Decor.WINDOW.name in items) && !quiet
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(moving, trick) {
+    LaunchedEffect(moving) {
         while (true) {
-            val tricking = trick?.let { System.currentTimeMillis() - it.atMs < PET_TRICK_MS } == true
-            if (tricking) awaitBeat(40) else if (moving) awaitBeat(120) else kotlinx.coroutines.delay(60_000)
+            if (moving) awaitBeat(120) else kotlinx.coroutines.delay(60_000)
             now = System.currentTimeMillis()
         }
     }
@@ -118,14 +114,6 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
             drawLine(Color(0xFFFF4D5E).copy(alpha = dim), sm + Offset(-9 * u, -29 * u), sm + Offset(9 * u, -29 * u), 3 * u)
             drawRect(Color(0xFF231C30).copy(alpha = dim), Offset(sm.x - 7 * u, sm.y - 54 * u), Size(14 * u, 8 * u))
             for (k in 0..2) drawCircle(Color(0xFF231C30).copy(alpha = dim), 1.3f * u, sm + Offset(0f, (-20 + k * 6) * u))
-        }
-        // The pet's pet-show rosette, pinned up by it.
-        if (postcards.pet?.rosettes?.isNotEmpty() == true) {
-            val ro = Offset(cx + (PET_SPOT.x - 18) * u, floor - 30 * u)
-            drawLine(Color(0xFF3E7BD8).copy(alpha = dim), ro, ro + Offset(-3 * u, 12 * u), 2.5f * u)
-            drawLine(Color(0xFF3E7BD8).copy(alpha = dim), ro, ro + Offset(3 * u, 12 * u), 2.5f * u)
-            drawCircle(Color(0xFFFFC266).copy(alpha = dim), 6 * u, ro)
-            drawCircle(Color(0xFF3E7BD8).copy(alpha = dim), 3 * u, ro)
         }
         if (has(Decor.BOOKSHELF)) drawShelf(Offset(cx - 160 * u, floor), u, dim, trophy = has(Decor.TROPHY), globe = has(Decor.SNOW_GLOBE) && month in listOf(11, 0, 1), read = postcards.books.size)
         val sx = { d: Decor -> (moved[d] ?: 0f) * u }
@@ -191,8 +179,6 @@ internal fun BlobRoom(blob: Offset, radius: Float, modifier: Modifier = Modifier
         com.rusty.museecho.gadget.RoomTheme.entries.firstOrNull { it.name == theme }?.let { drawSeasonal(it, cx, blob.y, floor, u, dim, now) }
         // The window-box garden, under the window.
         if (has(Decor.WINDOW)) drawGarden(Offset(cx - 124 * u, blob.y - 68 * u), u, garden, dim, t)
-        // The pet, on the rug.
-        pet?.let { drawPet(it, Offset(cx - 60 * u, floor + 2 * u), u, dim, now, t, trick) }
     }
 }
 
@@ -421,7 +407,7 @@ private fun DrawScope.drawLamp(at: Offset, u: Float, lit: Boolean, dim: Float) {
 }
 
 
-/** Where the pet sits, in room units from the blob's centre (x) and the floor (y), for tapping it. */
+/** Where a friend's pet would sit, in room units from the blob's centre (x) and the floor (y). */
 internal val PET_SPOT = Offset(-60f, 2f)
 
 private fun DrawScope.drawGarden(at: Offset, u: Float, stage: Int, dim: Float, t: Float) {
@@ -442,99 +428,6 @@ private fun DrawScope.drawGarden(at: Offset, u: Float, stage: Int, dim: Float, t
             }
         }
     }
-}
-
-private const val PET_TRICK_MS = 4_500L
-
-private fun DrawScope.drawPet(pet: com.rusty.museecho.gadget.Pet, at: Offset, u: Float, dim: Float, now: Long, t: Float,
-    trick: GadgetState.PetTrickShow? = null) {
-    val tr = trick?.takeIf { now - it.atMs in 0 until PET_TRICK_MS }
-    if (tr == null) { drawPetBody(pet, at, u, dim, now, t); return }
-    // A trick: a big jump (with a spin for the spinning ones) once it's learned, little wobbly hops while practising.
-    val p = (now - tr.atMs) / PET_TRICK_MS.toFloat()
-    val name = tr.trick.lowercase()
-    val hop = if (tr.learned) kotlin.math.max(0f, sin(p * PI.toFloat() * 2f)) * 18 * u else kotlin.math.abs(sin(p * PI.toFloat() * 3f)) * 6 * u
-    val spins = tr.learned && listOf("spin", "twirl", "hoop", "dash").any { it in name }
-    val angle = if (spins) 360f * ((p * 2f).coerceAtMost(1f)) else if (!tr.learned) sin(p * 14f) * 10f else 0f
-    val pivot = at + Offset(0f, -8 * u - hop)
-    translate(top = -hop) {
-        rotate(angle, pivot) { drawPetBody(pet, at, u, dim, now, t) }
-    }
-    val c = at + Offset(0f, -22 * u - hop)
-    if (tr.learned) {
-        for (k in 0 until 6) {
-            val a = k * 1.05f + p * 4f
-            val d = (8 + 14 * p) * u
-            val spot = c + Offset(kotlin.math.cos(a) * d, sin(a) * d * 0.7f)
-            if ("heart" in name || "bow" in name || "wave" in name)
-                drawCircle(Color(0xFFFF7A9A).copy(alpha = (1f - p) * dim), 2.2f * u, spot)
-            else drawCircle(Color(0xFFFFF3B0).copy(alpha = (1f - p) * dim), 1.8f * u, spot)
-        }
-        if ("bloom" in name) for (k in 0 until 5) {
-            val a = k * 1.256f
-            drawCircle(Color(0xFFFFB3DE).copy(alpha = dim), 2.6f * u * (p * 2f).coerceAtMost(1f), c + Offset(kotlin.math.cos(a) * 3 * u, sin(a) * 3 * u))
-        }
-    } else if (p > 0.5f) {
-        // Not quite: a little puff of effort.
-        drawCircle(Color.White.copy(alpha = (1f - p) * 0.6f * dim), 3 * u, c + Offset(6 * u, 4 * u))
-    }
-}
-
-private fun DrawScope.drawPetBody(pet: com.rusty.museecho.gadget.Pet, at: Offset, u: Float, dim: Float, now: Long, t: Float) {
-    val g = pet.growth(now)
-    val poked = (now - GadgetState.petPokedAt).coerceAtLeast(0) < 2_500
-    val wiggle = if (poked) sin(t * 18f) * 2 * u else 0f
-    when (pet.kind) {
-        "snail" -> {
-            // Creeps back and forth along the rug over the hours.
-            val x = at.x + sin(now / 900_000f) * 18 * u + wiggle
-            val y = at.y - 3 * u
-            drawOval(Color(0xFFC9B79C).copy(alpha = 0.8f * dim), Offset(x - 9 * u * g, y - 2 * u * g), Size(16 * u * g, 4 * u * g))
-            drawCircle(Color(0xFFC0714A).copy(alpha = 0.8f * dim), 5.5f * u * g, Offset(x, y - 6 * u * g))
-            drawCircle(Color(0xFF8A5A3C).copy(alpha = 0.8f * dim), 2.5f * u * g, Offset(x + 0.5f * u, y - 6 * u * g), style = androidx.compose.ui.graphics.drawscope.Stroke(1f * u))
-            val peek = if (poked) 3 * u else 0f
-            drawLine(Color(0xFFC9B79C).copy(alpha = 0.8f * dim), Offset(x + 6 * u * g, y - 2 * u), Offset(x + 8 * u * g, y - 7 * u * g - peek), 1f * u)
-        }
-        "sprout" -> {
-            drawRoundRect(Color(0xFFC0714A).copy(alpha = 0.7f * dim), Offset(at.x - 6 * u, at.y - 9 * u), Size(12 * u, 9 * u), CornerRadius(2 * u))
-            val top = Offset(at.x + wiggle, at.y - 9 * u - 10 * u * g)
-            drawLine(Color(0xFF5FBF7F).copy(alpha = 0.8f * dim), Offset(at.x, at.y - 9 * u), top, 1.6f * u)
-            for (s in listOf(-1f, 1f)) drawOval(Color(0xFF7FE0A8).copy(alpha = 0.8f * dim),
-                Offset(top.x + (if (s < 0) -8 * u * g else 0f), top.y - 2 * u), Size(8 * u * g, 4 * u * g))
-            // A tiny face.
-            drawCircle(Palette.night.copy(alpha = 0.8f * dim), 0.8f * u, Offset(at.x - 2 * u, at.y - 5 * u))
-            drawCircle(Palette.night.copy(alpha = 0.8f * dim), 0.8f * u, Offset(at.x + 2 * u, at.y - 5 * u))
-        }
-        else -> {
-            // A goldfish in a little round bowl.
-            val c = Offset(at.x, at.y - 10 * u)
-            drawCircle(Color(0xFFBFE6F5).copy(alpha = 0.25f * dim), 10 * u, c)
-            drawCircle(Color(0xFFBFE6F5).copy(alpha = 0.4f * dim), 10 * u, c, style = androidx.compose.ui.graphics.drawscope.Stroke(1f * u))
-            val swim = sin(t * (if (poked) 4f else 0.9f)) * 4 * u
-            val dir = if (kotlin.math.cos(t * (if (poked) 4f else 0.9f)) > 0) 1f else -1f
-            val f = c + Offset(swim, sin(t * 1.7f) * 1.5f * u)
-            drawOval(Color(0xFFFF9A3C).copy(alpha = 0.9f * dim), Offset(f.x - 3.5f * u * g, f.y - 2 * u * g), Size(7 * u * g, 4 * u * g))
-            drawPath(Path().apply {
-                moveTo(f.x - dir * 3 * u * g, f.y); lineTo(f.x - dir * 6 * u * g, f.y - 2.5f * u * g); lineTo(f.x - dir * 6 * u * g, f.y + 2.5f * u * g); close()
-            }, Color(0xFFFF9A3C).copy(alpha = 0.9f * dim))
-        }
-    }
-}
-
-/** An invisible tap target over the pet (drawn on top of the page so it gets the tap). */
-@Composable
-internal fun PetTapTarget(blob: Offset, half: Float) {
-    if (blob == Offset.Unspecified || half <= 0f) return
-    val data by GadgetState.friends.collectAsState()
-    if (data.pet == null) return
-    val u = half / 110f
-    val at = Offset(blob.x + PET_SPOT.x * u, blob.y + 92 * u + PET_SPOT.y * u)
-    val size = 26 * u
-    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((at.x - size / 2).toInt(), (at.y - size).toInt()) }
-        .size(with(androidx.compose.ui.platform.LocalDensity.current) { size.toDp() })
-        .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
-            com.rusty.museecho.gadget.GadgetService.instance?.life?.friends?.petTapped()
-        })
 }
 
 

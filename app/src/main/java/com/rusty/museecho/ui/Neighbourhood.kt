@@ -83,7 +83,6 @@ internal fun NeighbourhoodPage(actions: UiActions) {
     val visiting = visit?.friendIds.orEmpty().toSet()
     val unread = data.letters.filter { !it.read && !it.fromBlob }
     val garden by GadgetState.garden.collectAsState()
-    val marketOn = java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.SATURDAY && hour in 10..15
     val blobName by GadgetState.blobName.collectAsState()
     val weather by GadgetState.weather.collectAsState()
     val today = java.time.LocalDate.now()
@@ -160,19 +159,16 @@ internal fun NeighbourhoodPage(actions: UiActions) {
                     val where = FriendsBrain.whereabouts(f, visiting, now, hour)
                     val bday = FriendsBrain.isBirthday(f, today)
                     val whereLabel = if (where == Where.VISITING) "visiting ${blobName.ifBlank { "the blob" }}" else where.label
-                    val status = if (bday) "🎂 birthday!" else whereLabel + if (f.trophies > 0) " · 🏆${f.trophies}" else ""
-                    House(f.shownName, f.color, f.p.scale, where, if (marketOn && where == Where.HOME) "selling ${FriendsBrain.marketGoods(f)}" else status,
-                        hour, decor = decor, balloons = bday, stall = (marketOn || fest == FriendsBrain.Festival.FAIR) && where == Where.HOME,
+                    val status = if (bday) "🎂 birthday!" else whereLabel
+                    House(f.shownName, f.color, f.p.scale, where, status,
+                        hour, decor = decor, balloons = bday, stall = fest == FriendsBrain.Festival.FAIR && where == Where.HOME,
                         upgrade = data.upgrades[f.id] ?: 0, personality = f.p) { inside = f.id }
                 }
-                // The park at the end of the street: a picnic there on sunny weekends.
-                val picnic = visit?.activity == "picnic"
-                Column(Modifier.width(150.dp).clickable { note = if (picnic) "Everyone's having a picnic! 🧺" else "A quiet day in the park 🌳" },
-                    horizontalAlignment = Alignment.CenterHorizontally) {
-                    val who = if (picnic) listOf(Palette.violet) + visit!!.friendIds.mapNotNull { id -> data.friends.firstOrNull { it.id == id } }.map { Color(it.color) } else emptyList()
-                    Canvas(Modifier.width(146.dp).height(100.dp)) { drawPark(who, hour) }
+                // The park at the end of the street.
+                Column(Modifier.width(150.dp).clickable { note = "A quiet day in the park 🌳" }, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Canvas(Modifier.width(146.dp).height(100.dp)) { drawPark(emptyList(), hour) }
                     Text("The park", color = Color(0xFF7FC88A), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (picnic) "🧺 picnic!" else "quiet", color = Palette.muted, fontSize = 11.sp)
+                    Text("quiet", color = Palette.muted, fontSize = 11.sp)
                 }
                 // A new house going up (a week of building), until someone moves in.
                 data.building?.takeIf { it.friendId.isEmpty() }?.let { b ->
@@ -340,10 +336,6 @@ private fun HouseInside(f: Friend, where: Where, hour: Int, actions: UiActions, 
                     tintOverride = c, ownStyle = false)
                 else Text(when (where) { Where.VISITING -> "Out visiting ${GadgetState.blobCalled()}!"; Where.AWAY -> "Away on a trip ✈️"; else -> "Nobody home right now" },
                     color = Palette.muted, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
-                // Its pet stays home (unless they've gone visiting together).
-                if (f.petKind.isNotBlank() && where != Where.VISITING && where != Where.AWAY)
-                    Text(FriendsBrain.petEmoji(f.petKind) + if (f.petName.isNotBlank()) " ${f.petName}" else "", color = Palette.ink, fontSize = 14.sp,
-                        modifier = Modifier.align(Alignment.BottomStart).padding(start = 40.dp, bottom = 8.dp))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (where == Where.HOME || where == Where.OUT) Text("Invite over 🚶", color = Palette.night, fontSize = 15.sp,
@@ -398,8 +390,6 @@ internal fun DrawScope.drawInterior(f: Friend, c: Color, hour: Int) {
             drawLine(Color(0xFF7A5536), Offset(w * 0.36f, floor), Offset(w * 0.36f, floor - h * 0.5f), 3f)
         }
     }
-    // Its trophies on a little shelf.
-    for (i in 0 until f.trophies.coerceAtMost(5)) drawCircle(Color(0xFFFFC266), 6f, Offset(w * (0.25f + i * 0.04f), h * 0.08f))
 }
 
 

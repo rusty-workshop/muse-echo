@@ -5,8 +5,8 @@ import android.content.Context
 /** Something the blob wears or holds. */
 enum class Accessory {
     NONE, PARTY_HAT, SANTA_HAT, WITCH_HAT, SUNGLASSES, SCARF, HEADPHONES, CROWN, BOW, FLOWER, POPCORN,
-    // Rain gear (the umbrella-or-raincoat debate), and the monthly costumes.
-    RAINCOAT, EARMUFFS, HEART_GLASSES, CLOVER_HAT, BUNNY_EARS, FLOWER_CROWN, SUNHAT, STAR_GLASSES, SNORKEL, GRAD_CAP,
+    // The monthly costumes.
+    EARMUFFS, HEART_GLASSES, CLOVER_HAT, BUNNY_EARS, FLOWER_CROWN, SUNHAT, STAR_GLASSES, SNORKEL, GRAD_CAP,
     SCARECROW_HAT, LEAF_CROWN, ANTLERS,
 }
 
