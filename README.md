@@ -43,8 +43,8 @@ is installed.
 2. Optional grants, so Muse can bring the app to the front and change brightness:
 
    ```sh
-   adb -s G6G11B06033403LD shell appops set com.rusty.museecho SYSTEM_ALERT_WINDOW allow
-   adb -s G6G11B06033403LD shell appops set com.rusty.museecho WRITE_SETTINGS allow
+   adb -s <serial> shell appops set com.rusty.museecho SYSTEM_ALERT_WINDOW allow
+   adb -s <serial> shell appops set com.rusty.museecho WRITE_SETTINGS allow
    ```
 
 3. Get an SDK token at gadgets.muse.ai (Account > SDK tokens). Paste it in the
@@ -111,7 +111,7 @@ date, and the last weather are answered locally, marked "Offline".
 
 ## The Latitude's echo-hub
 
-[latitude-echo-hub](../latitude-echo-hub) serves homelab health from Uptime
+[echo-hub](https://github.com/rusty-workshop/latitude-services/tree/main/echo-hub) serves homelab health from Uptime
 Kuma (the status light by the connection chip; tap for each monitor) and the
 newest build for updates. Publish with `tools/release.sh "what changed"`; the
 Echo checks every 6 hours (setup > Updates > Check now) and offers it, and
